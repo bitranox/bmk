@@ -251,3 +251,11 @@ ignore-vulns = [
   "PYSEC-2025-49",     # setuptools 65.5.0 — env-only, not a project dependency
   "CVE-2024-6345",     # setuptools 65.5.0 — env-only, not a project dependency
 ]
+
+[tool.bandit]
+# Skip warnings for subprocess usage in test_cmd.py — this module intentionally
+# executes external scripts as part of its core functionality.
+skips = [
+  "B404",  # Consider possible security implications associated with subprocess module
+  "B603",  # subprocess call - check for execution of untrusted input
+]
