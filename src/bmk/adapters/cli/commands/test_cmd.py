@@ -45,9 +45,9 @@ def get_script_name() -> str:
     """Return OS-appropriate script name.
 
     Returns:
-        ``btx_stagerunner.ps1`` on Windows, ``btx_stagerunner.sh`` otherwise.
+        ``_btx_stagerunner.ps1`` on Windows, ``_btx_stagerunner.sh`` otherwise.
     """
-    return "btx_stagerunner.ps1" if sys.platform == "win32" else "btx_stagerunner.sh"
+    return "_btx_stagerunner.ps1" if sys.platform == "win32" else "_btx_stagerunner.sh"
 
 
 def resolve_script_path(script_name: str, cwd: Path) -> Path | None:

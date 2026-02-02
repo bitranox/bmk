@@ -3,8 +3,8 @@
 Provides ``testintegration``, ``testi``, and ``ti`` commands that execute
 external shell scripts with local override support. Scripts are searched in
 priority order:
-1. Local override: ``<cwd>/bmk_makescripts/btx_stagerunner.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/btx_stagerunner.sh`` (or ``.ps1``)
+1. Local override: ``<cwd>/bmk_makescripts/_btx_stagerunner.sh`` (or ``.ps1``)
+2. Bundled default: ``<package>/makescripts/_btx_stagerunner.sh`` (or ``.ps1``)
 
 The stage runner discovers and executes scripts matching ``test_integration_NN_*.sh``.
 
@@ -74,13 +74,13 @@ def _run_test_integration(args: tuple[str, ...]) -> None:
 def cli_testintegration(args: tuple[str, ...]) -> None:
     """Run integration tests only (pytest -m integration).
 
-    Executes btx_stagerunner.sh (Linux/macOS) or btx_stagerunner.ps1 (Windows)
+    Executes _btx_stagerunner.sh (Linux/macOS) or _btx_stagerunner.ps1 (Windows)
     with BMK_COMMAND_PREFIX=test_integration, which discovers and runs scripts
     matching test_integration_NN_*.sh.
 
     Script lookup order:
-    1. <cwd>/bmk_makescripts/btx_stagerunner.sh (local override)
-    2. <package>/makescripts/btx_stagerunner.sh (bundled default)
+    1. <cwd>/bmk_makescripts/_btx_stagerunner.sh (local override)
+    2. <package>/makescripts/_btx_stagerunner.sh (bundled default)
 
     Example:
         >>> from click.testing import CliRunner

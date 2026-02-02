@@ -114,7 +114,7 @@ def test_cli_testintegration_uses_test_integration_command_prefix(
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -156,7 +156,7 @@ def test_cli_testintegration_passes_extra_arguments(
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -190,7 +190,7 @@ def test_cli_testintegration_propagates_script_exit_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Script's exit code is propagated as CLI exit code."""
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\nexit 42")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -240,7 +240,7 @@ def test_cli_testi_behaves_same_as_testintegration(
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -283,7 +283,7 @@ def test_cli_ti_behaves_same_as_testintegration(
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:

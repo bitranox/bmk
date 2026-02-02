@@ -35,6 +35,11 @@ export BMK_STAGES_DIR
 TEMP_DIR=""
 TOTAL_SCRIPTS=0
 
+# ANSI color codes
+COLOR_GREEN='\033[32m'
+COLOR_RED='\033[31m'
+COLOR_RESET='\033[0m'
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helper Functions
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -179,10 +184,10 @@ run_single_script() {
     printf '\n'
 
     if [[ "$exit_code" -eq 0 ]]; then
-        printf '  ✓ %s\n\n' "$script_name"
+        printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n\n" "$script_name"
         return 0
     else
-        printf '  ✗ %s (exit code: %s)\n\n' "$script_name" "$exit_code"
+        printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n\n" "$script_name" "$exit_code"
         return 1
     fi
 }
@@ -246,10 +251,10 @@ run_stage_parallel() {
 
         if [[ "$exit_code" -eq 0 ]]; then
             passed+=("$script_name")
-            printf '  ✓ %s\n' "$script_name"
+            printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
         else
             failed+=("$script_name")
-            printf '  ✗ %s (exit code: %s)\n' "$script_name" "$exit_code"
+            printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$script_name" "$exit_code"
         fi
     done
 
@@ -257,13 +262,15 @@ run_stage_parallel() {
 
     # Print output of failed scripts
     if [[ ${#failed[@]} -gt 0 ]]; then
+        printf "${COLOR_RED}"
         print_header "FAILED ${BMK_COMMAND_PREFIX^^} OUTPUT (Stage $stage)"
+        printf "${COLOR_RESET}"
 
         for script_name in "${failed[@]}"; do
             output_file="$TEMP_DIR/${script_name}.out"
             printf '\n'
             print_separator
-            printf '[%s] (exit code: %s)\n' "$script_name" "${exit_codes[$script_name]}"
+            printf "${COLOR_RED}[%s] (exit code: %s)${COLOR_RESET}\n" "$script_name" "${exit_codes[$script_name]}"
             print_separator
             if [[ -f "$output_file" ]]; then
                 cat "$output_file"
@@ -288,6 +295,7 @@ print_no_scripts_message() {
 }
 
 run() {
+    clear
     cd "$BMK_PROJECT_DIR" || die "Cannot change to directory '$BMK_PROJECT_DIR'"
     derive_package_name
     setup_temp_dir
@@ -305,14 +313,18 @@ run() {
     # Run each stage sequentially; within each stage, scripts run in parallel
     for stage in "${stages[@]}"; do
         if ! run_stage_parallel "$stage"; then
+            printf "${COLOR_RED}"
             print_header "STOPPED: ${BMK_COMMAND_PREFIX^^} stage $stage failed"
+            printf "${COLOR_RESET}"
             explain_exit_code 1
             exit 1
         fi
     done
 
     # Summary
+    printf "${COLOR_GREEN}"
     print_header "ALL ${BMK_COMMAND_PREFIX^^} SCRIPTS PASSED ($TOTAL_SCRIPTS scripts)"
+    printf "${COLOR_RESET}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

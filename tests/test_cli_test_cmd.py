@@ -22,16 +22,16 @@ from bmk.adapters.cli.exit_codes import ExitCode
 
 @pytest.mark.os_agnostic
 def test_get_script_name_returns_sh_on_non_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """get_script_name returns btx_stagerunner.sh on Linux/macOS."""
+    """get_script_name returns _btx_stagerunner.sh on Linux/macOS."""
     monkeypatch.setattr(sys, "platform", "linux")
-    assert get_script_name() == "btx_stagerunner.sh"
+    assert get_script_name() == "_btx_stagerunner.sh"
 
 
 @pytest.mark.os_agnostic
 def test_get_script_name_returns_ps1_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """get_script_name returns btx_stagerunner.ps1 on Windows."""
+    """get_script_name returns _btx_stagerunner.ps1 on Windows."""
     monkeypatch.setattr(sys, "platform", "win32")
-    assert get_script_name() == "btx_stagerunner.ps1"
+    assert get_script_name() == "_btx_stagerunner.ps1"
 
 
 @pytest.mark.os_agnostic
@@ -39,10 +39,10 @@ def test_resolve_script_path_prefers_local_override(tmp_path: Path) -> None:
     """Local override in bmk_makescripts takes precedence over bundled."""
     local_dir = tmp_path / "bmk_makescripts"
     local_dir.mkdir()
-    local_script = local_dir / "btx_stagerunner.sh"
+    local_script = local_dir / "_btx_stagerunner.sh"
     local_script.write_text("#!/bin/bash\necho local")
 
-    result = resolve_script_path("btx_stagerunner.sh", tmp_path)
+    result = resolve_script_path("_btx_stagerunner.sh", tmp_path)
 
     assert result == local_script
 
@@ -50,10 +50,10 @@ def test_resolve_script_path_prefers_local_override(tmp_path: Path) -> None:
 @pytest.mark.os_agnostic
 def test_resolve_script_path_falls_back_to_bundled(tmp_path: Path) -> None:
     """Falls back to bundled script when no local override exists."""
-    result = resolve_script_path("btx_stagerunner.sh", tmp_path)
+    result = resolve_script_path("_btx_stagerunner.sh", tmp_path)
 
     assert result is not None
-    assert result.name == "btx_stagerunner.sh"
+    assert result.name == "_btx_stagerunner.sh"
     assert "makescripts" in str(result)
     assert result.is_file()
 
@@ -80,7 +80,7 @@ def test_execute_script_uses_powershell_for_ps1(tmp_path: Path, monkeypatch: pyt
         return subprocess.CompletedProcess(cmd, returncode=0)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
-    script_path = tmp_path / "btx_stagerunner.ps1"
+    script_path = tmp_path / "_btx_stagerunner.ps1"
     script_path.write_text("# test")
     cwd = tmp_path / "project"
 
@@ -111,7 +111,7 @@ def test_execute_script_runs_shell_script_directly(tmp_path: Path, monkeypatch: 
         return subprocess.CompletedProcess(cmd, returncode=0)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
     cwd = tmp_path / "project"
 
@@ -133,7 +133,7 @@ def test_execute_script_returns_exit_code(tmp_path: Path, monkeypatch: pytest.Mo
         return subprocess.CompletedProcess(cmd, returncode=42)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\nexit 42")
 
     result = execute_script(script_path, script_path.parent, ())
@@ -224,7 +224,7 @@ def test_cli_test_passes_cwd_as_first_argument(
         captured_args.append((script_path, cwd, extra_args))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -257,7 +257,7 @@ def test_cli_test_passes_extra_arguments(
         captured_args.append((script_path, cwd, extra_args))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -284,7 +284,7 @@ def test_cli_test_propagates_script_exit_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Script's exit code is propagated as CLI exit code."""
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\nexit 42")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -322,7 +322,7 @@ def test_cli_t_behaves_same_as_test(
         captured_args.append((script_path, cwd, extra_args))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:

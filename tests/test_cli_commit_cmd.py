@@ -96,7 +96,7 @@ def test_cli_commit_passes_message_arguments(
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -130,7 +130,7 @@ def test_cli_commit_uses_commit_prefix(
         captured_prefix.append(command_prefix)
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -156,7 +156,7 @@ def test_cli_commit_propagates_script_exit_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Script's exit code is propagated as CLI exit code."""
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\nexit 1")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
@@ -194,7 +194,7 @@ def test_cli_c_behaves_same_as_commit(
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
 
-    script_path = tmp_path / "btx_stagerunner.sh"
+    script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
     def mock_resolve(script_name: str, cwd: Path) -> Path:
