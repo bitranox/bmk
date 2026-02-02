@@ -37,7 +37,7 @@ _PASSTHROUGH_CONTEXT_SETTINGS = {
 }
 
 
-def _get_script_name() -> str:
+def get_script_name() -> str:
     """Return OS-appropriate script name.
 
     Returns:
@@ -46,7 +46,7 @@ def _get_script_name() -> str:
     return "test.ps1" if sys.platform == "win32" else "test.sh"
 
 
-def _resolve_script_path(script_name: str, cwd: Path) -> Path | None:
+def resolve_script_path(script_name: str, cwd: Path) -> Path | None:
     """Find script in local override or bundled location.
 
     Args:
@@ -68,7 +68,7 @@ def _resolve_script_path(script_name: str, cwd: Path) -> Path | None:
     return None
 
 
-def _execute_script(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
+def execute_script(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
     """Execute script with cwd as first argument.
 
     Args:
@@ -107,8 +107,8 @@ def _run_test(args: tuple[str, ...]) -> None:
             or the script's exit code on failure.
     """
     cwd = Path.cwd()
-    script_name = _get_script_name()
-    script_path = _resolve_script_path(script_name, cwd)
+    script_name = get_script_name()
+    script_path = resolve_script_path(script_name, cwd)
 
     if script_path is None:
         click.echo(f"Error: Test script '{script_name}' not found", err=True)
@@ -119,7 +119,7 @@ def _run_test(args: tuple[str, ...]) -> None:
         raise SystemExit(ExitCode.FILE_NOT_FOUND)
 
     logger.debug("Executing test script: %s", script_path)
-    exit_code = _execute_script(script_path, cwd, args)
+    exit_code = execute_script(script_path, cwd, args)
 
     if exit_code != 0:
         raise SystemExit(exit_code)
@@ -169,4 +169,4 @@ def cli_t(args: tuple[str, ...]) -> None:
         _run_test(args)
 
 
-__all__ = ["cli_t", "cli_test"]
+__all__ = ["cli_t", "cli_test", "execute_script", "get_script_name", "resolve_script_path"]

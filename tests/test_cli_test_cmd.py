@@ -13,25 +13,25 @@ from click.testing import CliRunner, Result
 
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands.test_cmd import (
-    _execute_script,
-    _get_script_name,
-    _resolve_script_path,
+    execute_script,
+    get_script_name,
+    resolve_script_path,
 )
 from bmk.adapters.cli.exit_codes import ExitCode
 
 
 @pytest.mark.os_agnostic
 def test_get_script_name_returns_sh_on_non_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_get_script_name returns test.sh on Linux/macOS."""
+    """get_script_name returns test.sh on Linux/macOS."""
     monkeypatch.setattr(sys, "platform", "linux")
-    assert _get_script_name() == "test.sh"
+    assert get_script_name() == "test.sh"
 
 
 @pytest.mark.os_agnostic
 def test_get_script_name_returns_ps1_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_get_script_name returns test.ps1 on Windows."""
+    """get_script_name returns test.ps1 on Windows."""
     monkeypatch.setattr(sys, "platform", "win32")
-    assert _get_script_name() == "test.ps1"
+    assert get_script_name() == "test.ps1"
 
 
 @pytest.mark.os_agnostic
@@ -42,7 +42,7 @@ def test_resolve_script_path_prefers_local_override(tmp_path: Path) -> None:
     local_script = local_dir / "test.sh"
     local_script.write_text("#!/bin/bash\necho local")
 
-    result = _resolve_script_path("test.sh", tmp_path)
+    result = resolve_script_path("test.sh", tmp_path)
 
     assert result == local_script
 
@@ -50,7 +50,7 @@ def test_resolve_script_path_prefers_local_override(tmp_path: Path) -> None:
 @pytest.mark.os_agnostic
 def test_resolve_script_path_falls_back_to_bundled(tmp_path: Path) -> None:
     """Falls back to bundled script when no local override exists."""
-    result = _resolve_script_path("test.sh", tmp_path)
+    result = resolve_script_path("test.sh", tmp_path)
 
     assert result is not None
     assert result.name == "test.sh"
@@ -61,7 +61,7 @@ def test_resolve_script_path_falls_back_to_bundled(tmp_path: Path) -> None:
 @pytest.mark.os_agnostic
 def test_resolve_script_path_returns_none_when_not_found(tmp_path: Path) -> None:
     """Returns None when neither local nor bundled script exists."""
-    result = _resolve_script_path("nonexistent_script.sh", tmp_path)
+    result = resolve_script_path("nonexistent_script.sh", tmp_path)
 
     assert result is None
 
@@ -80,7 +80,7 @@ def test_execute_script_uses_powershell_for_ps1(tmp_path: Path, monkeypatch: pyt
     script_path.write_text("# test")
     cwd = tmp_path / "project"
 
-    _execute_script(script_path, cwd, ("arg1", "arg2"))
+    execute_script(script_path, cwd, ("arg1", "arg2"))
 
     assert captured_cmd[0][0] == "powershell"
     assert "-ExecutionPolicy" in captured_cmd[0]
@@ -106,7 +106,7 @@ def test_execute_script_runs_shell_script_directly(tmp_path: Path, monkeypatch: 
     script_path.write_text("#!/bin/bash\necho test")
     cwd = tmp_path / "project"
 
-    _execute_script(script_path, cwd, ("--verbose",))
+    execute_script(script_path, cwd, ("--verbose",))
 
     assert captured_cmd[0][0] == str(script_path)
     assert captured_cmd[0][1] == str(cwd)
@@ -124,7 +124,7 @@ def test_execute_script_returns_exit_code(tmp_path: Path, monkeypatch: pytest.Mo
     script_path = tmp_path / "test.sh"
     script_path.write_text("#!/bin/bash\nexit 42")
 
-    result = _execute_script(script_path, script_path.parent, ())
+    result = execute_script(script_path, script_path.parent, ())
 
     assert result == 42
 
@@ -153,6 +153,11 @@ def test_cli_t_alias_exists(
     assert "alias for 'test'" in result.output
 
 
+def _mock_resolve_none(script_name: str, cwd: Path) -> None:
+    """Mock resolve_script_path that returns None."""
+    return None
+
+
 @pytest.mark.os_agnostic
 def test_cli_test_exits_with_file_not_found_when_script_missing(
     cli_runner: CliRunner,
@@ -163,8 +168,8 @@ def test_cli_test_exits_with_file_not_found_when_script_missing(
     """Exit code is FILE_NOT_FOUND when script doesn't exist."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._resolve_script_path",
-        lambda script_name, cwd: None,
+        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        _mock_resolve_none,
     )
 
     result: Result = cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
@@ -182,8 +187,8 @@ def test_cli_test_shows_error_message_when_script_missing(
     """Error message shows searched locations when script not found."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._resolve_script_path",
-        lambda script_name, cwd: None,
+        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        _mock_resolve_none,
     )
 
     result: Result = cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
@@ -210,12 +215,15 @@ def test_cli_test_passes_cwd_as_first_argument(
     script_path = tmp_path / "test.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._resolve_script_path",
-        lambda script_name, cwd: script_path,
+        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        mock_resolve,
     )
-    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd._execute_script", mock_execute)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
 
     cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
 
@@ -240,12 +248,15 @@ def test_cli_test_passes_extra_arguments(
     script_path = tmp_path / "test.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._resolve_script_path",
-        lambda script_name, cwd: script_path,
+        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        mock_resolve,
     )
-    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd._execute_script", mock_execute)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
 
     cli_runner.invoke(cli_mod.cli, ["test", "--verbose", "--coverage"], obj=production_factory)
 
@@ -264,14 +275,20 @@ def test_cli_test_propagates_script_exit_code(
     script_path = tmp_path / "test.sh"
     script_path.write_text("#!/bin/bash\nexit 42")
 
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
+        return 42
+
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._resolve_script_path",
-        lambda script_name, cwd: script_path,
+        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        mock_resolve,
     )
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._execute_script",
-        lambda script_path, cwd, extra_args: 42,
+        "bmk.adapters.cli.commands.test_cmd.execute_script",
+        mock_execute,
     )
 
     result: Result = cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
@@ -296,12 +313,15 @@ def test_cli_t_behaves_same_as_test(
     script_path = tmp_path / "test.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd._resolve_script_path",
-        lambda script_name, cwd: script_path,
+        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        mock_resolve,
     )
-    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd._execute_script", mock_execute)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
 
     cli_runner.invoke(cli_mod.cli, ["t", "--fast"], obj=production_factory)
 
