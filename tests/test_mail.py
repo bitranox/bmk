@@ -1114,6 +1114,7 @@ def smtp_config_from_env() -> EmailConfig:
     return email_config
 
 
+@pytest.mark.integration
 @pytest.mark.local_only
 @pytest.mark.os_agnostic
 def test_real_smtp_sends_email(smtp_config_from_env: EmailConfig) -> None:
@@ -1131,6 +1132,7 @@ def test_real_smtp_sends_email(smtp_config_from_env: EmailConfig) -> None:
     assert result is True
 
 
+@pytest.mark.integration
 @pytest.mark.local_only
 @pytest.mark.os_agnostic
 def test_real_smtp_sends_html_email(smtp_config_from_env: EmailConfig) -> None:
@@ -1146,6 +1148,7 @@ def test_real_smtp_sends_html_email(smtp_config_from_env: EmailConfig) -> None:
     assert result is True
 
 
+@pytest.mark.integration
 @pytest.mark.local_only
 @pytest.mark.os_agnostic
 def test_real_smtp_sends_notification(smtp_config_from_env: EmailConfig) -> None:

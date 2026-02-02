@@ -181,7 +181,7 @@ pdm.lock
 uv.lock
 
 # div
-.devcontainer/
+#  .devcontainer/   --> we need that for github codespaces
 .claude/
 CLAUDE.md
 prompts.md

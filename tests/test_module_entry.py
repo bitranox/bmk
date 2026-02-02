@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
+import os
 import runpy
 import subprocess
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 import lib_cli_exit_tools
 import pytest
 
 from bmk import __init__conf__, entry
 from bmk.adapters import cli as cli_mod
+
+
+def _get_subprocess_env() -> dict[str, str]:
+    """Build environment dict with PYTHONPATH pointing to src/.
+
+    Subprocess calls don't inherit pytest's sys.path modifications,
+    so we must explicitly set PYTHONPATH for `python -m bmk` to work.
+    """
+    env = os.environ.copy()
+    # Project root is 2 levels up from this test file
+    project_root = Path(__file__).parent.parent
+    src_path = str(project_root / "src")
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_path}{os.pathsep}{existing}" if existing else src_path
+    return env
 
 
 @pytest.mark.os_agnostic
@@ -104,6 +121,7 @@ def test_module_entry_subprocess_help() -> None:
         capture_output=True,
         timeout=30,
         check=False,
+        env=_get_subprocess_env(),
         # Use UTF-8 with error replacement for Windows compatibility
         # (rich-click outputs Unicode that cp1252 can't decode)
         encoding="utf-8",
@@ -122,6 +140,7 @@ def test_module_entry_subprocess_version() -> None:
         capture_output=True,
         timeout=30,
         check=False,
+        env=_get_subprocess_env(),
         # Use UTF-8 with error replacement for Windows compatibility
         encoding="utf-8",
         errors="replace",

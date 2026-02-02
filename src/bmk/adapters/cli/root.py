@@ -118,6 +118,8 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
 # modules import from package ancestors. This is the standard Click pattern.
 def _register_commands() -> None:
     from .commands import (
+        cli_c,
+        cli_commit,
         cli_config,
         cli_config_deploy,
         cli_config_generate_examples,
@@ -129,9 +131,14 @@ def _register_commands() -> None:
         cli_send_notification,
         cli_t,
         cli_test,
+        cli_testi,
+        cli_testintegration,
+        cli_ti,
     )
 
     for cmd in (
+        cli_c,
+        cli_commit,
         cli_info,
         cli_hello,
         cli_fail,
@@ -143,6 +150,9 @@ def _register_commands() -> None:
         cli_send_notification,
         cli_t,
         cli_test,
+        cli_testintegration,
+        cli_testi,
+        cli_ti,
     ):
         cli.add_command(cmd)
 

@@ -1,11 +1,18 @@
 we want to provode following cli commands :
 
 t / test       --> test.sh  ---> pass the actual directory.
-ti / test -i/--integration --> test_integration.sh
+ti / testi / testintegration  --> test_integration_???_<commment>.sh
+
 c / commit  --> commit.sh
+
+
+
+bump bmp b --> ma/major m/minor p/patch
+
+
 p / push --> push.sh
 r / run --> run.sh
-b / bmp / bump --> ma/major mi/minor p/patch 
+ 
 d / deps / dependencies --update
 du / dup
 cln / clean 

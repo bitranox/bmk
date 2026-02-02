@@ -5,6 +5,9 @@ local override support. Scripts are searched in priority order:
 1. Local override: ``<cwd>/bmk_makescripts/test.sh`` (or ``.ps1``)
 2. Bundled default: ``<package>/makescripts/test.sh`` (or ``.ps1``)
 
+Environment variables set for scripts:
+    * ``BMK_PROJECT_DIR`` - Path to the current working directory
+
 Contents:
     * :func:`cli_test` - Run the project test script.
     * :func:`cli_t` - Alias for ``cli_test``.
@@ -13,6 +16,7 @@ Contents:
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -41,9 +45,9 @@ def get_script_name() -> str:
     """Return OS-appropriate script name.
 
     Returns:
-        ``test.ps1`` on Windows, ``test.sh`` otherwise.
+        ``btx_stagerunner.ps1`` on Windows, ``btx_stagerunner.sh`` otherwise.
     """
-    return "test.ps1" if sys.platform == "win32" else "test.sh"
+    return "btx_stagerunner.ps1" if sys.platform == "win32" else "btx_stagerunner.sh"
 
 
 def resolve_script_path(script_name: str, cwd: Path) -> Path | None:
@@ -68,17 +72,29 @@ def resolve_script_path(script_name: str, cwd: Path) -> Path | None:
     return None
 
 
-def execute_script(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
-    """Execute script with cwd as first argument.
+def execute_script(
+    script_path: Path,
+    cwd: Path,
+    extra_args: tuple[str, ...],
+    *,
+    command_prefix: str = "test",
+) -> int:
+    """Execute script with BMK_PROJECT_DIR and BMK_COMMAND_PREFIX environment variables.
 
     Args:
         script_path: Path to the script to execute.
-        cwd: Current working directory (passed as first argument to script).
+        cwd: Current working directory (set as BMK_PROJECT_DIR env var).
         extra_args: Additional arguments to pass to the script.
+        command_prefix: Command prefix for staged scripts (set as BMK_COMMAND_PREFIX env var).
 
     Returns:
         Exit code from the script execution.
     """
+    # Set environment variables for the script
+    env = os.environ.copy()
+    env["BMK_PROJECT_DIR"] = str(cwd)
+    env["BMK_COMMAND_PREFIX"] = command_prefix
+
     if script_path.suffix == ".ps1":
         cmd = [
             "powershell",
@@ -86,13 +102,12 @@ def execute_script(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) ->
             "Bypass",
             "-File",
             str(script_path),
-            str(cwd),
             *extra_args,
         ]
     else:
-        cmd = [str(script_path), str(cwd), *extra_args]
+        cmd = [str(script_path), *extra_args]
 
-    result = subprocess.run(cmd, check=False)  # noqa: S603
+    result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
     return result.returncode
 
 
