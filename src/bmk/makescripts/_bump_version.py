@@ -256,7 +256,7 @@ def main() -> int:
         current_version = config.project.version
 
         if not current_version:
-            print("Error: Could not find [project].version in pyproject.toml", file=sys.stderr)  # noqa: T201
+            print("Error: Could not find [project].version in pyproject.toml", file=sys.stderr)
             return 1
 
         current = parse_version(current_version)
@@ -266,14 +266,14 @@ def main() -> int:
         old_version = update_pyproject(args.project_dir, new_version)
         update_changelog(args.project_dir, new_version)
 
-        print(f"Bumped version: {old_version} -> {new_version}")  # noqa: T201
+        print(f"Bumped version: {old_version} -> {new_version}")
         return 0
 
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)  # noqa: T201
+        print(f"Error: {e}", file=sys.stderr)
         return 1
     except FileNotFoundError as e:
-        print(f"Error: File not found - {e}", file=sys.stderr)  # noqa: T201
+        print(f"Error: File not found - {e}", file=sys.stderr)
         return 1
 
 

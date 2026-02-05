@@ -139,26 +139,26 @@ def clean(
     for pattern in patterns:
         for path in project_dir.glob(pattern):
             if dry_run:
-                print(f"[DRY RUN] Would remove: {path}")  # noqa: T201
+                print(f"[DRY RUN] Would remove: {path}")
                 removed_count += 1
             elif path.is_dir():
                 if verbose:
-                    print(f"Removing directory: {path}")  # noqa: T201
+                    print(f"Removing directory: {path}")
                 shutil.rmtree(path, ignore_errors=True)
                 removed_count += 1
             else:
                 try:
                     if verbose:
-                        print(f"Removing file: {path}")  # noqa: T201
+                        print(f"Removing file: {path}")
                     path.unlink()
                     removed_count += 1
                 except FileNotFoundError:
                     continue
 
     if dry_run:
-        print(f"\n[DRY RUN] Would remove {removed_count} items")  # noqa: T201
+        print(f"\n[DRY RUN] Would remove {removed_count} items")
     elif verbose or removed_count > 0:
-        print(f"Removed {removed_count} items")  # noqa: T201
+        print(f"Removed {removed_count} items")
 
     return 0
 
@@ -181,7 +181,7 @@ def main(
     """
     if project_dir is None:
         project_dir = Path.cwd()
-    print(f"Cleaning build artifacts in {project_dir}...")  # noqa: T201
+    print(f"Cleaning build artifacts in {project_dir}...")
     return clean(project_dir=project_dir, dry_run=dry_run, verbose=verbose)
 
 

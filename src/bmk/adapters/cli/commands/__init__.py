@@ -13,6 +13,7 @@ Contents:
     * Bump commands from :mod:`.bump_cmd`
     * Dependencies commands from :mod:`.dependencies_cmd`
     * Clean commands from :mod:`.clean_cmd`
+    * Coverage commands from :mod:`.cov_cmd`
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from .bump_cmd import cli_b, cli_bmp, cli_bump
 from .clean_cmd import cli_cl, cli_clean, cli_cln
 from .commit_cmd import cli_c, cli_commit
 from .config import cli_config, cli_config_deploy, cli_config_generate_examples
+from .cov_cmd import cli_codecov, cli_cov, cli_coverage
 from .dependencies_cmd import cli_d, cli_dependencies, cli_deps
 from .email import cli_send_email, cli_send_notification
 from .info import cli_fail, cli_hello, cli_info
@@ -36,10 +38,13 @@ __all__ = [
     "cli_cl",
     "cli_clean",
     "cli_cln",
+    "cli_codecov",
     "cli_commit",
     "cli_config",
     "cli_config_deploy",
     "cli_config_generate_examples",
+    "cli_cov",
+    "cli_coverage",
     "cli_d",
     "cli_dependencies",
     "cli_deps",

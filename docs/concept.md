@@ -25,17 +25,21 @@ use a small standalon python script who does the heavvy lifting and is called by
 adopt _clean.py and refractor it to your needs
 
 
+create a new command, same pattern as our other commands, command : codecov, coverage, cov  --> cov_010_coverage.sh
+use a small standalon python script who does the heavvy lifting and is called by that shellscripts: 
+adopt __coverage.py and refractor it to your needs. check for the .env file in BMK_PROJECT_DIR
+
+
 p / push --> push.sh
 r / run --> run.sh
- 
-
-
 rel / release
-
 bld / build
-
-h/help/hlp / --help
-
 m / mnu / menue
 
+check cves in pyproj.toml
 
+test coverage cicd (80)<> pyproj.toml (70)? 
+
+check notebook !
+
+look for broken links in mdfiles

@@ -295,7 +295,6 @@ print_no_scripts_message() {
 }
 
 run() {
-    clear
     cd "$BMK_PROJECT_DIR" || die "Cannot change to directory '$BMK_PROJECT_DIR'"
     derive_package_name
     setup_temp_dir

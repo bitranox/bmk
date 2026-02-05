@@ -414,7 +414,7 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
         Exit code (0 if all up-to-date, 1 if any outdated)
     """
     if not deps:
-        print("No dependencies found in pyproject.toml")  # noqa: T201
+        print("No dependencies found in pyproject.toml")
         return 0
 
     # Group by source
@@ -432,8 +432,8 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
         if not display_deps:
             continue
 
-        print(f"\n{source}:")  # noqa: T201
-        print("-" * len(source) + "-")  # noqa: T201
+        print(f"\n{source}:")
+        print("-" * len(source) + "-")
 
         # Calculate column widths
         name_width = max(len(d.name) for d in display_deps)
@@ -444,7 +444,7 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
             status_icon = _get_status_icon(dep.status)
             constraint_display = dep.constraint if dep.constraint else "(any)"
 
-            print(  # noqa: T201
+            print(
                 f"  {status_icon} {dep.name:<{name_width}}"
                 f"  {constraint_display:<{constraint_width}}"
                 f"  -> {dep.latest:<{latest_width}}  [{dep.status}]"
@@ -461,15 +461,15 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
     pinned = sum(1 for d in deps if d.status == "pinned")
     unknown = sum(1 for d in deps if d.status == "unknown")
 
-    print(f"\nSummary: {total} dependencies checked")  # noqa: T201
-    print(f"  Up-to-date: {up_to_date}")  # noqa: T201
-    print(f"  Pinned:     {pinned}")  # noqa: T201
-    print(f"  Outdated:   {outdated_count}")  # noqa: T201
-    print(f"  Unknown:    {unknown}")  # noqa: T201
-    print(f"  Errors:     {error_count}")  # noqa: T201
+    print(f"\nSummary: {total} dependencies checked")
+    print(f"  Up-to-date: {up_to_date}")
+    print(f"  Pinned:     {pinned}")
+    print(f"  Outdated:   {outdated_count}")
+    print(f"  Unknown:    {unknown}")
+    print(f"  Errors:     {error_count}")
 
     if outdated_count > 0:
-        print("\nRun with --verbose to see all dependencies")  # noqa: T201
+        print("\nRun with --verbose to see all dependencies")
         return 1
     return 0
 
@@ -563,14 +563,14 @@ def update_dependencies(
     """
     outdated = [d for d in deps if d.status == "outdated"]
     if not outdated:
-        print("All dependencies are up-to-date!")  # noqa: T201
+        print("All dependencies are up-to-date!")
         return 0
 
     # Read the file content
     content = pyproject.read_text(encoding="utf-8")
     updated_count = 0
 
-    print(f"\n{'[DRY RUN] ' if dry_run else ''}Updating {len(outdated)} dependencies:\n")  # noqa: T201
+    print(f"\n{'[DRY RUN] ' if dry_run else ''}Updating {len(outdated)} dependencies:\n")
 
     for dep in outdated:
         if not dep.original_spec:
@@ -602,19 +602,19 @@ def update_dependencies(
                 break
 
         if replaced:
-            print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")  # noqa: T201
+            print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")
             updated_count += 1
         else:
-            print(f"  {dep.name}: Could not locate in file (manual update needed)")  # noqa: T201
+            print(f"  {dep.name}: Could not locate in file (manual update needed)")
 
     if updated_count > 0:
         if dry_run:
-            print(f"\n[DRY RUN] Would update {updated_count} dependencies")  # noqa: T201
+            print(f"\n[DRY RUN] Would update {updated_count} dependencies")
         else:
             pyproject.write_text(content, encoding="utf-8")
-            print(f"\nUpdated {updated_count} dependencies in {pyproject}")  # noqa: T201
+            print(f"\nUpdated {updated_count} dependencies in {pyproject}")
     else:
-        print("\nNo dependencies were updated")  # noqa: T201
+        print("\nNo dependencies were updated")
 
     return updated_count
 
@@ -637,7 +637,7 @@ def main(
     Returns:
         Exit code (0 if all up-to-date or update successful, 1 if any outdated)
     """
-    print(f"Checking dependencies in {pyproject}...")  # noqa: T201
+    print(f"Checking dependencies in {pyproject}...")
     deps = check_dependencies(pyproject)
     exit_code = print_report(deps, verbose=verbose)
 
