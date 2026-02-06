@@ -30,7 +30,30 @@ use a small standalon python script who does the heavvy lifting and is called by
 adopt __coverage.py and refractor it to your needs. check for the .env file in BMK_PROJECT_DIR
 
 
-p / push --> push.sh
+create a new command, same pattern as our other commands, command : build, bld, b   --> bld_010_build.sh,
+that builds the python project
+
+
+
+create a new command, same pattern as our other commands, command : p, psh, push  --> 
+push_010_update_deps.sh (calls deps via stagerunner)
+push_020_test.sh (calls test via stagerunner)
+push_030_commit.sh (calls commit via stagerunner)
+push_040_push.sh (push like : "git", "push", "-u", remote, branch) - find a good way to pass the commit message from commit to the push command. take care that there is no env remaining for the next run 
+
+
+
+
+
+
+
+
+
+p / psh / push --> push.sh
+
+
+
+
 r / run --> run.sh
 rel / release
 bld / build

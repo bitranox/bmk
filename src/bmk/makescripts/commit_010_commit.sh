@@ -18,16 +18,28 @@ explain_exit_code() {
     esac
 }
 
-# Join all arguments as the commit message
+# Resolve commit message:
+# 1. Command line arguments
+# 2. BMK_COMMIT_MESSAGE environment variable
+# 3. Prompt interactively (only if terminal available)
 commit_message="$*"
 
-# If no message provided, prompt for one
 if [[ -z "$commit_message" ]]; then
-    printf 'Commit message: '
-    read -r commit_message
-    if [[ -z "$commit_message" ]]; then
-        printf 'Error: Commit message cannot be empty\n' >&2
-        exit 1
+    commit_message="${BMK_COMMIT_MESSAGE:-}"
+fi
+
+if [[ -z "$commit_message" ]]; then
+    if [[ -t 0 ]]; then
+        # Interactive terminal available, prompt for message
+        printf 'Commit message: '
+        read -r commit_message
+        if [[ -z "$commit_message" ]]; then
+            printf 'Error: Commit message cannot be empty\n' >&2
+            exit 1
+        fi
+    else
+        # Non-interactive, use default
+        commit_message="chores"
     fi
 fi
 
@@ -39,11 +51,19 @@ full_message="${timestamp} - ${commit_message}"
 printf 'Staging changes...\n'
 git add -A
 
+# Check if there are staged changes
+if git diff --cached --quiet; then
+    printf 'No staged changes detected; creating empty commit\n'
+    allow_empty="--allow-empty"
+else
+    allow_empty=""
+fi
+
 # Commit with timestamped message
 printf 'Committing: %s\n' "$full_message"
 
 set +e
-git commit -m "$full_message"
+git commit $allow_empty -m "$full_message"
 exit_code=$?
 set -e
 

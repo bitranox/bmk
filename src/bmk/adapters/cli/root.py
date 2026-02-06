@@ -119,7 +119,9 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
 def _register_commands() -> None:
     from .commands import (
         cli_b,
+        cli_bld,
         cli_bmp,
+        cli_build,
         cli_bump,
         cli_c,
         cli_cl,
@@ -139,6 +141,9 @@ def _register_commands() -> None:
         cli_hello,
         cli_info,
         cli_logdemo,
+        cli_psh,
+        cli_push,
+        cli_push_p,
         cli_send_email,
         cli_send_notification,
         cli_t,
@@ -150,7 +155,9 @@ def _register_commands() -> None:
 
     for cmd in (
         cli_b,
+        cli_bld,
         cli_bmp,
+        cli_build,
         cli_bump,
         cli_c,
         cli_cl,
@@ -170,6 +177,9 @@ def _register_commands() -> None:
         cli_config_deploy,
         cli_config_generate_examples,
         cli_logdemo,
+        cli_psh,
+        cli_push,
+        cli_push_p,
         cli_send_email,
         cli_send_notification,
         cli_t,

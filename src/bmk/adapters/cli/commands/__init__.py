@@ -11,6 +11,8 @@ Contents:
     * Test commands from :mod:`.test_cmd`
     * Commit commands from :mod:`.commit_cmd`
     * Bump commands from :mod:`.bump_cmd`
+    * Build commands from :mod:`.build_cmd`
+    * Push commands from :mod:`.push_cmd`
     * Dependencies commands from :mod:`.dependencies_cmd`
     * Clean commands from :mod:`.clean_cmd`
     * Coverage commands from :mod:`.cov_cmd`
@@ -18,6 +20,7 @@ Contents:
 
 from __future__ import annotations
 
+from .build_cmd import cli_bld, cli_build
 from .bump_cmd import cli_b, cli_bmp, cli_bump
 from .clean_cmd import cli_cl, cli_clean, cli_cln
 from .commit_cmd import cli_c, cli_commit
@@ -27,12 +30,15 @@ from .dependencies_cmd import cli_d, cli_dependencies, cli_deps
 from .email import cli_send_email, cli_send_notification
 from .info import cli_fail, cli_hello, cli_info
 from .logging import cli_logdemo
+from .push_cmd import cli_psh, cli_push, cli_push_p
 from .test_cmd import cli_t, cli_test
 from .test_integration_cmd import cli_testi, cli_testintegration, cli_ti
 
 __all__ = [
     "cli_b",
+    "cli_bld",
     "cli_bmp",
+    "cli_build",
     "cli_bump",
     "cli_c",
     "cli_cl",
@@ -52,6 +58,9 @@ __all__ = [
     "cli_hello",
     "cli_info",
     "cli_logdemo",
+    "cli_psh",
+    "cli_push",
+    "cli_push_p",
     "cli_send_email",
     "cli_send_notification",
     "cli_t",

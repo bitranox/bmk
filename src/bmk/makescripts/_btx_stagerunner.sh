@@ -34,6 +34,7 @@ export BMK_STAGES_DIR
 
 TEMP_DIR=""
 TOTAL_SCRIPTS=0
+SCRIPT_ARGS=()  # Arguments to forward to child scripts
 
 # ANSI color codes
 COLOR_GREEN='\033[32m'
@@ -178,7 +179,7 @@ run_single_script() {
     printf '\n'
 
     # Run script directly, output goes to console
-    "$script"
+    "$script" "${SCRIPT_ARGS[@]}"
     exit_code=$?
 
     printf '\n'
@@ -228,7 +229,7 @@ run_stage_parallel() {
         exit_file="$TEMP_DIR/${script_name}.exit"
 
         {
-            "$script" > "$output_file" 2>&1
+            "$script" "${SCRIPT_ARGS[@]}" > "$output_file" 2>&1
             printf '%s\n' "$?" > "$exit_file"
         } &
 
@@ -330,4 +331,5 @@ run() {
 # Entry Point
 # ═══════════════════════════════════════════════════════════════════════════════
 
+SCRIPT_ARGS=("$@")
 run
