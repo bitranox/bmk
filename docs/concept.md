@@ -42,26 +42,18 @@ push_030_commit.sh (calls commit via stagerunner)
 push_040_push.sh (push like : "git", "push", "-u", remote, branch) - find a good way to pass the commit message from commit to the push command. take care that there is no env remaining for the next run 
 
 
-
-
-
-
-
-
-
-p / psh / push --> push.sh
-
-
-
-
 r / run --> run.sh
+
 rel / release
-bld / build
+
 m / mnu / menue
 
-check cves in pyproj.toml
 
-test coverage cicd (80)<> pyproj.toml (70)? 
+
+
+prompts for claude : 
+
+check cves in pyproj.toml
 
 check notebook !
 
