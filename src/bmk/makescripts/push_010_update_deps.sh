@@ -8,4 +8,4 @@ set -Eeu -o pipefail
 
 printf 'Updating dependencies...\n'
 
-BMK_COMMAND_PREFIX="deps_update" exec "${BMK_STAGES_DIR}/_btx_stagerunner.sh" "$@"
+BMK_COMMAND_PREFIX="deps" exec "${BMK_STAGES_DIR}/_btx_stagerunner.sh" --update "$@"

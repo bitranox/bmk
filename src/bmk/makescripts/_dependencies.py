@@ -78,6 +78,7 @@ __all__ = [
     "compare_versions",
     "fetch_latest_version",
     "print_report",
+    "sync_installed_packages",
     "update_dependencies",
 ]
 
@@ -545,6 +546,106 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
     return updated
 
 
+def _get_installed_version(package_name: str) -> str | None:
+    """Get the installed version of a package, or None if not installed."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(_normalize_name(package_name))
+    except (PackageNotFoundError, ValueError):
+        return None
+
+
+def _find_packages_needing_install(deps: list[DependencyInfo]) -> list[tuple[str, str | None, str]]:
+    """Find packages that need installation or update.
+
+    Returns:
+        List of (name, installed_version, required_version) tuples.
+        installed_version is None if not installed.
+    """
+    needs_install: list[tuple[str, str | None, str]] = []
+
+    for dep in deps:
+        if not dep.current_min:
+            continue
+
+        installed = _get_installed_version(dep.name)
+
+        if installed is None:
+            needs_install.append((dep.name, None, dep.current_min))
+        elif compare_versions(installed, dep.current_min) == "outdated":
+            needs_install.append((dep.name, installed, dep.current_min))
+
+    return needs_install
+
+
+def _print_install_report(needs_install: list[tuple[str, str | None, str]], *, dry_run: bool) -> None:
+    """Print report of packages needing installation."""
+    print(f"\n{'[DRY RUN] ' if dry_run else ''}Packages needing installation/update:\n")
+
+    for name, installed, required in sorted(needs_install):
+        status = "NOT INSTALLED" if installed is None else installed
+        print(f"  {name}: {status} -> >={required}")
+
+
+def _run_pip_install(needs_install: list[tuple[str, str | None, str]]) -> int:
+    """Run pip install for packages needing update.
+
+    Returns:
+        pip exit code
+    """
+    import subprocess
+
+    pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade"]
+
+    if sys.platform.startswith("linux"):
+        pip_cmd.append("--break-system-packages")
+
+    pip_cmd.extend(f"{name}>={required}" for name, _, required in needs_install)
+
+    return subprocess.run(pip_cmd, check=False).returncode
+
+
+def sync_installed_packages(
+    deps: list[DependencyInfo],
+    *,
+    dry_run: bool = False,
+) -> int:
+    """Ensure installed packages match pyproject.toml requirements.
+
+    Checks each dependency's required minimum version against the locally
+    installed version and runs pip install if updates are needed.
+
+    Args:
+        deps: List of dependency info objects from check_dependencies
+        dry_run: If True, only show what would be installed without running pip
+
+    Returns:
+        Number of packages that needed updating
+    """
+    needs_install = _find_packages_needing_install(deps)
+
+    if not needs_install:
+        print("\nAll installed packages match pyproject.toml requirements!")
+        return 0
+
+    _print_install_report(needs_install, dry_run=dry_run)
+
+    if dry_run:
+        print(f"\n[DRY RUN] Would install/update {len(needs_install)} packages")
+        return len(needs_install)
+
+    print("\nInstalling/updating packages...")
+    exit_code = _run_pip_install(needs_install)
+
+    if exit_code == 0:
+        print(f"\nSuccessfully installed/updated {len(needs_install)} packages")
+    else:
+        print(f"\npip install failed with exit code {exit_code}", file=sys.stderr)
+
+    return len(needs_install)
+
+
 def update_dependencies(
     deps: list[DependencyInfo],
     pyproject: Path = Path("pyproject.toml"),
@@ -642,9 +743,17 @@ def main(
     exit_code = print_report(deps, verbose=verbose)
 
     if update:
+        # Update pyproject.toml with latest versions
         updated = update_dependencies(deps, pyproject, dry_run=dry_run)
+
+        # Re-check dependencies after pyproject.toml update
         if updated > 0 and not dry_run:
-            return 0  # Successfully updated
+            deps = check_dependencies(pyproject)
+
+        # Sync installed packages with pyproject.toml requirements
+        sync_installed_packages(deps, dry_run=dry_run)
+        return 0
+
     return exit_code
 
 
