@@ -126,9 +126,7 @@ class TestStagerunner:
         marker = tmp_path / "marker.txt"
 
         stage_script = scripts_dir / "mytest_01_hello.ps1"
-        stage_script.write_text(
-            f'Write-Host "hello from stage"; "ran" | Set-Content "{marker}"\n'
-        )
+        stage_script.write_text(f'Write-Host "hello from stage"; "ran" | Set-Content "{marker}"\n')
 
         result = _run_ps1(
             "_btx_stagerunner.ps1",
@@ -189,13 +187,9 @@ class TestStagerunner:
         order_file = tmp_path / "order.txt"
 
         # Stage 01 writes "first"
-        (scripts_dir / "seq_01_first.ps1").write_text(
-            f'"first" | Add-Content -Path "{order_file}"\n'
-        )
+        (scripts_dir / "seq_01_first.ps1").write_text(f'"first" | Add-Content -Path "{order_file}"\n')
         # Stage 02 writes "second"
-        (scripts_dir / "seq_02_second.ps1").write_text(
-            f'"second" | Add-Content -Path "{order_file}"\n'
-        )
+        (scripts_dir / "seq_02_second.ps1").write_text(f'"second" | Add-Content -Path "{order_file}"\n')
 
         result = _run_ps1(
             "_btx_stagerunner.ps1",
@@ -227,9 +221,7 @@ class TestStagerunner:
         marker = tmp_path / "stage2_ran.txt"
 
         (scripts_dir / "stop_01_fail.ps1").write_text("exit 1\n")
-        (scripts_dir / "stop_02_should_not_run.ps1").write_text(
-            f'"ran" | Set-Content "{marker}"\n'
-        )
+        (scripts_dir / "stop_02_should_not_run.ps1").write_text(f'"ran" | Set-Content "{marker}"\n')
 
         result = _run_ps1(
             "_btx_stagerunner.ps1",
@@ -259,9 +251,7 @@ class TestStagerunner:
         scripts_dir.mkdir()
         args_file = tmp_path / "args.txt"
 
-        (scripts_dir / "fwd_01_echo.ps1").write_text(
-            f'($args -join ",") | Set-Content "{args_file}"\n'
-        )
+        (scripts_dir / "fwd_01_echo.ps1").write_text(f'($args -join ",") | Set-Content "{args_file}"\n')
 
         result = _run_ps1(
             "_btx_stagerunner.ps1",

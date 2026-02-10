@@ -38,10 +38,7 @@ def test_get_clean_patterns_returns_fallback_when_no_clean_section(tmp_path: Pat
 def test_get_clean_patterns_reads_from_pyproject(tmp_path: Path) -> None:
     """Reads custom patterns from [tool.clean].patterns."""
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        '[project]\nname = "test"\n\n'
-        '[tool.clean]\npatterns = ["custom_cache", "*.tmp"]\n'
-    )
+    pyproject.write_text('[project]\nname = "test"\n\n[tool.clean]\npatterns = ["custom_cache", "*.tmp"]\n')
 
     patterns = get_clean_patterns(pyproject)
 
@@ -296,7 +293,9 @@ def test_main_prints_cleaning_message(tmp_path: Path, capsys: pytest.CaptureFixt
 
 
 @pytest.mark.os_agnostic
-def test_main_defaults_to_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_defaults_to_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """main() defaults project_dir to cwd."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
 

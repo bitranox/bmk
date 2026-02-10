@@ -570,7 +570,12 @@ def _run_pip_install(needs_install: list[tuple[str, str | None, str]]) -> int:
         # Only needed on PEP 668 externally-managed installations
         marker = Path(sys.prefix) / "EXTERNALLY-MANAGED"
         if not marker.exists():
-            marker = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "EXTERNALLY-MANAGED"
+            marker = (
+                Path(sys.prefix)
+                / "lib"
+                / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                / "EXTERNALLY-MANAGED"
+            )
         if marker.exists():
             pip_cmd.append("--break-system-packages")
 

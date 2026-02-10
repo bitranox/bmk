@@ -81,10 +81,12 @@ def test_get_default_remote_returns_origin_when_no_tool_section() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_returns_origin_when_no_git_section() -> None:
     """Falls back to 'origin' when [tool.git] section is absent."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"clean": {"patterns": []}},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"clean": {"patterns": []}},
+        }
+    )
 
     assert _get_default_remote(config) == "origin"
 
@@ -92,10 +94,12 @@ def test_get_default_remote_returns_origin_when_no_git_section() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_returns_configured_remote() -> None:
     """Returns configured remote when tool.git.default-remote is set."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"git": {"default-remote": "upstream"}},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"git": {"default-remote": "upstream"}},
+        }
+    )
 
     assert _get_default_remote(config) == "upstream"
 
@@ -103,10 +107,12 @@ def test_get_default_remote_returns_configured_remote() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_handles_non_dict_tool_value() -> None:
     """Falls back to 'origin' when tool value is not a dict."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": "not-a-dict",
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": "not-a-dict",
+        }
+    )
 
     assert _get_default_remote(config) == "origin"
 
@@ -114,10 +120,12 @@ def test_get_default_remote_handles_non_dict_tool_value() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_handles_non_dict_git_value() -> None:
     """Falls back to 'origin' when tool.git value is not a dict."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"git": "not-a-dict"},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"git": "not-a-dict"},
+        }
+    )
 
     assert _get_default_remote(config) == "origin"
 
@@ -125,10 +133,12 @@ def test_get_default_remote_handles_non_dict_git_value() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_handles_non_string_remote_value() -> None:
     """Falls back to 'origin' when default-remote is not a string."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"git": {"default-remote": 42}},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"git": {"default-remote": 42}},
+        }
+    )
 
     assert _get_default_remote(config) == "origin"
 
@@ -136,10 +146,12 @@ def test_get_default_remote_handles_non_string_remote_value() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_handles_empty_string_remote() -> None:
     """Falls back to 'origin' when default-remote is an empty string."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"git": {"default-remote": ""}},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"git": {"default-remote": ""}},
+        }
+    )
 
     assert _get_default_remote(config) == "origin"
 
@@ -147,10 +159,12 @@ def test_get_default_remote_handles_empty_string_remote() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_handles_whitespace_only_remote() -> None:
     """Falls back to 'origin' when default-remote is whitespace only."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"git": {"default-remote": "   "}},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"git": {"default-remote": "   "}},
+        }
+    )
 
     assert _get_default_remote(config) == "origin"
 
@@ -158,10 +172,12 @@ def test_get_default_remote_handles_whitespace_only_remote() -> None:
 @pytest.mark.os_agnostic
 def test_get_default_remote_strips_whitespace_from_remote() -> None:
     """Strips surrounding whitespace from a valid remote name."""
-    config = _make_config({
-        "project": {"name": "test", "version": "1.0.0"},
-        "tool": {"git": {"default-remote": "  upstream  "}},
-    })
+    config = _make_config(
+        {
+            "project": {"name": "test", "version": "1.0.0"},
+            "tool": {"git": {"default-remote": "  upstream  "}},
+        }
+    )
 
     assert _get_default_remote(config) == "upstream"
 

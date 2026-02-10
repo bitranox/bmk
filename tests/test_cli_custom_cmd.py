@@ -93,9 +93,7 @@ def test_cli_custom_rejects_unsafe_command_name(
     makescripts = tmp_path / "makescripts"
     makescripts.mkdir()
 
-    result: Result = cli_runner.invoke(
-        cli_mod.cli, ["custom", "../../etc"], obj=production_factory
-    )
+    result: Result = cli_runner.invoke(cli_mod.cli, ["custom", "../../etc"], obj=production_factory)
 
     assert result.exit_code != 0
 
@@ -190,9 +188,7 @@ def test_cli_custom_error_when_override_dir_missing(
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     # tmp_path/makescripts does not exist by default
 
-    result: Result = cli_runner.invoke(
-        cli_mod.cli, ["custom", "deploy"], obj=production_factory
-    )
+    result: Result = cli_runner.invoke(cli_mod.cli, ["custom", "deploy"], obj=production_factory)
 
     assert result.exit_code == ExitCode.FILE_NOT_FOUND
     assert "does not exist" in result.output
@@ -216,9 +212,7 @@ def test_cli_custom_error_when_no_scripts_match(
     makescripts.mkdir()
     # Directory exists but no matching scripts
 
-    result: Result = cli_runner.invoke(
-        cli_mod.cli, ["custom", "nonexistent"], obj=production_factory
-    )
+    result: Result = cli_runner.invoke(cli_mod.cli, ["custom", "nonexistent"], obj=production_factory)
 
     assert result.exit_code == ExitCode.FILE_NOT_FOUND
     assert 'custom command "nonexistent" not found' in result.output
@@ -239,18 +233,13 @@ def test_cli_custom_executes_with_correct_env(
 
     output_file = tmp_path / "env_output.txt"
     script = tmp_path / "capture_env.sh"
-    script.write_text(
-        f'#!/bin/bash\n'
-        f'echo "$BMK_COMMAND_PREFIX|$BMK_OVERRIDE_DIR" > "{output_file}"\n'
-    )
+    script.write_text(f'#!/bin/bash\necho "$BMK_COMMAND_PREFIX|$BMK_OVERRIDE_DIR" > "{output_file}"\n')
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
     override_dir = tmp_path / "overrides"
     override_dir.mkdir()
 
-    execute_custom_script(
-        script, tmp_path, (), command_prefix="deploy", override_dir=override_dir
-    )
+    execute_custom_script(script, tmp_path, (), command_prefix="deploy", override_dir=override_dir)
 
     parts = output_file.read_text().strip().split("|")
     assert parts[0] == "deploy"
@@ -267,17 +256,18 @@ def test_cli_custom_forwards_extra_arguments(
 
     output_file = tmp_path / "args_output.txt"
     script = tmp_path / "capture_args.sh"
-    script.write_text(
-        f'#!/bin/bash\necho "$@" > "{output_file}"\n'
-    )
+    script.write_text(f'#!/bin/bash\necho "$@" > "{output_file}"\n')
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
     override_dir = tmp_path / "overrides"
     override_dir.mkdir()
 
     execute_custom_script(
-        script, tmp_path, ("--verbose", "--dry-run"),
-        command_prefix="deploy", override_dir=override_dir,
+        script,
+        tmp_path,
+        ("--verbose", "--dry-run"),
+        command_prefix="deploy",
+        override_dir=override_dir,
     )
 
     assert output_file.read_text().strip() == "--verbose --dry-run"
@@ -299,7 +289,11 @@ def test_cli_custom_propagates_nonzero_exit_code(
     override_dir.mkdir()
 
     result = execute_custom_script(
-        script, tmp_path, (), command_prefix="deploy", override_dir=override_dir,
+        script,
+        tmp_path,
+        (),
+        command_prefix="deploy",
+        override_dir=override_dir,
     )
 
     assert result == 42

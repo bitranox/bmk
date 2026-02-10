@@ -96,9 +96,7 @@ def test_cli_run_executes_script_with_run_command_prefix(
 
     output_file = tmp_path / "env_output.txt"
     script = tmp_path / "capture_env.sh"
-    script.write_text(
-        f'#!/bin/bash\necho "$BMK_COMMAND_PREFIX" > "{output_file}"\n'
-    )
+    script.write_text(f'#!/bin/bash\necho "$BMK_COMMAND_PREFIX" > "{output_file}"\n')
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
     execute_script(script, tmp_path, (), command_prefix="run")
@@ -116,9 +114,7 @@ def test_cli_run_forwards_extra_arguments(
 
     output_file = tmp_path / "args_output.txt"
     script = tmp_path / "capture_args.sh"
-    script.write_text(
-        f'#!/bin/bash\necho "$@" > "{output_file}"\n'
-    )
+    script.write_text(f'#!/bin/bash\necho "$@" > "{output_file}"\n')
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
     execute_script(script, tmp_path, ("--help", "--version"), command_prefix="run")

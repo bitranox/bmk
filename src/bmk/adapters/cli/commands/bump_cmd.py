@@ -104,6 +104,7 @@ def _make_bump_group(name: str, help_text: str) -> click.Group:
         name: CLI group name (e.g. "bump", "bmp", "b").
         help_text: Help string displayed by ``--help``.
     """
+
     @click.group(name, context_settings=CLICK_CONTEXT_SETTINGS)
     def _group() -> None:
         pass
@@ -111,9 +112,7 @@ def _make_bump_group(name: str, help_text: str) -> click.Group:
     _group.help = help_text
 
     for cmd_name, bump_type, cmd_help, is_alias in _SUBCOMMAND_SPECS:
-        _group.add_command(
-            _make_bump_subcommand(cmd_name, bump_type, cmd_help, is_alias=is_alias)
-        )
+        _group.add_command(_make_bump_subcommand(cmd_name, bump_type, cmd_help, is_alias=is_alias))
 
     return _group
 
@@ -134,14 +133,12 @@ cli_bump: click.Group = _make_bump_group(
 
 cli_bmp: click.Group = _make_bump_group(
     "bmp",
-    "Bump project version (alias for 'bump').\n\n"
-    "See ``bmk bump --help`` for full documentation.",
+    "Bump project version (alias for 'bump').\n\nSee ``bmk bump --help`` for full documentation.",
 )
 
 cli_b: click.Group = _make_bump_group(
     "b",
-    "Bump project version (short alias for 'bump').\n\n"
-    "See ``bmk bump --help`` for full documentation.",
+    "Bump project version (short alias for 'bump').\n\nSee ``bmk bump --help`` for full documentation.",
 )
 
 

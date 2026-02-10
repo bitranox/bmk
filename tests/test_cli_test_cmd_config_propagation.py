@@ -200,7 +200,9 @@ def test_execute_script_sets_both_config_vars(
     script = _make_env_capture_script(tmp_path, output_file)
 
     execute_script(
-        script, tmp_path, (),
+        script,
+        tmp_path,
+        (),
         override_dir="/opt/stages",
         package_name="my_app",
     )

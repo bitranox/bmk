@@ -220,9 +220,7 @@ def cli_custom(command_name: str, args: tuple[str, ...]) -> None:
         bmk custom deploy              # Run deploy_*.sh scripts
         bmk custom deploy --verbose    # Forward --verbose to scripts
     """
-    with lib_log_rich.runtime.bind(
-        job_id="cli-custom", extra={"command": "custom", "prefix": command_name}
-    ):
+    with lib_log_rich.runtime.bind(job_id="cli-custom", extra={"command": "custom", "prefix": command_name}):
         logger.info("Executing custom command '%s'", command_name)
         _run_custom(command_name, args)
 
