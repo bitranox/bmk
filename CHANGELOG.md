@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.5] 2026-02-11 00:39:28
+
+### Changed
+- **Stage delegator scripts show delegation flow**: replaced generic announcements with `delegator → target pipeline` messages (e.g. `push_040_commit → commit pipeline`) so pipeline nesting is visible in output
+
 ## [2.0.4] 2026-02-10 23:12:40
 
 ### Fixed
