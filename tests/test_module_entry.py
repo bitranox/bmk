@@ -116,7 +116,7 @@ def test_module_entry_subprocess_help() -> None:
     This tests the true CLI invocation path that end-users would experience,
     complementing the runpy-based tests that run in-process.
     """
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "bmk", "--help"],
         capture_output=True,
         timeout=30,
@@ -135,7 +135,7 @@ def test_module_entry_subprocess_help() -> None:
 @pytest.mark.os_agnostic
 def test_module_entry_subprocess_version() -> None:
     """Verify `python -m bmk --version` outputs version."""
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "bmk", "--version"],
         capture_output=True,
         timeout=30,
