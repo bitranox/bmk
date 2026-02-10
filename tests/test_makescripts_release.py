@@ -1,6 +1,10 @@
 """Behaviour tests for makescripts._release: semver validation, default remote, command existence."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -65,7 +69,7 @@ def test_looks_like_semver_rejects_empty_string() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_config(raw_data: dict) -> PyprojectConfig:
+def _make_config(raw_data: dict[str, Any]) -> PyprojectConfig:
     """Build a PyprojectConfig with the given raw_data dict."""
     return PyprojectConfig.from_dict(raw_data)
 
