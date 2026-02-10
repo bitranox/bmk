@@ -1,5 +1,7 @@
 """Behaviour tests for CLI entry point, context helpers, and edge cases."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import lib_cli_exit_tools

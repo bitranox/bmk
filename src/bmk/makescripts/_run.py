@@ -37,7 +37,7 @@ except ModuleNotFoundError:
     from bmk.makescripts._loader import load_pyproject_config
 
 if TYPE_CHECKING:
-    from _toml_config import PyprojectConfig
+    from bmk.makescripts._toml_config import PyprojectConfig
 
 __all__ = ["run_cli"]
 

@@ -34,7 +34,7 @@ except ModuleNotFoundError:
     from bmk.makescripts._loader import load_pyproject_config
 
 if TYPE_CHECKING:
-    from _toml_config import PyprojectConfig
+    from bmk.makescripts._toml_config import PyprojectConfig
 
 _RE_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 

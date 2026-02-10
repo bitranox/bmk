@@ -1,5 +1,7 @@
 """Behaviour tests for makescripts._run: dependency extraction and local discovery."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 from pathlib import Path

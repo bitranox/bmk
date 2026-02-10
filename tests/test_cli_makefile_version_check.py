@@ -1,5 +1,7 @@
 """Pre-command Makefile version check: prompt when local Makefile is outdated."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 from collections.abc import Callable
