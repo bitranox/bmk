@@ -12,7 +12,6 @@ from click.testing import CliRunner, Result
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands.install_cmd import _extract_version
 
-
 # =============================================================================
 # _extract_version unit tests
 # =============================================================================

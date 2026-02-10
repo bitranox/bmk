@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
 import lib_cli_exit_tools
 import pytest
 import rich_click as click
@@ -21,7 +18,6 @@ from bmk.adapters.cli.context import (
     store_cli_context,
 )
 from bmk.adapters.cli.main import main
-
 
 # ---------------------------------------------------------------------------
 # main() — missing services_factory

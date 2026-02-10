@@ -11,12 +11,8 @@ import shutil
 import subprocess
 import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    pass
 
 PWSH = shutil.which("pwsh")
 MAKESCRIPTS_DIR = Path(__file__).resolve().parent.parent / "src" / "bmk" / "makescripts"

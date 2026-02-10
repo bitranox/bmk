@@ -8,7 +8,6 @@ import pytest
 
 from bmk.makescripts._clean import clean, get_clean_patterns, main
 
-
 # ---------------------------------------------------------------------------
 # get_clean_patterns
 # ---------------------------------------------------------------------------

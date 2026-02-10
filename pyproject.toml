@@ -122,12 +122,10 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Notebooks: unused imports are often intentional for side effects
 "notebooks/*.ipynb" = ["F401"]
-# Scripts: tooling code with print(), subprocess, boolean params, large orchestrators
-"scripts/*.py" = ["T20", "S101", "S603", "S607", "ERA001", "FBT001", "FBT002", "FBT003", "PERF203", "PLR0912", "PLR0913", "PLR0915", "PLR2004", "RUF012"]
 # Makescripts: standalone CLI utilities with subprocess calls, print output, and magic values
-"src/bmk/makescripts/*.py" = ["T20", "S101", "S603", "S607", "PLR0913", "PLR2004"]
+"src/bmk/makescripts/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0912", "PLR0913", "PLR2004"]
 # Tests: assert is standard, test fixtures have passwords, magic values are clearer inline, temp paths are fine
-"tests/*.py" = ["T20", "S101", "S105", "S106", "S108", "FBT001", "FBT003", "PLR0913", "PLR2004"]
+"tests/*.py" = ["T20", "S101", "S105", "S106", "S108", "S603", "S607", "E501", "ERA001", "FBT001", "FBT003", "PLR0913", "PLR2004", "PLW1510"]
 # CLI: Click framework injects boolean params; commands have many options
 "src/bmk/adapters/cli/**/*.py" = ["FBT001", "FBT002", "PLR0913"]
 # Protocols/adapters: many-param signatures by design
@@ -187,7 +185,7 @@ output = "coverage.json"
 pretty_print = true
 
 [tool.clean]
-# Patterns to remove when running `make clean` or `python -m scripts clean`
+# Patterns to remove when running `make clean`
 patterns = [
   "**/__pycache__",
   ".hypothesis",

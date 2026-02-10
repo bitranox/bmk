@@ -7,7 +7,6 @@ import pytest
 from bmk.makescripts._release import _cmd_exists, _get_default_remote, _looks_like_semver
 from bmk.makescripts._toml_config import PyprojectConfig
 
-
 # ---------------------------------------------------------------------------
 # _looks_like_semver
 # ---------------------------------------------------------------------------

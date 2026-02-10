@@ -8,7 +8,6 @@ import pytest
 
 from bmk.adapters.email.config import EmailConfig, load_email_config_from_dict
 
-
 # ---------------------------------------------------------------------------
 # Validator: _coerce_string_to_list edge cases
 # ---------------------------------------------------------------------------

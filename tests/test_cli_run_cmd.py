@@ -14,7 +14,6 @@ from click.testing import CliRunner, Result
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.exit_codes import ExitCode
 
-
 # ---------------------------------------------------------------------------
 # Command registration
 # ---------------------------------------------------------------------------

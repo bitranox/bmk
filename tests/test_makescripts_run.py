@@ -9,7 +9,6 @@ import pytest
 from bmk.makescripts._run import _extract_dependency_names, _find_local_dependencies
 from bmk.makescripts._toml_config import ProjectSection, PyprojectConfig
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
