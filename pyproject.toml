@@ -251,6 +251,9 @@ layers = [
 # Known vulnerabilities to ignore (environment-level packages, not project dependencies)
 ignore-vulns = [
   "CVE-2026-1703",     # pip wheel path traversal — excluded per user request
+  "PYSEC-2022-43012",  # setuptools 65.5.0 — build-time only, not a runtime dependency
+  "PYSEC-2025-49",     # setuptools 65.5.0 — build-time only, not a runtime dependency
+  "CVE-2024-6345",     # setuptools 65.5.0 — build-time only, not a runtime dependency
 ]
 
 [tool.bandit]
