@@ -19,6 +19,7 @@ from bmk.adapters.config.overrides import apply_overrides
 
 from .constants import CLICK_CONTEXT_SETTINGS
 from .context import apply_traceback_preferences, store_cli_context
+from .exit_codes import ExitCode
 
 if TYPE_CHECKING:
     from bmk.composition import AppServices
@@ -109,6 +110,15 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
     )
     apply_traceback_preferences(traceback)
 
+    if ctx.invoked_subcommand is not None and ctx.invoked_subcommand != "install":
+        try:
+            from .commands.install_cmd import check_makefile_update
+
+            if check_makefile_update():
+                raise SystemExit(ExitCode.SUCCESS)
+        except (OSError, click.Abort):
+            pass
+
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -134,12 +144,14 @@ def _register_commands() -> None:
         cli_config_generate_examples,
         cli_cov,
         cli_coverage,
+        cli_custom,
         cli_d,
         cli_dependencies,
         cli_deps,
         cli_fail,
         cli_hello,
         cli_info,
+        cli_install,
         cli_logdemo,
         cli_psh,
         cli_push,
@@ -171,10 +183,12 @@ def _register_commands() -> None:
         cli_commit,
         cli_cov,
         cli_coverage,
+        cli_custom,
         cli_d,
         cli_dependencies,
         cli_deps,
         cli_info,
+        cli_install,
         cli_hello,
         cli_fail,
         cli_config,

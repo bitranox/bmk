@@ -75,7 +75,7 @@
 Install dev extras if you haven't:
 
 ```bash
-pip install -e .[dev]
+pip install -e .
 ```
 
 Run the menu:
@@ -87,7 +87,7 @@ make menu
 ### Target Details
 
 - `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`).
-  - Auto-bootstrap: `make test` will try to install dev tools (`pip install -e .[dev]`) if `ruff`/`pyright`/`pytest` are missing. Set `SKIP_BOOTSTRAP=1` to skip this behavior.
+  - Auto-bootstrap: `make test` will try to install dev tools (`pip install -e .`) if `ruff`/`pyright`/`pytest` are missing. Set `SKIP_BOOTSTRAP=1` to skip this behavior.
 - `build`: creates wheel/sdist artifacts.
 - `version-current`: prints current version from `pyproject.toml`.
 - `bump`: updates `pyproject.toml` version and inserts a new section in `CHANGELOG.md`. Use `VERSION=X.Y.Z make bump` or `make bump-minor`/`bump-major`/`bump-patch`.

@@ -33,6 +33,6 @@ _bump_run() {
     local exit_code=$?
     set -e
 
-    _bump_explain_exit_code $exit_code
-    exit $exit_code
+    _bump_explain_exit_code "$exit_code"
+    exit "$exit_code"
 }

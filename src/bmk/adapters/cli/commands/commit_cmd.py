@@ -22,19 +22,10 @@ from pathlib import Path
 import lib_log_rich.runtime
 import rich_click as click
 
-from ..constants import CLICK_CONTEXT_SETTINGS
-from ..exit_codes import ExitCode
-from .test_cmd import execute_script, get_script_name, resolve_script_path
+from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from .test_cmd import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
-
-# Context settings for commit commands that accept message as arguments.
-_COMMIT_CONTEXT_SETTINGS = {
-    **CLICK_CONTEXT_SETTINGS,
-    "ignore_unknown_options": True,
-    "allow_extra_args": True,
-    "allow_interspersed_args": False,
-}
 
 
 def _run_commit(args: tuple[str, ...]) -> None:
@@ -47,17 +38,11 @@ def _run_commit(args: tuple[str, ...]) -> None:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
+    from ._shared import require_script_path
+
     cwd = Path.cwd()
     script_name = get_script_name()
-    script_path = resolve_script_path(script_name, cwd)
-
-    if script_path is None:
-        click.echo(f"Error: Commit script '{script_name}' not found", err=True)
-        click.echo("Searched locations:", err=True)
-        click.echo(f"  - {cwd / 'bmk_makescripts' / script_name}", err=True)
-        bundled = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-        click.echo(f"  - {bundled}", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    script_path = require_script_path(script_name, cwd, "Commit")
 
     logger.debug("Executing commit script: %s", script_path)
     exit_code = execute_script(script_path, cwd, args, command_prefix="commit")
@@ -66,7 +51,7 @@ def _run_commit(args: tuple[str, ...]) -> None:
         raise SystemExit(exit_code)
 
 
-@click.command("commit", context_settings=_COMMIT_CONTEXT_SETTINGS)
+@click.command("commit", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("message", nargs=-1, type=click.UNPROCESSED)
 def cli_commit(message: tuple[str, ...]) -> None:
     """Create a git commit with timestamped message.
@@ -97,7 +82,7 @@ def cli_commit(message: tuple[str, ...]) -> None:
         _run_commit(message)
 
 
-@click.command("c", context_settings=_COMMIT_CONTEXT_SETTINGS)
+@click.command("c", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("message", nargs=-1, type=click.UNPROCESSED)
 def cli_c(message: tuple[str, ...]) -> None:
     """Create a git commit with timestamped message (alias for 'commit').

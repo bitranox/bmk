@@ -24,18 +24,10 @@ from pathlib import Path
 import lib_log_rich.runtime
 import rich_click as click
 
-from ..constants import CLICK_CONTEXT_SETTINGS
-from ..exit_codes import ExitCode
-from .test_cmd import execute_script, get_script_name, resolve_script_path
+from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from .test_cmd import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
-
-_PASSTHROUGH_CONTEXT_SETTINGS = {
-    **CLICK_CONTEXT_SETTINGS,
-    "ignore_unknown_options": True,
-    "allow_extra_args": True,
-    "allow_interspersed_args": False,
-}
 
 
 def _run_run(args: tuple[str, ...]) -> None:
@@ -48,17 +40,11 @@ def _run_run(args: tuple[str, ...]) -> None:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
+    from ._shared import require_script_path
+
     cwd = Path.cwd()
     script_name = get_script_name()
-    script_path = resolve_script_path(script_name, cwd)
-
-    if script_path is None:
-        click.echo(f"Error: Run script '{script_name}' not found", err=True)
-        click.echo("Searched locations:", err=True)
-        click.echo(f"  - {cwd / 'bmk_makescripts' / script_name}", err=True)
-        bundled = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-        click.echo(f"  - {bundled}", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    script_path = require_script_path(script_name, cwd, "Run")
 
     command_prefix = "run"
     logger.debug("Executing run script: %s with prefix %s", script_path, command_prefix)
@@ -68,7 +54,7 @@ def _run_run(args: tuple[str, ...]) -> None:
         raise SystemExit(exit_code)
 
 
-@click.command("run", context_settings=_PASSTHROUGH_CONTEXT_SETTINGS)
+@click.command("run", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_run(args: tuple[str, ...]) -> None:
     """Run the project CLI via uvx with local dependency discovery.

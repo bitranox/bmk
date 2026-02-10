@@ -1,7 +1,7 @@
 [project]
 name = "bmk"
-version = "1.3.0"
-description = "Bitranox Make CLI application - flexible make commands"
+version = "2.0.0"
+description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,10 +12,31 @@ dependencies = [
     "btx_lib_mail>=1.3.1",
     "pydantic>=2.12.5",
     "orjson>=3.11.7",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "hypothesis>=6.151.5",
+    "ruff>=0.15.0",
+    "pyright[nodejs]>=1.1.408",
+    "bandit>=1.9.3",
+    "build>=1.4.0",
+    "twine>=6.2.0",
+    "codecov-cli>=11.2.6",
+    "pip-audit>=2.10.0",
+    "textual>=7.5.0",
+    "import-linter>=2.10",
+    "rtoml>=0.13.0",
+    "httpx>=0.28.1",
+    # Transitive CVE pins
+    "jaraco-context>=6.1.0",       # CVE-2026-23949
+    "python-multipart>=0.0.22",    # CVE-2026-24486
+    "wheel>=0.46.3",               # CVE-2026-24049
+    "pynacl>=1.6.2",               # CVE-2025-69277
+    "urllib3>=2.6.3",              # CVE-2025-66471, CVE-2025-66418, CVE-2026-21441
+    "virtualenv>=20.36.1",         # CVE-2026-22702
 ]
 license = { text = "MIT" }
 authors = [{ name = "bitranox", email = "bitranox@gmail.com" }]
-keywords = ["cli", "make", "instrumentation", "script", "test", "pytest"]
+keywords = ["cli", "make", "build", "test", "clean", "stagerunner", "custom-commands", "automation", "instrumentation", "script", "task-runner", "devops"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -35,31 +56,6 @@ Homepage = "https://github.com/bitranox/bmk"
 Repository = "https://github.com/bitranox/bmk.git"
 Issues = "https://github.com/bitranox/bmk/issues"
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=9.0.2",
-  "pytest-cov>=7.0.0",
-  "hypothesis>=6.151.5",
-  "ruff>=0.15.0",
-  "pyright[nodejs]>=1.1.408",
-  "bandit>=1.9.3",
-  "build>=1.4.0",
-  "twine>=6.2.0",
-  "codecov-cli>=11.2.6",
-  "pip-audit>=2.10.0",
-  "textual>=7.5.0",
-  "import-linter>=2.10",
-  "rtoml>=0.13.0",
-  "httpx>=0.28.1",
-  # Transitive CVE pins
-  "jaraco-context>=6.1.0",       # CVE-2025-23949
-  "python-multipart>=0.0.22",    # CVE-2025-24486
-  "wheel>=0.46.3",               # CVE-2025-24049
-  "pynacl>=1.6.2",               # CVE-2025-69277
-  "urllib3>=2.6.3",              # CVE-2025-66471, CVE-2025-66418
-  "virtualenv>=20.36.1",         # CVE-2025-22702
-]
-
 [project.scripts]
 bmk = "bmk.entry:main"
 mk = "bmk.entry:main"
@@ -76,6 +72,10 @@ include = [
     "src/bmk/py.typed",
     "src/bmk/adapters/config/defaultconfig.toml",
     "src/bmk/adapters/config/defaultconfig.d/*.toml",
+    "src/bmk/makefile/Makefile",
+    "src/bmk/makescripts/*.sh",
+    "src/bmk/makescripts/*.ps1",
+    "src/bmk/makescripts/*.py",
 ]
 
 [tool.ruff]
@@ -251,14 +251,8 @@ layers = [
 
 [tool.pip-audit]
 # Known vulnerabilities to ignore (environment-level packages, not project dependencies)
-# PYSEC-2022-42969: py library ReDoS — py 1.11.0 is installed in the development
-#   environment but is not a dependency of this project; no fix available.
 ignore-vulns = [
-  "PYSEC-2022-42969",
-  "PYSEC-2022-43012",  # setuptools 65.5.0 — env-only, not a project dependency
-  "PYSEC-2025-49",     # setuptools 65.5.0 — env-only, not a project dependency
-  "CVE-2024-6345",     # setuptools 65.5.0 — env-only, not a project dependency
-  "CVE-2026-1703",     # excluded per user request
+  "CVE-2026-1703",     # pip wheel path traversal — excluded per user request
 ]
 
 [tool.bandit]

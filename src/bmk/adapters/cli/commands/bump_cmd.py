@@ -27,8 +27,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
-from ..exit_codes import ExitCode
-from .test_cmd import execute_script, get_script_name, resolve_script_path
+from .test_cmd import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +42,11 @@ def _run_bump(bump_type: str) -> None:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
+    from ._shared import require_script_path
+
     cwd = Path.cwd()
     script_name = get_script_name()
-    script_path = resolve_script_path(script_name, cwd)
-
-    if script_path is None:
-        click.echo(f"Error: Bump script '{script_name}' not found", err=True)
-        click.echo("Searched locations:", err=True)
-        click.echo(f"  - {cwd / 'bmk_makescripts' / script_name}", err=True)
-        bundled = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-        click.echo(f"  - {bundled}", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    script_path = require_script_path(script_name, cwd, "Bump")
 
     command_prefix = f"bump_{bump_type}"
     logger.debug("Executing bump script: %s with prefix %s", script_path, command_prefix)
@@ -64,254 +57,92 @@ def _run_bump(bump_type: str) -> None:
 
 
 # =============================================================================
-# Main command group: bump
+# Subcommand definitions (shared across all bump groups)
 # =============================================================================
 
+_SUBCOMMAND_SPECS: tuple[tuple[str, str, str, bool], ...] = (
+    ("major", "major", "Bump major version (X.0.0).", False),
+    ("ma", "major", "Bump major version (alias for 'major').", True),
+    ("minor", "minor", "Bump minor version (X.Y.0).", False),
+    ("m", "minor", "Bump minor version (alias for 'minor').", True),
+    ("patch", "patch", "Bump patch version (X.Y.Z).", False),
+    ("p", "patch", "Bump patch version (alias for 'patch').", True),
+)
 
-@click.group("bump", context_settings=CLICK_CONTEXT_SETTINGS)
-def cli_bump() -> None:
-    """Bump project version (major, minor, or patch).
 
-    Updates version in pyproject.toml and CHANGELOG.md.
+def _make_bump_subcommand(
+    name: str,
+    bump_type: str,
+    help_text: str,
+    *,
+    is_alias: bool,
+) -> click.Command:
+    """Create a Click command for a specific bump action.
 
-    Example:
-        bmk bump major      # 1.3.0 -> 2.0.0
-        bmk bump minor      # 1.3.0 -> 1.4.0
-        bmk bump patch      # 1.3.0 -> 1.3.1
+    Args:
+        name: CLI subcommand name (e.g. "major", "ma").
+        bump_type: Version part to bump ("major", "minor", or "patch").
+        help_text: Help string displayed by ``--help``.
+        is_alias: Whether this is an alias (used in log messages).
     """
+    alias_suffix = f" (via alias '{name}')" if is_alias else ""
+
+    @click.command(name, context_settings=CLICK_CONTEXT_SETTINGS)
+    def _cmd() -> None:
+        with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": bump_type}):
+            logger.info("Bumping %s version%s", bump_type, alias_suffix)
+            _run_bump(bump_type)
+
+    _cmd.help = help_text
+    return _cmd
 
 
-@cli_bump.command("major")
-def bump_cmd_major() -> None:
-    """Bump major version (X.0.0).
+def _make_bump_group(name: str, help_text: str) -> click.Group:
+    """Create a bump command group and register all subcommands on it.
 
-    Increments the major version number and resets minor and patch to 0.
-    Example: 1.3.5 -> 2.0.0
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(bump_cmd_major)
-        >>> result.exit_code in (0, 1, 2)
-        True
+    Args:
+        name: CLI group name (e.g. "bump", "bmp", "b").
+        help_text: Help string displayed by ``--help``.
     """
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "major"}):
-        logger.info("Bumping major version")
-        _run_bump("major")
+    @click.group(name, context_settings=CLICK_CONTEXT_SETTINGS)
+    def _group() -> None:
+        pass
 
+    _group.help = help_text
 
-@cli_bump.command("ma")
-def bump_cmd_ma() -> None:
-    """Bump major version (alias for 'major').
+    for cmd_name, bump_type, cmd_help, is_alias in _SUBCOMMAND_SPECS:
+        _group.add_command(
+            _make_bump_subcommand(cmd_name, bump_type, cmd_help, is_alias=is_alias)
+        )
 
-    See ``bmk bump major --help`` for full documentation.
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(bump_cmd_ma)
-        >>> result.exit_code in (0, 1, 2)
-        True
-    """
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "major"}):
-        logger.info("Bumping major version (via alias 'ma')")
-        _run_bump("major")
-
-
-@cli_bump.command("minor")
-def bump_cmd_minor() -> None:
-    """Bump minor version (X.Y.0).
-
-    Increments the minor version number and resets patch to 0.
-    Example: 1.3.5 -> 1.4.0
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(bump_cmd_minor)
-        >>> result.exit_code in (0, 1, 2)
-        True
-    """
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "minor"}):
-        logger.info("Bumping minor version")
-        _run_bump("minor")
-
-
-@cli_bump.command("m")
-def bump_cmd_m() -> None:
-    """Bump minor version (alias for 'minor').
-
-    See ``bmk bump minor --help`` for full documentation.
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(bump_cmd_m)
-        >>> result.exit_code in (0, 1, 2)
-        True
-    """
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "minor"}):
-        logger.info("Bumping minor version (via alias 'm')")
-        _run_bump("minor")
-
-
-@cli_bump.command("patch")
-def bump_cmd_patch() -> None:
-    """Bump patch version (X.Y.Z).
-
-    Increments the patch version number.
-    Example: 1.3.5 -> 1.3.6
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(bump_cmd_patch)
-        >>> result.exit_code in (0, 1, 2)
-        True
-    """
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "patch"}):
-        logger.info("Bumping patch version")
-        _run_bump("patch")
-
-
-@cli_bump.command("p")
-def bump_cmd_p() -> None:
-    """Bump patch version (alias for 'patch').
-
-    See ``bmk bump patch --help`` for full documentation.
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(bump_cmd_p)
-        >>> result.exit_code in (0, 1, 2)
-        True
-    """
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "patch"}):
-        logger.info("Bumping patch version (via alias 'p')")
-        _run_bump("patch")
+    return _group
 
 
 # =============================================================================
-# Alias command group: bmp
+# Command groups
 # =============================================================================
 
+cli_bump: click.Group = _make_bump_group(
+    "bump",
+    "Bump project version (major, minor, or patch).\n\n"
+    "Updates version in pyproject.toml and CHANGELOG.md.\n\n"
+    "Example:\n"
+    "    bmk bump major      # 1.3.0 -> 2.0.0\n"
+    "    bmk bump minor      # 1.3.0 -> 1.4.0\n"
+    "    bmk bump patch      # 1.3.0 -> 1.3.1",
+)
 
-@click.group("bmp", context_settings=CLICK_CONTEXT_SETTINGS)
-def cli_bmp() -> None:
-    """Bump project version (alias for 'bump').
+cli_bmp: click.Group = _make_bump_group(
+    "bmp",
+    "Bump project version (alias for 'bump').\n\n"
+    "See ``bmk bump --help`` for full documentation.",
+)
 
-    See ``bmk bump --help`` for full documentation.
-    """
-
-
-@cli_bmp.command("major")
-def bmp_cmd_major() -> None:
-    """Bump major version (X.0.0)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "major"}):
-        logger.info("Bumping major version (via 'bmp')")
-        _run_bump("major")
-
-
-@cli_bmp.command("ma")
-def bmp_cmd_ma() -> None:
-    """Bump major version (alias)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "major"}):
-        logger.info("Bumping major version (via 'bmp ma')")
-        _run_bump("major")
-
-
-@cli_bmp.command("minor")
-def bmp_cmd_minor() -> None:
-    """Bump minor version (X.Y.0)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "minor"}):
-        logger.info("Bumping minor version (via 'bmp')")
-        _run_bump("minor")
-
-
-@cli_bmp.command("m")
-def bmp_cmd_m() -> None:
-    """Bump minor version (alias)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "minor"}):
-        logger.info("Bumping minor version (via 'bmp m')")
-        _run_bump("minor")
-
-
-@cli_bmp.command("patch")
-def bmp_cmd_patch() -> None:
-    """Bump patch version (X.Y.Z)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "patch"}):
-        logger.info("Bumping patch version (via 'bmp')")
-        _run_bump("patch")
-
-
-@cli_bmp.command("p")
-def bmp_cmd_p() -> None:
-    """Bump patch version (alias)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "patch"}):
-        logger.info("Bumping patch version (via 'bmp p')")
-        _run_bump("patch")
-
-
-# =============================================================================
-# Short alias command group: b
-# =============================================================================
-
-
-@click.group("b", context_settings=CLICK_CONTEXT_SETTINGS)
-def cli_b() -> None:
-    """Bump project version (short alias for 'bump').
-
-    See ``bmk bump --help`` for full documentation.
-    """
-
-
-@cli_b.command("major")
-def b_cmd_major() -> None:
-    """Bump major version (X.0.0)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "major"}):
-        logger.info("Bumping major version (via 'b')")
-        _run_bump("major")
-
-
-@cli_b.command("ma")
-def b_cmd_ma() -> None:
-    """Bump major version (alias)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "major"}):
-        logger.info("Bumping major version (via 'b ma')")
-        _run_bump("major")
-
-
-@cli_b.command("minor")
-def b_cmd_minor() -> None:
-    """Bump minor version (X.Y.0)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "minor"}):
-        logger.info("Bumping minor version (via 'b')")
-        _run_bump("minor")
-
-
-@cli_b.command("m")
-def b_cmd_m() -> None:
-    """Bump minor version (alias)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "minor"}):
-        logger.info("Bumping minor version (via 'b m')")
-        _run_bump("minor")
-
-
-@cli_b.command("patch")
-def b_cmd_patch() -> None:
-    """Bump patch version (X.Y.Z)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "patch"}):
-        logger.info("Bumping patch version (via 'b')")
-        _run_bump("patch")
-
-
-@cli_b.command("p")
-def b_cmd_p() -> None:
-    """Bump patch version (alias)."""
-    with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": "patch"}):
-        logger.info("Bumping patch version (via 'b p')")
-        _run_bump("patch")
+cli_b: click.Group = _make_bump_group(
+    "b",
+    "Bump project version (short alias for 'bump').\n\n"
+    "See ``bmk bump --help`` for full documentation.",
+)
 
 
 __all__ = ["cli_b", "cli_bmp", "cli_bump"]

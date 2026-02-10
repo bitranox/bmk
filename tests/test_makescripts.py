@@ -196,40 +196,40 @@ class TestEnsureCodecovToken:
         return _coverage
 
     @pytest.mark.os_agnostic
-    def test_returns_true_when_token_already_set(
+    def test_returns_existing_token_from_environment(
         self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ensure_codecov_token returns True when CODECOV_TOKEN is set."""
+        """ensure_codecov_token returns token when CODECOV_TOKEN is set."""
         monkeypatch.setenv("CODECOV_TOKEN", "existing-token")
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
-        assert result is True
+        assert result == "existing-token"
 
     @pytest.mark.os_agnostic
-    def test_returns_false_when_env_file_missing(
+    def test_returns_none_when_env_file_missing(
         self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ensure_codecov_token returns False when .env file doesn't exist."""
+        """ensure_codecov_token returns None when .env file doesn't exist."""
         monkeypatch.delenv("CODECOV_TOKEN", raising=False)
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
-        assert result is False
+        assert result is None
 
     @pytest.mark.os_agnostic
     def test_loads_token_from_env_file(
         self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ensure_codecov_token loads token from .env file."""
+        """ensure_codecov_token loads token from .env file without mutating os.environ."""
         monkeypatch.delenv("CODECOV_TOKEN", raising=False)
         env_file = tmp_path / ".env"
         env_file.write_text("CODECOV_TOKEN=my-secret-token\n")
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
-        assert result is True
-        assert os.environ.get("CODECOV_TOKEN") == "my-secret-token"
+        assert result == "my-secret-token"
+        assert os.environ.get("CODECOV_TOKEN") is None
 
     @pytest.mark.os_agnostic
     def test_handles_quoted_token_values(
@@ -242,8 +242,8 @@ class TestEnsureCodecovToken:
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
-        assert result is True
-        assert os.environ.get("CODECOV_TOKEN") == "quoted-token"
+        assert result == "quoted-token"
+        assert os.environ.get("CODECOV_TOKEN") is None
 
     @pytest.mark.os_agnostic
     def test_skips_comments_and_empty_lines(
@@ -263,8 +263,8 @@ CODECOV_TOKEN=found-token
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
-        assert result is True
-        assert os.environ.get("CODECOV_TOKEN") == "found-token"
+        assert result == "found-token"
+        assert os.environ.get("CODECOV_TOKEN") is None
 
 
 class TestGitServiceHelpers:

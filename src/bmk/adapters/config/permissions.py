@@ -6,6 +6,7 @@ compute effective permission modes for deployment targets.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from lib_layered_config import (
@@ -19,6 +20,8 @@ from bmk.domain.enums import DeployTarget
 
 if TYPE_CHECKING:
     from lib_layered_config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def parse_mode(value: int | str, default: int) -> int:
@@ -50,6 +53,7 @@ def parse_mode(value: int | str, default: int) -> int:
             return int(value, 0)  # int() auto-detects 0o prefix
         return int(value, 8)  # Plain "755" needs explicit base 8
     except ValueError:
+        logger.warning("Invalid permission mode '%s', falling back to default %o", value, default)
         return default
 
 

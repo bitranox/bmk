@@ -26,18 +26,10 @@ from pathlib import Path
 import lib_log_rich.runtime
 import rich_click as click
 
-from ..constants import CLICK_CONTEXT_SETTINGS
-from ..exit_codes import ExitCode
-from .test_cmd import execute_script, get_script_name, resolve_script_path
+from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from .test_cmd import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
-
-_PASSTHROUGH_CONTEXT_SETTINGS = {
-    **CLICK_CONTEXT_SETTINGS,
-    "ignore_unknown_options": True,
-    "allow_extra_args": True,
-    "allow_interspersed_args": False,
-}
 
 
 def _run_test_integration(args: tuple[str, ...]) -> None:
@@ -50,17 +42,11 @@ def _run_test_integration(args: tuple[str, ...]) -> None:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
+    from ._shared import require_script_path
+
     cwd = Path.cwd()
     script_name = get_script_name()
-    script_path = resolve_script_path(script_name, cwd)
-
-    if script_path is None:
-        click.echo(f"Error: Test runner script '{script_name}' not found", err=True)
-        click.echo("Searched locations:", err=True)
-        click.echo(f"  - {cwd / 'bmk_makescripts' / script_name}", err=True)
-        bundled = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-        click.echo(f"  - {bundled}", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    script_path = require_script_path(script_name, cwd, "Test runner")
 
     logger.debug("Executing integration test script: %s", script_path)
     exit_code = execute_script(script_path, cwd, args, command_prefix="test_integration")
@@ -69,7 +55,7 @@ def _run_test_integration(args: tuple[str, ...]) -> None:
         raise SystemExit(exit_code)
 
 
-@click.command("testintegration", context_settings=_PASSTHROUGH_CONTEXT_SETTINGS)
+@click.command("testintegration", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_testintegration(args: tuple[str, ...]) -> None:
     """Run integration tests only (pytest -m integration).
@@ -94,7 +80,7 @@ def cli_testintegration(args: tuple[str, ...]) -> None:
         _run_test_integration(args)
 
 
-@click.command("testi", context_settings=_PASSTHROUGH_CONTEXT_SETTINGS)
+@click.command("testi", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_testi(args: tuple[str, ...]) -> None:
     """Run integration tests only (alias for 'testintegration').
@@ -113,7 +99,7 @@ def cli_testi(args: tuple[str, ...]) -> None:
         _run_test_integration(args)
 
 
-@click.command("ti", context_settings=_PASSTHROUGH_CONTEXT_SETTINGS)
+@click.command("ti", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_ti(args: tuple[str, ...]) -> None:
     """Run integration tests only (alias for 'testintegration').

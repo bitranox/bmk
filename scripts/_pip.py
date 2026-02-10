@@ -2,7 +2,7 @@
 
 Purpose
 -------
-Automate the initial ``pip install -e .[dev]`` dance and guard against common
+Automate the initial ``pip install -e .`` dance and guard against common
 CI pitfalls (SHA-256 hash-check errors on pre-installed pip wheels, missing
 ``sqlite3`` on minimal container images).
 
@@ -12,7 +12,7 @@ Contents
 * ``_needs_dev_install`` -- heuristic: do dev tools already exist?
 * ``_upgrade_pip`` -- upgrade pip with CI-safe error handling.
 * ``_is_ci_sha_error`` / ``_print_pip_error`` -- error-classification helpers.
-* ``_install_dev_dependencies`` -- ``pip install -e .[dev]``.
+* ``_install_dev_dependencies`` -- ``pip install -e .``.
 * ``_ensure_sqlite3`` -- install ``pysqlite3-binary`` when the stdlib
   ``sqlite3`` module is missing.
 
@@ -92,8 +92,8 @@ def _print_pip_error(result: RunResult) -> None:
 
 def _install_dev_dependencies() -> None:
     """Install dev dependencies with pip."""
-    print("[bootstrap] Installing dev dependencies via 'pip install -e .[dev]'")
-    install_cmd = [sys.executable, "-m", "pip", "install", "-e", ".[dev]"]
+    print("[bootstrap] Installing dev dependencies via 'pip install -e .'")
+    install_cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
     if sys.platform.startswith("linux"):
         install_cmd.insert(4, "--break-system-packages")
     run(install_cmd)

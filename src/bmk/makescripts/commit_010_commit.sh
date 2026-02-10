@@ -51,21 +51,28 @@ full_message="${timestamp} - ${commit_message}"
 printf 'Staging changes...\n'
 git add -A
 
-# Check if there are staged changes
+# Warn about potentially sensitive files being staged
+sensitive_files=$(git diff --cached --name-only | grep -iE '\.env$|\.env\.|credentials|secret|\.key$|\.pem$|id_rsa' || true)
+if [[ -n "$sensitive_files" ]]; then
+    printf 'Warning: Potentially sensitive files staged:\n' >&2
+    printf '  %s\n' $sensitive_files >&2
+    printf 'These files will be committed. Ensure .gitignore is correct.\n' >&2
+fi
+
+# Build commit arguments
+commit_args=()
 if git diff --cached --quiet; then
     printf 'No staged changes detected; creating empty commit\n'
-    allow_empty="--allow-empty"
-else
-    allow_empty=""
+    commit_args+=(--allow-empty)
 fi
 
 # Commit with timestamped message
 printf 'Committing: %s\n' "$full_message"
 
 set +e
-git commit $allow_empty -m "$full_message"
+git commit "${commit_args[@]}" -m "$full_message"
 exit_code=$?
 set -e
 
-explain_exit_code $exit_code
-exit $exit_code
+explain_exit_code "$exit_code"
+exit "$exit_code"

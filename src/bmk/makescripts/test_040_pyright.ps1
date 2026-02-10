@@ -1,3 +1,29 @@
-# PowerShell version - not implemented yet
-Write-Error "Not implemented yet"
-exit 1
+# Stage 02: Pyright type checking
+
+$ErrorActionPreference = "Stop"
+
+if (-not $env:BMK_PROJECT_DIR) {
+    throw "BMK_PROJECT_DIR environment variable must be set"
+}
+
+Set-Location $env:BMK_PROJECT_DIR
+
+function Explain-ExitCode {
+    param([int]$Code)
+    switch ($Code) {
+        0 { }
+        1 { Write-Error "Exit code 1: Type errors found" }
+        2 { Write-Error "Exit code 2: Fatal error occurred" }
+        3 { Write-Error "Exit code 3: Configuration error" }
+        4 { Write-Error "Exit code 4: CLI usage error" }
+        default { Write-Error "Exit code ${Code}: unknown" }
+    }
+}
+
+Write-Host "Running pyright..."
+
+pyright
+$exitCode = $LASTEXITCODE
+
+Explain-ExitCode $exitCode
+exit $exitCode

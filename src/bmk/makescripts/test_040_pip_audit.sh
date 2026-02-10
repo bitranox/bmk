@@ -45,5 +45,5 @@ pip-audit $IGNORE_FLAGS
 exit_code=$?
 set -e
 
-explain_exit_code $exit_code
-exit $exit_code
+explain_exit_code "$exit_code"
+exit "$exit_code"

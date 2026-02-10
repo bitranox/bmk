@@ -13,4 +13,5 @@ if (-not $env:BMK_STAGES_DIR) {
 Write-Host "Updating outdated dependencies..."
 
 $env:BMK_COMMAND_PREFIX = "deps_update"
-& "$env:BMK_STAGES_DIR\_btx_stagerunner.ps1"
+& "$env:BMK_STAGES_DIR\_btx_stagerunner.ps1" @args
+exit $LASTEXITCODE

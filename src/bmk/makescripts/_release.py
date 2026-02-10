@@ -21,7 +21,6 @@ stagerunner pipeline. Uses ``_toml_config`` for pyproject parsing and
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import shutil
 import subprocess
@@ -29,51 +28,17 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+try:
+    from _loader import load_pyproject_config
+except ModuleNotFoundError:
+    from bmk.makescripts._loader import load_pyproject_config
+
 if TYPE_CHECKING:
     from _toml_config import PyprojectConfig
 
 _RE_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 __all__ = ["release", "main"]
-
-
-# ---------------------------------------------------------------------------
-# _toml_config dynamic loader (same pattern as _clean.py)
-# ---------------------------------------------------------------------------
-
-
-def _load_toml_config_module():
-    """Dynamically import _toml_config from the same directory as this script.
-
-    This allows the script to work both when run standalone from the makescripts
-    directory and when imported for testing from elsewhere.
-
-    The module is registered in sys.modules to ensure dataclasses can resolve
-    type annotations correctly in Python 3.14+.
-    """
-    if "_toml_config" in sys.modules:
-        return sys.modules["_toml_config"]
-
-    script_dir = Path(__file__).parent
-    toml_config_path = script_dir / "_toml_config.py"
-
-    spec = importlib.util.spec_from_file_location("_toml_config", toml_config_path)
-    if spec is None or spec.loader is None:
-        msg = f"Could not load _toml_config from {toml_config_path}"
-        raise ImportError(msg)
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["_toml_config"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_toml_config = _load_toml_config_module()
-
-
-def _load_pyproject(path: Path) -> PyprojectConfig:
-    """Load pyproject.toml configuration using toml_config module."""
-    return _toml_config.load_pyproject_config(path)
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +154,7 @@ def release(*, project_dir: Path, remote: str | None = None) -> int:
         Exit code (0 on success).
     """
     pyproject_path = project_dir / "pyproject.toml"
-    config = _load_pyproject(pyproject_path)
+    config = load_pyproject_config(pyproject_path)
 
     version = config.project.version
     if not version or not _looks_like_semver(version):

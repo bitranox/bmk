@@ -1,0 +1,32 @@
+# ==============================================================================
+# bmk Core Settings - Stagerunner and package configuration
+# ==============================================================================
+#
+# Settings are loaded via lib_layered_config and can be overridden via:
+#   - Host/User config files (see precedence list in defaultconfig.toml)
+#   - Environment variables (see below)
+#
+# Environment Variable Naming
+# ---------------------------
+# Use lib_layered_config format for all environment variable overrides:
+#
+#   Format: <SLUG>___<SECTION>__<KEY>=<VALUE>
+#
+#   Examples:
+#     BMK___BMK__OVERRIDE_DIR=/path/to/overrides
+#     BMK___BMK__PACKAGE_NAME=my_package
+#
+#   In .env files, omit the slug prefix:
+#     BMK__OVERRIDE_DIR=/path/to/overrides
+#     BMK__PACKAGE_NAME=my_package
+
+[bmk]
+# Per-project directory for stage script overrides.
+# If scripts matching the command prefix exist here, they replace
+# the bundled scripts entirely for that command.
+# Empty string = use stagerunner default ($BMK_PROJECT_DIR/makescripts).
+override_dir = ""
+
+# Override the auto-derived package name (from pyproject.toml).
+# Empty string = auto-derive.
+package_name = ""

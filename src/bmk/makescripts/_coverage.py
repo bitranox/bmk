@@ -10,8 +10,8 @@ Contents
 * ``prune_coverage_data_files`` / ``remove_report_artifacts`` -- housekeeping
   before and after coverage runs.
 * ``run_coverage_tests`` -- run pytest under coverage and generate reports.
-* ``ensure_codecov_token`` -- loads ``CODECOV_TOKEN`` from ``.env`` when the
-  environment variable is not already set.
+* ``ensure_codecov_token`` -- discovers ``CODECOV_TOKEN`` from the environment
+  or ``.env`` file and returns it without mutating global state.
 * ``upload_coverage_report`` -- drives the official Codecov CLI uploader.
 * Git resolution helpers (commit SHA, branch, service).
 * ``main`` -- entry point for standalone execution.
@@ -295,23 +295,26 @@ def run_coverage_tests(
 # ---------------------------------------------------------------------------
 
 
-def ensure_codecov_token(project_dir: Path | None = None) -> bool:
-    """Load CODECOV_TOKEN from .env file if not already set.
+def ensure_codecov_token(project_dir: Path | None = None) -> str | None:
+    """Find and return codecov token without mutating os.environ.
+
+    Checks the ``CODECOV_TOKEN`` environment variable first, then falls
+    back to reading the ``.env`` file in *project_dir*.
 
     Args:
         project_dir: Directory containing .env file. Defaults to cwd.
 
     Returns:
-        True if the token was loaded or was already present, meaning the
-        caller should rebuild its environment dict to pick up the change.
+        The token string if found, or ``None`` if unavailable.
     """
-    if os.getenv("CODECOV_TOKEN"):
-        return True
+    existing = os.getenv("CODECOV_TOKEN")
+    if existing:
+        return existing
     if project_dir is None:
         project_dir = Path.cwd()
     env_path = project_dir / ".env"
     if not env_path.is_file():
-        return False
+        return None
     for line in env_path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
@@ -320,10 +323,9 @@ def ensure_codecov_token(project_dir: Path | None = None) -> bool:
         if key.strip() == "CODECOV_TOKEN":
             token = value.strip().strip("\"'")
             if token:
-                os.environ.setdefault("CODECOV_TOKEN", token)
-                return True
+                return token
             break
-    return False
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -443,12 +445,15 @@ def upload_coverage_report(
     *,
     project_dir: Path | None = None,
     coverage_report_file: str = "coverage.xml",
+    codecov_token: str | None = None,
 ) -> bool:
     """Upload coverage report via the official Codecov CLI when available.
 
     Args:
         project_dir: Project directory containing coverage report. Defaults to cwd.
         coverage_report_file: Name of the coverage report file.
+        codecov_token: Codecov token to inject into the subprocess environment.
+            When provided, avoids reliance on a globally-set environment variable.
 
     Returns:
         True if upload succeeded, False otherwise.
@@ -456,7 +461,7 @@ def upload_coverage_report(
     if project_dir is None:
         project_dir = Path.cwd()
 
-    uploader = _check_codecov_prerequisites(project_dir, coverage_report_file)
+    uploader = _check_codecov_prerequisites(project_dir, coverage_report_file, codecov_token=codecov_token)
     if uploader is None:
         return False
 
@@ -478,9 +483,11 @@ def upload_coverage_report(
     )
     env_overrides = _build_codecov_env(repo_owner, repo_name)
 
-    # Merge environment
+    # Build subprocess environment without mutating os.environ
     env = os.environ.copy()
     env.update(env_overrides)
+    if codecov_token:
+        env.setdefault("CODECOV_TOKEN", codecov_token)
 
     result = subprocess.run(
         args,
@@ -494,12 +501,15 @@ def upload_coverage_report(
 def _check_codecov_prerequisites(
     project_dir: Path,
     coverage_report_file: str = "coverage.xml",
+    *,
+    codecov_token: str | None = None,
 ) -> str | None:
     """Check prerequisites for codecov upload, return uploader path or None.
 
     Args:
         project_dir: Project directory containing coverage report.
         coverage_report_file: Name of the coverage report file.
+        codecov_token: Codecov token discovered by the caller.
 
     Returns:
         Path to codecovcli executable, or None if prerequisites not met.
@@ -509,7 +519,8 @@ def _check_codecov_prerequisites(
         print(f"[codecov] Coverage report not found: {report_path}")
         return None
 
-    if not os.getenv("CODECOV_TOKEN") and not os.getenv("CI"):
+    has_token = bool(codecov_token or os.getenv("CODECOV_TOKEN"))
+    if not has_token and not os.getenv("CI"):
         print("[codecov] CODECOV_TOKEN not configured; skipping upload (set CODECOV_TOKEN or run in CI)")
         return None
 
@@ -654,11 +665,11 @@ def main(
     if upload:
         print(f"[codecov] Uploading coverage from {project_dir}...")
 
-        # Ensure token is loaded
-        ensure_codecov_token(project_dir)
+        # Discover token without mutating global environment
+        token = ensure_codecov_token(project_dir)
 
         # Upload coverage
-        success = upload_coverage_report(project_dir=project_dir)
+        success = upload_coverage_report(project_dir=project_dir, codecov_token=token)
         if not success:
             return 1
 

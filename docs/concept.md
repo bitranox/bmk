@@ -53,6 +53,8 @@ run_010_run.sh
 use a small standalon python script who does the heavvy lifting and is called by that shellscripts:
 adopt _run.py and refractor it to your needs.
 
+mk_push - no options, no commands . everything is passed through as commit message
+_run.py must not accept any options or commands . everything is passed through as commands or options to the called script !
 
 
 m / mnu / menue

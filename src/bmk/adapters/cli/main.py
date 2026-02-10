@@ -49,6 +49,7 @@ def _run_cli(argv: Sequence[str] | None, *, services_factory: Callable[[], AppSe
     # doesn't support passing obj. We replicate its behavior while adding obj support.
     args = list(argv) if argv is not None else sys.argv[1:]
 
+    restore_signals = lib_cli_exit_tools.install_signal_handlers()
     try:
         cli.main(
             args=args,
@@ -71,6 +72,8 @@ def _run_cli(argv: Sequence[str] | None, *, services_factory: Callable[[], AppSe
         length_limit = TRACEBACK_VERBOSE_LIMIT if tracebacks_enabled else TRACEBACK_SUMMARY_LIMIT
         lib_cli_exit_tools.print_exception_message(trace_back=tracebacks_enabled, length_limit=length_limit)
         return lib_cli_exit_tools.get_system_exit_code(exc)
+    finally:
+        restore_signals()
 
 
 def main(

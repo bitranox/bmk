@@ -9,4 +9,5 @@ if (-not $env:BMK_STAGES_DIR) { throw "BMK_STAGES_DIR environment variable must 
 Write-Host "Cleaning build artifacts..."
 
 $env:BMK_COMMAND_PREFIX = "clean"
-& "$env:BMK_STAGES_DIR\_btx_stagerunner.ps1"
+& "$env:BMK_STAGES_DIR\_btx_stagerunner.ps1" @args
+exit $LASTEXITCODE

@@ -71,7 +71,7 @@ pip install bmk
 # optional install from GitHub
 pip install "git+https://github.com/bitranox/bmk"
 # optional development install from local
-pip install -e ".[dev]"
+pip install -e "."
 # optional install from local runtime only:
 pip install .
 ```

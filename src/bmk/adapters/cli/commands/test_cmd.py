@@ -7,6 +7,9 @@ local override support. Scripts are searched in priority order:
 
 Environment variables set for scripts:
     * ``BMK_PROJECT_DIR`` - Path to the current working directory
+    * ``BMK_COMMAND_PREFIX`` - Command prefix for staged scripts
+    * ``BMK_OVERRIDE_DIR`` - Per-project override directory (from config, if set)
+    * ``BMK_PACKAGE_NAME`` - Package name override (from config, if set)
 
 Contents:
     * :func:`cli_test` - Run the project test script.
@@ -24,21 +27,28 @@ from pathlib import Path
 import lib_log_rich.runtime
 import rich_click as click
 
-from ..constants import CLICK_CONTEXT_SETTINGS
-from ..exit_codes import ExitCode
+from bmk.adapters.config.loader import get_config
+
+from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 
 logger = logging.getLogger(__name__)
 
-# Context settings for pass-through commands that accept arbitrary arguments.
-# ignore_unknown_options: Allows --flags to be passed through to the script
-# allow_extra_args: Allows extra positional arguments
-# allow_interspersed_args: Allows mixing options and arguments
-_PASSTHROUGH_CONTEXT_SETTINGS = {
-    **CLICK_CONTEXT_SETTINGS,
-    "ignore_unknown_options": True,
-    "allow_extra_args": True,
-    "allow_interspersed_args": False,
-}
+
+def normalize_returncode(code: int) -> int:
+    """Convert negative signal return codes to POSIX 128+N convention.
+
+    Python's ``subprocess`` reports signal-killed processes as negative values
+    (e.g., -2 for SIGINT). POSIX convention is 128+N (e.g., 130 for SIGINT).
+
+    Args:
+        code: Raw return code from subprocess.
+
+    Returns:
+        POSIX-conventional exit code.
+    """
+    if code < 0:
+        return 128 + abs(code)
+    return code
 
 
 def get_script_name() -> str:
@@ -78,22 +88,33 @@ def execute_script(
     extra_args: tuple[str, ...],
     *,
     command_prefix: str = "test",
+    override_dir: str = "",
+    package_name: str = "",
 ) -> int:
-    """Execute script with BMK_PROJECT_DIR and BMK_COMMAND_PREFIX environment variables.
+    """Execute script with BMK environment variables.
+
+    Pure function: receives all configuration values as parameters instead
+    of reaching for global state. Callers are responsible for loading config.
 
     Args:
         script_path: Path to the script to execute.
         cwd: Current working directory (set as BMK_PROJECT_DIR env var).
         extra_args: Additional arguments to pass to the script.
         command_prefix: Command prefix for staged scripts (set as BMK_COMMAND_PREFIX env var).
+        override_dir: Override directory path (set as BMK_OVERRIDE_DIR if non-empty).
+        package_name: Package name override (set as BMK_PACKAGE_NAME if non-empty).
 
     Returns:
         Exit code from the script execution.
     """
-    # Set environment variables for the script
     env = os.environ.copy()
     env["BMK_PROJECT_DIR"] = str(cwd)
     env["BMK_COMMAND_PREFIX"] = command_prefix
+
+    if override_dir:
+        env["BMK_OVERRIDE_DIR"] = str(override_dir)
+    if package_name:
+        env["BMK_PACKAGE_NAME"] = str(package_name)
 
     if script_path.suffix == ".ps1":
         cmd = [
@@ -108,7 +129,7 @@ def execute_script(
         cmd = [str(script_path), *extra_args]
 
     result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
-    return result.returncode
+    return normalize_returncode(result.returncode)
 
 
 def _run_test(args: tuple[str, ...]) -> None:
@@ -121,26 +142,28 @@ def _run_test(args: tuple[str, ...]) -> None:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
+    from ._shared import require_script_path
+
     cwd = Path.cwd()
     script_name = get_script_name()
-    script_path = resolve_script_path(script_name, cwd)
+    script_path = require_script_path(script_name, cwd, "Test")
 
-    if script_path is None:
-        click.echo(f"Error: Test script '{script_name}' not found", err=True)
-        click.echo("Searched locations:", err=True)
-        click.echo(f"  - {cwd / 'bmk_makescripts' / script_name}", err=True)
-        bundled = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-        click.echo(f"  - {bundled}", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    bmk_config = get_config().as_dict().get("bmk", {})
 
     logger.debug("Executing test script: %s", script_path)
-    exit_code = execute_script(script_path, cwd, args)
+    exit_code = execute_script(
+        script_path,
+        cwd,
+        args,
+        override_dir=bmk_config.get("override_dir", ""),
+        package_name=bmk_config.get("package_name", ""),
+    )
 
     if exit_code != 0:
         raise SystemExit(exit_code)
 
 
-@click.command("test", context_settings=_PASSTHROUGH_CONTEXT_SETTINGS)
+@click.command("test", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_test(args: tuple[str, ...]) -> None:
     """Run the project test script.
@@ -165,7 +188,7 @@ def cli_test(args: tuple[str, ...]) -> None:
         _run_test(args)
 
 
-@click.command("t", context_settings=_PASSTHROUGH_CONTEXT_SETTINGS)
+@click.command("t", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_t(args: tuple[str, ...]) -> None:
     """Run the project test script (alias for 'test').
@@ -184,4 +207,11 @@ def cli_t(args: tuple[str, ...]) -> None:
         _run_test(args)
 
 
-__all__ = ["cli_t", "cli_test", "execute_script", "get_script_name", "resolve_script_path"]
+__all__ = [
+    "cli_t",
+    "cli_test",
+    "execute_script",
+    "get_script_name",
+    "normalize_returncode",
+    "resolve_script_path",
+]

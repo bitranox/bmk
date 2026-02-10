@@ -52,7 +52,7 @@ jobs:
       - name: Install dev deps
         shell: bash
         run: |
-          uv pip install -e .[dev] --system
+          uv pip install -e . --system
 
       - name: Install Windows Event Log prerequisites
         if: runner.os == 'Windows'

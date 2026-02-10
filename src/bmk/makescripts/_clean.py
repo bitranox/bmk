@@ -19,51 +19,14 @@ import-time usage and standalone execution via command line.
 
 from __future__ import annotations
 
-import importlib.util
 import shutil
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from _toml_config import PyprojectConfig
-
-
-def _load_toml_config_module():
-    """Dynamically import _toml_config from the same directory as this script.
-
-    This allows the script to work both when run standalone from the makescripts
-    directory and when imported for testing from elsewhere.
-
-    The module is registered in sys.modules to ensure dataclasses can resolve
-    type annotations correctly in Python 3.14+.
-    """
-    # Check if already loaded
-    if "_toml_config" in sys.modules:
-        return sys.modules["_toml_config"]
-
-    script_dir = Path(__file__).parent
-    toml_config_path = script_dir / "_toml_config.py"
-
-    spec = importlib.util.spec_from_file_location("_toml_config", toml_config_path)
-    if spec is None or spec.loader is None:
-        msg = f"Could not load _toml_config from {toml_config_path}"
-        raise ImportError(msg)
-
-    module = importlib.util.module_from_spec(spec)
-    # Register in sys.modules BEFORE exec to allow dataclasses to work
-    sys.modules["_toml_config"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_toml_config = _load_toml_config_module()
-
-
-def load_pyproject_config(path: Path) -> PyprojectConfig:
-    """Load pyproject.toml configuration using toml_config module."""
-    return _toml_config.load_pyproject_config(path)
+try:
+    from _loader import load_pyproject_config
+except ModuleNotFoundError:
+    from bmk.makescripts._loader import load_pyproject_config
 
 
 _FALLBACK_PATTERNS: tuple[str, ...] = (
@@ -110,6 +73,24 @@ def get_clean_patterns(pyproject: Path = Path("pyproject.toml")) -> tuple[str, .
     return _FALLBACK_PATTERNS
 
 
+def _is_contained(path: Path, root: Path) -> bool:
+    """Return True if *path* is equal to or inside *root* after resolving symlinks.
+
+    Guards against path-traversal patterns (``../``, symlinks) in user-supplied
+    glob patterns.  Both paths are resolved to absolute, canonical form before
+    comparison.
+
+    >>> _is_contained(Path("/project/.cache"), Path("/project"))
+    True
+    >>> _is_contained(Path("/project/../etc/passwd"), Path("/project"))
+    False
+    """
+    try:
+        return path.resolve().is_relative_to(root.resolve())
+    except ValueError:
+        return False
+
+
 def clean(
     *,
     project_dir: Path | None = None,
@@ -118,6 +99,11 @@ def clean(
     verbose: bool = False,
 ) -> int:
     """Remove cached artefacts and build outputs matching ``patterns``.
+
+    Only paths that resolve to locations **inside** ``project_dir`` are
+    touched.  Patterns containing ``..`` or symlinks pointing outside the
+    project boundary are silently skipped, preventing accidental or
+    malicious deletion of files above the project root.
 
     Args:
         project_dir: Root directory to clean from. Defaults to cwd.
@@ -135,9 +121,18 @@ def clean(
         pyproject = project_dir / "pyproject.toml"
         patterns = get_clean_patterns(pyproject)
 
+    resolved_root = project_dir.resolve()
     removed_count = 0
+    skipped_count = 0
+
     for pattern in patterns:
         for path in project_dir.glob(pattern):
+            if not _is_contained(path, resolved_root):
+                skipped_count += 1
+                if verbose:
+                    print(f"Skipping (outside project): {path}")
+                continue
+
             if dry_run:
                 print(f"[DRY RUN] Would remove: {path}")
                 removed_count += 1
@@ -155,6 +150,8 @@ def clean(
                 except FileNotFoundError:
                     continue
 
+    if skipped_count > 0:
+        print(f"Skipped {skipped_count} paths outside project directory")
     if dry_run:
         print(f"\n[DRY RUN] Would remove {removed_count} items")
     elif verbose or removed_count > 0:

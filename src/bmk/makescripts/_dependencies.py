@@ -22,7 +22,6 @@ additional dependencies.
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import sys
 from dataclasses import dataclass
@@ -32,44 +31,13 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import orjson
 
+try:
+    from _loader import load_pyproject_config
+except ModuleNotFoundError:
+    from bmk.makescripts._loader import load_pyproject_config
+
 if TYPE_CHECKING:
     from _toml_config import PyprojectConfig
-
-
-def _load_toml_config_module():
-    """Dynamically import _toml_config from the same directory as this script.
-
-    This allows the script to work both when run standalone from the makescripts
-    directory and when imported for testing from elsewhere.
-
-    The module is registered in sys.modules to ensure dataclasses can resolve
-    type annotations correctly in Python 3.14+.
-    """
-    # Check if already loaded
-    if "_toml_config" in sys.modules:
-        return sys.modules["_toml_config"]
-
-    script_dir = Path(__file__).parent
-    toml_config_path = script_dir / "_toml_config.py"
-
-    spec = importlib.util.spec_from_file_location("_toml_config", toml_config_path)
-    if spec is None or spec.loader is None:
-        msg = f"Could not load _toml_config from {toml_config_path}"
-        raise ImportError(msg)
-
-    module = importlib.util.module_from_spec(spec)
-    # Register in sys.modules BEFORE exec to allow dataclasses to work
-    sys.modules["_toml_config"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_toml_config = _load_toml_config_module()
-
-
-def load_pyproject_config(path: Path) -> PyprojectConfig:
-    """Load pyproject.toml configuration using toml_config module."""
-    return _toml_config.load_pyproject_config(path)
 
 
 __all__ = [
@@ -599,7 +567,12 @@ def _run_pip_install(needs_install: list[tuple[str, str | None, str]]) -> int:
     pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade"]
 
     if sys.platform.startswith("linux"):
-        pip_cmd.append("--break-system-packages")
+        # Only needed on PEP 668 externally-managed installations
+        marker = Path(sys.prefix) / "EXTERNALLY-MANAGED"
+        if not marker.exists():
+            marker = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "EXTERNALLY-MANAGED"
+        if marker.exists():
+            pip_cmd.append("--break-system-packages")
 
     pip_cmd.extend(f"{name}>={required}" for name, _, required in needs_install)
 

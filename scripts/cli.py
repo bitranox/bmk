@@ -108,7 +108,7 @@ def install_command(dry_run: bool) -> None:
     install_module.install(dry_run=dry_run)
 
 
-@main.command(name="dev", help="Install with development extras: pip install -e .[dev]")
+@main.command(name="dev", help="Install with development extras: pip install -e .")
 @click.option("--dry-run", is_flag=True, help="Print commands only")
 def dev_command(dry_run: bool) -> None:
     dev_module.install_dev(dry_run=dry_run)

@@ -4,8 +4,10 @@ All notable changes to this project will be documented in this file following
 the [Keep a Changelog](https://keepachangelog.com/) format.
 
 
-## [Unreleased]
+## [2.0.0] - 2026-02-10
 
+### Added
+- **initial official release**
 
 ## [1.3.0] - 2026-02-01
 

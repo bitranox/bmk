@@ -118,7 +118,7 @@ def test_cli_dependencies_exits_with_file_not_found_when_script_missing(
     """Exit code is FILE_NOT_FOUND when script doesn't exist."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -138,7 +138,7 @@ def test_cli_dependencies_shows_error_message_when_script_missing(
     """Error message shows searched locations when script not found."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -200,7 +200,7 @@ def test_cli_dependencies_uses_correct_command_prefix(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.dependencies_cmd.execute_script", mock_execute)
@@ -247,7 +247,7 @@ def test_cli_dependencies_propagates_script_exit_code(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -285,7 +285,7 @@ def test_cli_dependencies_returns_success_when_script_succeeds(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -345,7 +345,7 @@ def test_cli_dependencies_aliases_invoke_same_implementation(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.dependencies_cmd.execute_script", mock_execute)
@@ -400,7 +400,7 @@ def test_cli_deps_update_flag_equivalent_to_subcommand(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.dependencies_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.dependencies_cmd.execute_script", mock_execute)

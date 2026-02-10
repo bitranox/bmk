@@ -30,5 +30,5 @@ git push -u "$BMK_GIT_REMOTE" "$BMK_GIT_BRANCH"
 exit_code=$?
 set -e
 
-explain_exit_code $exit_code
-exit $exit_code
+explain_exit_code "$exit_code"
+exit "$exit_code"

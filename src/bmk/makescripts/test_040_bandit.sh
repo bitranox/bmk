@@ -24,5 +24,5 @@ bandit -q -r -c pyproject.toml "src/${BMK_PACKAGE_NAME}"
 exit_code=$?
 set -e
 
-explain_exit_code $exit_code
-exit $exit_code
+explain_exit_code "$exit_code"
+exit "$exit_code"

@@ -60,7 +60,7 @@ else:  # pragma: no cover
         print("[menu-tui] Failed to import Textual components:", file=sys.stderr)
         traceback.print_exc()
         raise SystemExit(
-            "textual is not installed or incompatible in this environment. Install dev extras: pip install -e .[dev]"
+            "textual is not installed or incompatible in this environment. Install dev extras: pip install -e ."
         ) from exc
 
 

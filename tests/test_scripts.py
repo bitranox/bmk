@@ -190,7 +190,7 @@ def test_dev_script_installs_dev_extras(monkeypatch: MonkeyPatch) -> None:
     assert result.exit_code == 0
     first_command = _first_command(recorded)
     assert isinstance(first_command, list)
-    assert first_command == [sys.executable, "-m", "pip", "install", "-e", ".[dev]"]
+    assert first_command == [sys.executable, "-m", "pip", "install", "-e", "."]
 
 
 @pytest.mark.local_only

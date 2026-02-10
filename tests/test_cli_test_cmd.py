@@ -180,7 +180,7 @@ def test_cli_test_exits_with_file_not_found_when_script_missing(
     """Exit code is FILE_NOT_FOUND when script doesn't exist."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -199,7 +199,7 @@ def test_cli_test_shows_error_message_when_script_missing(
     """Error message shows searched locations when script not found."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -220,7 +220,7 @@ def test_cli_test_passes_cwd_as_first_argument(
     """Current working directory is passed as first argument to script."""
     captured_args: list[tuple[Path, Path, tuple[str, ...]]] = []
 
-    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
         captured_args.append((script_path, cwd, extra_args))
         return 0
 
@@ -232,7 +232,7 @@ def test_cli_test_passes_cwd_as_first_argument(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
@@ -253,7 +253,7 @@ def test_cli_test_passes_extra_arguments(
     """Extra CLI arguments are passed through to the script."""
     captured_args: list[tuple[Path, Path, tuple[str, ...]]] = []
 
-    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
         captured_args.append((script_path, cwd, extra_args))
         return 0
 
@@ -265,7 +265,7 @@ def test_cli_test_passes_extra_arguments(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
@@ -290,12 +290,12 @@ def test_cli_test_propagates_script_exit_code(
     def mock_resolve(script_name: str, cwd: Path) -> Path:
         return script_path
 
-    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
         return 42
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -318,7 +318,7 @@ def test_cli_t_behaves_same_as_test(
     """The 't' alias invokes the same underlying implementation."""
     captured_args: list[tuple[Path, Path, tuple[str, ...]]] = []
 
-    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...]) -> int:
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
         captured_args.append((script_path, cwd, extra_args))
         return 0
 
@@ -330,7 +330,7 @@ def test_cli_t_behaves_same_as_test(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)

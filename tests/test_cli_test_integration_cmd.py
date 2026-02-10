@@ -64,7 +64,7 @@ def test_cli_testintegration_exits_with_file_not_found_when_script_missing(
     """Exit code is FILE_NOT_FOUND when script doesn't exist."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -83,7 +83,7 @@ def test_cli_testintegration_shows_error_message_when_script_missing(
     """Error message shows searched locations when script not found."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -122,7 +122,7 @@ def test_cli_testintegration_uses_test_integration_command_prefix(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -164,7 +164,7 @@ def test_cli_testintegration_passes_extra_arguments(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -207,7 +207,7 @@ def test_cli_testintegration_propagates_script_exit_code(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -248,7 +248,7 @@ def test_cli_testi_behaves_same_as_testintegration(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -291,7 +291,7 @@ def test_cli_ti_behaves_same_as_testintegration(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_integration_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(

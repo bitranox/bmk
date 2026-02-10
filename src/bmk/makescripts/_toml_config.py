@@ -6,6 +6,7 @@ dict-based access patterns and their associated type issues.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -417,7 +418,9 @@ class PyprojectConfig:
         try:
             data: dict[str, Any] = rtoml.loads(path.read_text(encoding="utf-8"))
             return cls.from_dict(data)
-        except (rtoml.TomlParsingError, OSError, ValueError):
+        except (rtoml.TomlParsingError, OSError, ValueError) as exc:
+            if path.exists():
+                print(f"Warning: Failed to parse {path}: {exc}", file=sys.stderr)
             return cls()
 
 

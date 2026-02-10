@@ -8,6 +8,10 @@
 #
 # Optional environment variables:
 #   BMK_STAGES_DIR     - Directory containing stage scripts (default: directory of this script)
+#   BMK_OVERRIDE_DIR   - Per-project override directory for stage scripts
+#                        (default: $BMK_PROJECT_DIR/makescripts)
+#                        If scripts matching the command prefix exist here,
+#                        they replace the bundled scripts entirely for that command.
 #
 # This script coordinates execution in STAGED PARALLEL BATCHES:
 # - Stage 01: Run all {prefix}_01_*.sh in parallel, wait for all to complete
@@ -20,9 +24,10 @@
 set -Eeu -o pipefail
 IFS=$'\n\t'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Configuration
-# ═══════════════════════════════════════════════════════════════════════════════
+if ((BASH_VERSINFO[0] < 4)); then
+    printf 'Error: bash 4+ required (found %s)\n' "$BASH_VERSION" >&2
+    exit 1
+fi
 
 : "${BMK_PROJECT_DIR:?BMK_PROJECT_DIR environment variable must be set}"
 : "${BMK_COMMAND_PREFIX:?BMK_COMMAND_PREFIX environment variable must be set}"
@@ -32,31 +37,36 @@ export BMK_PROJECT_DIR BMK_COMMAND_PREFIX
 BMK_STAGES_DIR="${BMK_STAGES_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export BMK_STAGES_DIR
 
+# Per-project override directory (checked before bundled stages)
+BMK_OVERRIDE_DIR="${BMK_OVERRIDE_DIR:-${BMK_PROJECT_DIR}/makescripts}"
+export BMK_OVERRIDE_DIR
+
 TEMP_DIR=""
 TOTAL_SCRIPTS=0
 SCRIPT_ARGS=()  # Arguments to forward to child scripts
+FAILED_SCRIPTS=()  # Track failed script names across stages
 
 # ANSI color codes
 COLOR_GREEN='\033[32m'
 COLOR_RED='\033[31m'
 COLOR_RESET='\033[0m'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Helper Functions
-# ═══════════════════════════════════════════════════════════════════════════════
-
 die() {
     printf 'Error: %s\n' "$1" >&2
     exit 1
 }
 
-explain_exit_code() {
-    local code=$1
-    case $code in
-        0) ;;
-        1) printf 'Exit code 1: One or more stages failed\n' >&2 ;;
-        *) printf 'Exit code %d: unknown\n' "$code" >&2 ;;
-    esac
+resolve_stages_dir() {
+    # If the override directory contains scripts matching the command prefix,
+    # use it exclusively instead of the bundled stages directory.
+    local -a override_scripts
+    override_scripts=("${BMK_OVERRIDE_DIR}/${BMK_COMMAND_PREFIX}_"[0-9]*_*.sh)
+
+    # Check if the glob expanded to at least one real file
+    if [[ -f "${override_scripts[0]:-}" ]]; then
+        BMK_STAGES_DIR="$BMK_OVERRIDE_DIR"
+        export BMK_STAGES_DIR
+    fi
 }
 
 derive_package_name() {
@@ -119,6 +129,17 @@ sys.exit(1)
 setup_temp_dir() {
     TEMP_DIR=$(mktemp -d)
     trap 'rm -rf "$TEMP_DIR"' EXIT
+    trap 'cleanup_on_signal 2' INT
+    trap 'cleanup_on_signal 15' TERM
+}
+
+cleanup_on_signal() {
+    local sig="$1"
+    # Kill background jobs spawned by parallel stages
+    kill 0 2>/dev/null || true
+    wait 2>/dev/null || true
+    # Temp dir cleanup handled by EXIT trap
+    exit "$((128 + sig))"
 }
 
 extract_stage_number() {
@@ -126,7 +147,10 @@ extract_stage_number() {
     # Pattern: {prefix}_N+_*.sh where N+ is 2-6 digits, returned as integer
     local script_name="$1"
     local stage
-    stage=$(printf '%s\n' "$script_name" | sed -n "s/^${BMK_COMMAND_PREFIX}_\\([0-9]\\{2,6\\}\\)_.*\\.sh\$/\\1/p")
+    # Escape sed regex metacharacters in the prefix for safe interpolation
+    local safe_prefix
+    safe_prefix=$(printf '%s' "$BMK_COMMAND_PREFIX" | sed 's/[.[\/*^$\\]/\\&/g')
+    stage=$(printf '%s\n' "$script_name" | sed -n "s/^${safe_prefix}_\\([0-9]\\{2,6\\}\\)_.*\\.sh\$/\\1/p")
     # Remove leading zeros to get integer value
     [[ -n "$stage" ]] && printf '%d\n' "$((10#$stage))"
 }
@@ -153,17 +177,6 @@ gather_scripts_for_stage() {
     done
 }
 
-print_header() {
-    local title="$1"
-    printf '═══════════════════════════════════════════════════════════════════════════════\n'
-    printf '%s\n' "$title"
-    printf '═══════════════════════════════════════════════════════════════════════════════\n'
-}
-
-print_separator() {
-    printf '───────────────────────────────────────────────────────────────────────────────\n'
-}
-
 run_single_script() {
     # Runs a single script with output directly to console
     local stage="$1"
@@ -174,22 +187,16 @@ run_single_script() {
 
     TOTAL_SCRIPTS=$((TOTAL_SCRIPTS + 1))
 
-    printf '\n'
-    print_header "${BMK_COMMAND_PREFIX^^} STAGE $stage: $script_name"
-    printf '\n'
-
     # Run script directly, output goes to console
     "$script" "${SCRIPT_ARGS[@]}"
     exit_code=$?
 
-    printf '\n'
-
     if [[ "$exit_code" -eq 0 ]]; then
-        printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n\n" "$script_name"
+        printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
         return 0
     else
-        printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n\n" "$script_name" "$exit_code"
-        return 1
+        FAILED_SCRIPTS+=("${script_name}:${exit_code}")
+        return "$exit_code"
     fi
 }
 
@@ -218,10 +225,6 @@ run_stage_parallel() {
 
     TOTAL_SCRIPTS=$((TOTAL_SCRIPTS + ${#scripts[@]}))
 
-    printf '\n'
-    print_header "${BMK_COMMAND_PREFIX^^} STAGE $stage (${#scripts[@]} scripts in parallel)"
-    printf '\n'
-
     # Start all scripts in parallel
     for script in "${scripts[@]}"; do
         script_name="$(basename "$script")"
@@ -244,6 +247,7 @@ run_stage_parallel() {
         exit_file="$TEMP_DIR/${script_name}.exit"
         if [[ -f "$exit_file" ]]; then
             exit_code=$(cat "$exit_file")
+            exit_code="${exit_code:-1}"
         else
             exit_code=1
         fi
@@ -259,20 +263,16 @@ run_stage_parallel() {
         fi
     done
 
-    printf '\n'
-
     # Print output of failed scripts
     if [[ ${#failed[@]} -gt 0 ]]; then
-        printf "${COLOR_RED}"
-        print_header "FAILED ${BMK_COMMAND_PREFIX^^} OUTPUT (Stage $stage)"
-        printf "${COLOR_RESET}"
-
+        local first_failure_code=""
         for script_name in "${failed[@]}"; do
+            local ecode="${exit_codes[$script_name]}"
+            FAILED_SCRIPTS+=("${script_name}:${ecode}")
+            [[ -z "$first_failure_code" ]] && first_failure_code="$ecode"
             output_file="$TEMP_DIR/${script_name}.out"
             printf '\n'
-            print_separator
-            printf "${COLOR_RED}[%s] (exit code: %s)${COLOR_RESET}\n" "$script_name" "${exit_codes[$script_name]}"
-            print_separator
+            printf "${COLOR_RED}[%s] (exit code: %s)${COLOR_RESET}\n" "$script_name" "$ecode"
             if [[ -f "$output_file" ]]; then
                 cat "$output_file"
             else
@@ -280,23 +280,15 @@ run_stage_parallel() {
             fi
         done
         printf '\n'
-        return 1
+        return "${first_failure_code:-1}"
     fi
 
     return 0
 }
 
-print_no_scripts_message() {
-    print_header "NO SCRIPTS FOUND FOR '${BMK_COMMAND_PREFIX}'"
-    printf 'Create %s_NN_*.sh scripts where NN is a two-digit stage number.\n' "$BMK_COMMAND_PREFIX"
-    printf 'Example: %s_01_step1.sh, %s_01_step2.sh, %s_02_final.sh\n' "$BMK_COMMAND_PREFIX" "$BMK_COMMAND_PREFIX" "$BMK_COMMAND_PREFIX"
-    printf '\n'
-    printf 'Scripts within the same stage run in parallel.\n'
-    printf 'Stages run sequentially (stage 02 waits for stage 01 to complete).\n'
-}
-
 run() {
     cd "$BMK_PROJECT_DIR" || die "Cannot change to directory '$BMK_PROJECT_DIR'"
+    resolve_stages_dir
     derive_package_name
     setup_temp_dir
 
@@ -306,30 +298,24 @@ run() {
     done < <(discover_stages)
 
     if [[ ${#stages[@]} -eq 0 ]]; then
-        print_no_scripts_message
+        printf 'No scripts found for %s. ' "$BMK_COMMAND_PREFIX"
+        printf 'Create %s_NN_*.sh scripts where NN is a two-digit stage number.\n' "$BMK_COMMAND_PREFIX"
         exit 0
     fi
 
     # Run each stage sequentially; within each stage, scripts run in parallel
     for stage in "${stages[@]}"; do
         if ! run_stage_parallel "$stage"; then
-            printf "${COLOR_RED}"
-            print_header "STOPPED: ${BMK_COMMAND_PREFIX^^} stage $stage failed"
-            printf "${COLOR_RESET}"
-            explain_exit_code 1
-            exit 1
+            local first_code="${FAILED_SCRIPTS[0]#*:}"
+            for entry in "${FAILED_SCRIPTS[@]}"; do
+                local sname="${entry%%:*}"
+                local scode="${entry#*:}"
+                printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$sname" "$scode"
+            done
+            exit "${first_code:-1}"
         fi
     done
-
-    # Summary
-    printf "${COLOR_GREEN}"
-    print_header "ALL ${BMK_COMMAND_PREFIX^^} SCRIPTS PASSED ($TOTAL_SCRIPTS scripts)"
-    printf "${COLOR_RESET}"
 }
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Entry Point
-# ═══════════════════════════════════════════════════════════════════════════════
 
 SCRIPT_ARGS=("$@")
 run

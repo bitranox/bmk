@@ -232,7 +232,7 @@ def _prompt_and_install_dependencies(total_issues: int) -> None:
             the hint message).
     """
     if os.getenv("CI") or not sys.stdin.isatty():
-        click.echo(f"[dependencies] {total_issues} package(s) need updating. Run 'pip install -e .[dev]' to fix.")
+        click.echo(f"[dependencies] {total_issues} package(s) need updating. Run 'pip install -e .' to fix.")
         return
 
     try:
@@ -248,7 +248,7 @@ def _prompt_and_install_dependencies(total_issues: int) -> None:
 
     if response.lower() == "y":
         click.echo("\n[dependencies] Installing/updating packages...")
-        install_cmd = [sys.executable, "-m", "pip", "install", "-e", ".[dev]"]
+        install_cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
         if sys.platform.startswith("linux"):
             install_cmd.insert(4, "--break-system-packages")
         result = run(install_cmd, check=False, capture=False)
@@ -257,7 +257,7 @@ def _prompt_and_install_dependencies(total_issues: int) -> None:
         else:
             click.echo(f"[dependencies] Package installation failed (exit code {result.code})", err=True)
     else:
-        click.echo("[dependencies] Install skipped. Run 'pip install -e .[dev]' to update packages.")
+        click.echo("[dependencies] Install skipped. Run 'pip install -e .' to update packages.")
 
 
 def _check_installed_dependencies() -> None:

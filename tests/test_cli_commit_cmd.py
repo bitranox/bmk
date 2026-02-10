@@ -52,7 +52,7 @@ def test_cli_commit_exits_with_file_not_found_when_script_missing(
     """Exit code is FILE_NOT_FOUND when script doesn't exist."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.commit_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -71,7 +71,7 @@ def test_cli_commit_shows_error_message_when_script_missing(
     """Error message shows searched locations when script not found."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.commit_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         _mock_resolve_none,
     )
 
@@ -104,7 +104,7 @@ def test_cli_commit_passes_message_arguments(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.commit_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.commit_cmd.execute_script", mock_execute)
@@ -138,7 +138,7 @@ def test_cli_commit_uses_commit_prefix(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.commit_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.commit_cmd.execute_script", mock_execute)
@@ -167,7 +167,7 @@ def test_cli_commit_propagates_script_exit_code(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.commit_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr(
@@ -202,7 +202,7 @@ def test_cli_c_behaves_same_as_commit(
 
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.commit_cmd.resolve_script_path",
+        "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
     monkeypatch.setattr("bmk.adapters.cli.commands.commit_cmd.execute_script", mock_execute)

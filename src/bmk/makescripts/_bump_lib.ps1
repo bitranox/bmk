@@ -14,6 +14,24 @@ function Initialize-Bump {
     Set-Location $env:BMK_PROJECT_DIR
 }
 
+function Explain-BumpExitCode {
+    <#
+    .SYNOPSIS
+        Print human-readable explanation for bump exit codes.
+    .PARAMETER Code
+        The exit code to explain.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [int]$Code
+    )
+    switch ($Code) {
+        0 { }
+        1 { Write-Error "Exit code 1: Version bump failed" }
+        default { Write-Error "Exit code ${Code}: unknown" }
+    }
+}
+
 function Invoke-Bump {
     <#
     .SYNOPSIS
@@ -34,17 +52,9 @@ function Invoke-Bump {
 
     Write-Host "Bumping $BumpType version..."
 
-    try {
-        python3 "$ScriptDir\_bump_version.py" $BumpType --project-dir $env:BMK_PROJECT_DIR
-        $exitCode = $LASTEXITCODE
-    }
-    catch {
-        Write-Error "Version bump failed: $_"
-        exit 1
-    }
+    python3 "$ScriptDir\_bump_version.py" $BumpType --project-dir $env:BMK_PROJECT_DIR
+    $exitCode = $LASTEXITCODE
 
-    if ($exitCode -ne 0) {
-        Write-Error "Version bump failed with exit code $exitCode"
-    }
+    Explain-BumpExitCode $exitCode
     exit $exitCode
 }

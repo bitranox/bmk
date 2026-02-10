@@ -26,7 +26,7 @@ Thanks for helping improve **bmk**. The sections below summarise the day-to-day 
 ## 4. Tests & Tooling
 
 - `make test` runs Ruff (lint + format check), Pyright, and Pytest with coverage. Coverage is `on` by default; override with `COVERAGE=off` if you explicitly need a no-coverage run.
-- The harness auto-installs dev tools with `pip install -e .[dev]` when Ruff, Pyright, or Pytest are missing. Skip this by exporting `SKIP_BOOTSTRAP=1`.
+- The harness auto-installs dev tools with `pip install -e .` when Ruff, Pyright, or Pytest are missing. Skip this by exporting `SKIP_BOOTSTRAP=1`.
 - Codecov uploads require a commit (provided by the automatic commit described above). For private repositories set `CODECOV_TOKEN` in your environment or `.env`.
 - Tests follow a narrative style: prefer names like `test_when_<condition>_<outcome>()`, keep each case laser-focused, and mark OS constraints with the provided markers (`@pytest.mark.os_agnostic`, `@pytest.mark.os_windows`, etc.).
 - Whenever you add a CLI behaviour or change metadata fallbacks, update the relevant story in `tests/test_cli.py` or `tests/test_metadata.py` so the specification remains complete.
