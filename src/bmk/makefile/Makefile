@@ -1,6 +1,6 @@
 # BMK MAKEFILE 1.0.0
-# do not alter this file - it will be updated on new versions of BMK
-# if You want to alter it, remove the first line # BMK MAKEFILE 1.0.0 - then it is a custom makefile and will not be overwritten
+# do not alter this file - it might be overwritten on new versions of BMK
+# if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx
 #
 # Usage:
@@ -42,8 +42,9 @@ _BMK_TARGETS := test t testintegration testi ti codecov coverage cov \
 ifneq (,$(filter $(_BMK_TARGETS),$(firstword $(MAKECMDGOALS))))
   # Capture everything after the first word as extra arguments
   _EXTRA := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-  # Turn extra words into no-op targets so make doesn't complain
-  $(eval $(_EXTRA):;@:)
+  # Turn extra words into no-op targets so make doesn't complain,
+  # but skip words that are already real targets (avoids recipe override warnings)
+  $(foreach w,$(_EXTRA),$(if $(filter $(w),$(_BMK_TARGETS)),,$(eval $(w):;@:)))
   # Append to ARGS (so explicit ARGS="..." still works alongside)
   override ARGS += $(_EXTRA)
 endif

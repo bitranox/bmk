@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.3] 2026-02-10 22:56:06
+
+### Added
+- **Auto-sync `__init__conf__.py` version from `pyproject.toml`**: new `_sync_initconf.py` makescript patches the `version` line after every bump and before every commit, preventing version mismatch test failures
+- Stage scripts `bump_{patch,minor,major}_020_sync_initconf.{sh,ps1}` run sync immediately after version bumps
+- Stage script `commit_005_sync_initconf.{sh,ps1}` runs sync as a safety net before every commit
+
+### Fixed
+- **Makefile recipe override warning**: `make push test parameters` no longer warns about overriding the `test` target recipe — extra arguments that collide with existing target names are now skipped in the no-op eval
+
 ## [2.0.2] 2026-02-10 22:35:34
 
 ### Fixed
