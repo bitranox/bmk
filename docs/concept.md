@@ -48,11 +48,14 @@ use a small standalon python script who does the heavvy lifting and is called by
 adopt _release.py and refractor it to your needs.
 
 
-r / run --> run.sh
+create a new command, same pattern as our other commands, command : run  --> 
+run_010_run.sh
+use a small standalon python script who does the heavvy lifting and is called by that shellscripts:
+adopt _run.py and refractor it to your needs.
+
 
 
 m / mnu / menue
-
 
 
 

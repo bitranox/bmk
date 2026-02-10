@@ -16,6 +16,8 @@ Contents:
     * Dependencies commands from :mod:`.dependencies_cmd`
     * Clean commands from :mod:`.clean_cmd`
     * Coverage commands from :mod:`.cov_cmd`
+    * Release commands from :mod:`.release_cmd`
+    * Run commands from :mod:`.run_cmd`
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ from .email import cli_send_email, cli_send_notification
 from .info import cli_fail, cli_hello, cli_info
 from .logging import cli_logdemo
 from .push_cmd import cli_psh, cli_push, cli_push_p
+from .release_cmd import cli_r, cli_rel, cli_release
+from .run_cmd import cli_run
 from .test_cmd import cli_t, cli_test
 from .test_integration_cmd import cli_testi, cli_testintegration, cli_ti
 
@@ -61,6 +65,10 @@ __all__ = [
     "cli_psh",
     "cli_push",
     "cli_push_p",
+    "cli_r",
+    "cli_rel",
+    "cli_release",
+    "cli_run",
     "cli_send_email",
     "cli_send_notification",
     "cli_t",
