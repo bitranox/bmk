@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file following
 the [Keep a Changelog](https://keepachangelog.com/) format.
 
 
+## [Unreleased]
+
+## [2.0.2] 2026-02-10 22:35:34
+
+### Fixed
+- **Stagerunner parallel output**: announce tasks upfront (`▶ running N tasks in parallel: ...`) and print all results together after completion instead of trickling one-by-one in arbitrary order
+- **Makescript Python scripts reject unknown arguments**: changed `parse_args()` to `parse_known_args()` in all 5 makescript entry points so forwarded pipeline arguments (e.g. commit messages from `bmk push`) no longer cause errors
+- **pip-audit false positives**: added `CVE-2025-8869` (pip) and `PYSEC-2022-42969` (py) to ignore-vulns
+
+## [2.0.1] - 2026-02-10
+
+### Removed
+- Unnecessary transitive CVE pins: `wheel`, `python-multipart`, `pynacl`, `virtualenv` (not in bmk's dependency tree)
+
 ## [2.0.0] - 2026-02-10
 
 ### Added

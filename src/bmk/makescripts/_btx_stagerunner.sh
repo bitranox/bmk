@@ -225,6 +225,21 @@ run_stage_parallel() {
 
     TOTAL_SCRIPTS=$((TOTAL_SCRIPTS + ${#scripts[@]}))
 
+    # Build ordered name list and announce parallel execution
+    local -a script_names=()
+    local -a friendly_names=()
+    local friendly joined
+    for script in "${scripts[@]}"; do
+        script_name="$(basename "$script")"
+        script_names+=("$script_name")
+        friendly="${script_name#${BMK_COMMAND_PREFIX}_}"
+        friendly="${friendly#[0-9]*_}"
+        friendly="${friendly%.sh}"
+        friendly_names+=("$friendly")
+    done
+    joined=$(IFS=', '; printf '%s' "${friendly_names[*]}")
+    printf '  ▶ running %d tasks in parallel: %s\n' "${#scripts[@]}" "$joined"
+
     # Start all scripts in parallel
     for script in "${scripts[@]}"; do
         script_name="$(basename "$script")"
@@ -239,8 +254,8 @@ run_stage_parallel() {
         pids[$script_name]=$!
     done
 
-    # Wait and collect results
-    for script_name in "${!pids[@]}"; do
+    # Wait for ALL jobs to complete before printing results
+    for script_name in "${script_names[@]}"; do
         pid="${pids[$script_name]}"
         wait "$pid" 2> /dev/null || true
 
@@ -256,9 +271,17 @@ run_stage_parallel() {
 
         if [[ "$exit_code" -eq 0 ]]; then
             passed+=("$script_name")
-            printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
         else
             failed+=("$script_name")
+        fi
+    done
+
+    # Print all results together
+    for script_name in "${script_names[@]}"; do
+        exit_code="${exit_codes[$script_name]}"
+        if [[ "$exit_code" -eq 0 ]]; then
+            printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
+        else
             printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$script_name" "$exit_code"
         fi
     done

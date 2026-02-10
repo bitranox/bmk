@@ -745,6 +745,6 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument(
         "--project-dir", type=Path, default=Path.cwd(), help="Project directory containing pyproject.toml"
     )
-    args = parser.parse_args()
+    args, _unknown = parser.parse_known_args()
     pyproject = args.project_dir / "pyproject.toml"
     sys.exit(main(verbose=args.verbose, update=args.update, dry_run=args.dry_run, pyproject=pyproject))

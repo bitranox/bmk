@@ -229,5 +229,5 @@ if __name__ == "__main__":  # pragma: no cover
         default=None,
         help="Git remote name (default: auto-detect from pyproject.toml or 'origin')",
     )
-    args = parser.parse_args()
+    args, _unknown = parser.parse_known_args()
     sys.exit(main(project_dir=args.project_dir, remote=args.remote))

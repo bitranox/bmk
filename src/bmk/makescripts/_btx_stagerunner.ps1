@@ -203,6 +203,17 @@ function Invoke-StageParallel {
 
     $script:TotalScripts += $scripts.Count
 
+    # Build ordered name list and announce parallel execution
+    $scriptNames = [System.Collections.Generic.List[string]]::new()
+    $friendlyNames = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in $scripts) {
+        $scriptNames.Add($s.Name)
+        $friendly = $s.Name -replace "^$([regex]::Escape($env:BMK_COMMAND_PREFIX))_\d+_", "" -replace "\.ps1$", ""
+        $friendlyNames.Add($friendly)
+    }
+    $joined = $friendlyNames -join ', '
+    Write-Host "  $([char]0x25B6) running $($scripts.Count) tasks in parallel: $joined"
+
     # Start all scripts as PowerShell jobs
     $jobs = @{}
     foreach ($s in $scripts) {
@@ -219,23 +230,21 @@ function Invoke-StageParallel {
         $jobs[$scriptName] = $job
     }
 
-    # Wait for all jobs and collect results
+    # Wait for ALL jobs to complete before printing results
+    $exitCodes = @{}
     $failed = [System.Collections.Generic.List[string]]::new()
     $failedOutput = @{}
     $firstFailureCode = $null
 
-    foreach ($scriptName in $jobs.Keys) {
+    foreach ($scriptName in $scriptNames) {
         $job = $jobs[$scriptName]
         $null = Wait-Job $job
         $exitCode = $job.ChildJobs[0].ExitCode
         if ($null -eq $exitCode) { $exitCode = if ($job.State -eq 'Failed') { 1 } else { 0 } }
         $output = Receive-Job $job 2>&1
+        $exitCodes[$scriptName] = $exitCode
 
-        if ($exitCode -eq 0) {
-            Write-Host "${ColorGreen}  $([char]0x2713) $scriptName${ColorReset}"
-        }
-        else {
-            Write-Host "${ColorRed}  $([char]0x2717) $scriptName (exit code: $exitCode)${ColorReset}"
+        if ($exitCode -ne 0) {
             $failed.Add($scriptName)
             $failedOutput[$scriptName] = $output
             $script:FailedScripts.Add("${scriptName}:${exitCode}")
@@ -243,6 +252,17 @@ function Invoke-StageParallel {
         }
 
         Remove-Job $job -Force
+    }
+
+    # Print all results together
+    foreach ($scriptName in $scriptNames) {
+        $exitCode = $exitCodes[$scriptName]
+        if ($exitCode -eq 0) {
+            Write-Host "${ColorGreen}  $([char]0x2713) $scriptName${ColorReset}"
+        }
+        else {
+            Write-Host "${ColorRed}  $([char]0x2717) $scriptName (exit code: $exitCode)${ColorReset}"
+        }
     }
 
     # Print output of failed scripts

@@ -722,7 +722,7 @@ Examples:
         action="store_true",
         help="Enable verbose output",
     )
-    args = parser.parse_args()
+    args, _unknown = parser.parse_known_args()
     sys.exit(
         main(
             project_dir=args.project_dir,

@@ -204,5 +204,5 @@ if __name__ == "__main__":  # pragma: no cover
         action="store_true",
         help="List each file/directory being deleted",
     )
-    args = parser.parse_args()
+    args, _unknown = parser.parse_known_args()
     sys.exit(main(project_dir=args.project_dir, dry_run=args.dry_run, verbose=args.verbose))

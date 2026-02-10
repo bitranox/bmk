@@ -211,7 +211,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Bump version in pyproject.toml and CHANGELOG.md")
     parser.add_argument("part", choices=["major", "minor", "patch"], help="Version part to bump")
     parser.add_argument("--project-dir", type=Path, default=Path.cwd(), help="Project directory")
-    args = parser.parse_args()
+    args, _unknown = parser.parse_known_args()
 
     try:
         # Read current version using toml_config
