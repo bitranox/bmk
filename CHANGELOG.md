@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.4] 2026-02-10 23:12:40
+
+### Fixed
+- **Duplicate log messages in stage wrapper scripts**: removed redundant printf/Write-Host from 8 delegator scripts (.sh + .ps1 pairs) that re-announced what the inner pipeline already prints (`push_030_clean`, `bld_010_clean`, `push_020_build`, `push_010_update_deps`, `test_010_update_deps`, `test_050_clean`, `push_020_test`, `push_040_commit`)
+
 ## [2.0.3] 2026-02-10 22:56:06
 
 ### Added

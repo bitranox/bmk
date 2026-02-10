@@ -10,8 +10,6 @@ if (-not $env:BMK_STAGES_DIR) {
     throw "BMK_STAGES_DIR environment variable must be set"
 }
 
-Write-Host "Updating outdated dependencies..."
-
 $env:BMK_COMMAND_PREFIX = "deps_update"
 & "$env:BMK_STAGES_DIR\_btx_stagerunner.ps1" @args
 exit $LASTEXITCODE
