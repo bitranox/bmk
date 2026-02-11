@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.12] 2026-02-11 12:54:51
+
+### Fixed
+- **Makefile argument forwarding**: trailing words matching real target names (e.g. `make push codecov fix`) no longer execute those targets as separate commands; replaced `$(eval)` no-ops (overridden by later target definitions) with a regular rule block at end of Makefile using GNU Make's "last rule wins" behavior
+
 ## [2.0.11] 2026-02-11 12:47:59
 
 ### Changed

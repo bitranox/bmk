@@ -1,4 +1,4 @@
-# BMK MAKEFILE 2.0.11
+# BMK MAKEFILE 2.0.12
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx
@@ -42,9 +42,6 @@ _BMK_TARGETS := test t testintegration testi ti codecov coverage cov \
 ifneq (,$(filter $(_BMK_TARGETS),$(firstword $(MAKECMDGOALS))))
   # Capture everything after the first word as extra arguments
   _EXTRA := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-  # Turn extra words into no-op targets so make doesn't complain,
-  # but skip words that are already real targets (avoids recipe override warnings)
-  $(foreach w,$(_EXTRA),$(if $(filter $(w),$(_BMK_TARGETS)),,$(eval $(w):;@:)))
   # Append to ARGS (so explicit ARGS="..." still works alongside)
   override ARGS += $(_EXTRA)
 endif
@@ -218,3 +215,15 @@ help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}' | \
 		sort
+
+# ──────────────────────────────────────────────────────────────
+# No-op overrides for trailing argument words (MUST be last)
+# ──────────────────────────────────────────────────────────────
+# Placed after all real target definitions so the no-op recipes
+# override them.  This prevents "make push codecov fix" from
+# executing the real codecov target — "codecov" is an argument
+# to push, not a separate command.
+ifneq (,$(_EXTRA))
+$(_EXTRA):
+	@:
+endif
