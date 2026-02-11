@@ -86,9 +86,11 @@ derive_package_name() {
         die "pyproject.toml not found in ${BMK_PROJECT_DIR}"
     fi
 
-    # Prefer python3, fall back to python (e.g. Windows Git Bash)
+    # Prefer BMK_PYTHON_CMD from parent process, then python3, then python
     local python_cmd
-    if command -v python3 &>/dev/null; then
+    if [[ -n "${BMK_PYTHON_CMD:-}" ]] && command -v "$BMK_PYTHON_CMD" &>/dev/null; then
+        python_cmd="$BMK_PYTHON_CMD"
+    elif command -v python3 &>/dev/null; then
         python_cmd="python3"
     elif command -v python &>/dev/null; then
         python_cmd="python"

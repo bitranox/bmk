@@ -11,6 +11,9 @@ if (-not $env:BMK_STAGES_DIR) {
 }
 
 Write-Host "test_010_update_deps -> deps_update pipeline"
+$savedPrefix = $env:BMK_COMMAND_PREFIX
 $env:BMK_COMMAND_PREFIX = "deps_update"
 & "$env:BMK_STAGES_DIR\_btx_stagerunner.ps1" @args
-exit $LASTEXITCODE
+$stageExitCode = $LASTEXITCODE
+$env:BMK_COMMAND_PREFIX = $savedPrefix
+exit $stageExitCode

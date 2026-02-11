@@ -50,11 +50,12 @@ $script:TotalScripts = 0
 $script:ScriptArgs = $args
 $script:FailedScripts = [System.Collections.Generic.List[string]]::new()
 
-# ANSI color codes
-$ColorGreen = "`e[32m"
-$ColorRed = "`e[31m"
-$ColorYellow = "`e[33m"
-$ColorReset = "`e[0m"
+# ANSI color codes — use [char]0x1B instead of `e for Windows PowerShell 5.1 compat
+$ESC = [char]0x1B
+$ColorGreen = "${ESC}[32m"
+$ColorRed = "${ESC}[31m"
+$ColorYellow = "${ESC}[33m"
+$ColorReset = "${ESC}[0m"
 
 # ---------------------------------------------------------------------------
 # Functions
@@ -127,9 +128,33 @@ if name:
 sys.exit(1)
 '@
 
-    # Use 'python' on Windows (python3 is not available); fall back to python3 elsewhere
-    $pythonCmd = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { Write-Die "Neither 'python' nor 'python3' found in PATH"; return }
-    $result = & $pythonCmd -c $pythonCode $pyprojectPath 2>&1
+    # Resolve Python interpreter — prefer BMK_PYTHON_CMD from parent process
+    $pythonCmd = $null
+    if ($env:BMK_PYTHON_CMD -and (Test-Path $env:BMK_PYTHON_CMD)) {
+        $pythonCmd = $env:BMK_PYTHON_CMD
+    }
+    else {
+        # Skip Windows Store stub by path
+        foreach ($candidate in @("python", "python3")) {
+            $cmds = @(Get-Command $candidate -All -ErrorAction SilentlyContinue)
+            foreach ($cmd in $cmds) {
+                if ($cmd.Source -match '\\Microsoft\\WindowsApps\\') { continue }
+                $pythonCmd = $cmd.Source
+                break
+            }
+            if ($pythonCmd) { break }
+        }
+    }
+    if (-not $pythonCmd) { Write-Die "Neither 'python' nor 'python3' found in PATH" }
+    # Write code to temp file — python -c on Windows mangles multiline strings
+    $tempScript = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.py'
+    try {
+        [System.IO.File]::WriteAllText($tempScript, $pythonCode)
+        $result = & $pythonCmd $tempScript $pyprojectPath 2>&1
+    }
+    finally {
+        Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Die "Failed to derive package name from pyproject.toml"
     }
@@ -182,8 +207,14 @@ function Invoke-SingleScript {
 
     $script:TotalScripts++
 
-    & $Script.FullName @script:ScriptArgs
+    # Capture stdout so it does not leak into this function's return value
+    # (PowerShell returns ALL output-stream objects, not just the explicit
+    # 'return' value).  Display captured output via Write-Host afterwards.
+    $scriptOutput = & $Script.FullName @script:ScriptArgs 2>&1
     $exitCode = $LASTEXITCODE
+    if ($scriptOutput) {
+        $scriptOutput | ForEach-Object { Write-Host $_ }
+    }
 
     if ($exitCode -eq 0) {
         Write-Host "${ColorGreen}  $([char]0x2713) $($Script.Name)${ColorReset}"
@@ -263,8 +294,15 @@ function Invoke-StageParallel {
 
         $job = Start-Job -ScriptBlock {
             param($Path, $Args_)
-            & $Path @Args_
-            exit $LASTEXITCODE
+            # Wrap in try/catch: child scripts set $ErrorActionPreference = "Stop"
+            # which turns native-command stderr into terminating errors in PS 5.1.
+            try {
+                & $Path @Args_
+            } catch {
+                # Allow $LASTEXITCODE from the native command to propagate
+            }
+            $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }
+            exit $code
         } -ArgumentList $scriptPath, $jobArgs
 
         $jobs[$scriptName] = $job
@@ -282,7 +320,7 @@ function Invoke-StageParallel {
         $null = Wait-Job $job
         $exitCode = $job.ChildJobs[0].ExitCode
         if ($null -eq $exitCode) { $exitCode = if ($job.State -eq 'Failed') { 1 } else { 0 } }
-        $output = Receive-Job $job 2>&1
+        $output = Receive-Job $job 2>&1 -ErrorAction SilentlyContinue
         $exitCodes[$scriptName] = $exitCode
         $allOutput[$scriptName] = $output
 
@@ -361,3 +399,4 @@ function Invoke-Run {
 }
 
 Invoke-Run
+exit 0

@@ -102,6 +102,7 @@ def execute_script(
     env["BMK_PROJECT_DIR"] = str(cwd)
     env["BMK_COMMAND_PREFIX"] = command_prefix
     env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
+    env["BMK_PYTHON_CMD"] = sys.executable
 
     if override_dir:
         env["BMK_OVERRIDE_DIR"] = str(override_dir)

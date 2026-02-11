@@ -2,6 +2,7 @@
 # shellcheck shell=bash
 # Stage 02: Build Python wheel and sdist artifacts
 set -Eeu -o pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_resolve_python.sh"
 
 : "${BMK_PROJECT_DIR:?BMK_PROJECT_DIR environment variable must be set}"
 
@@ -20,7 +21,7 @@ explain_exit_code() {
 printf 'Building wheel/sdist via python -m build\n'
 
 set +e
-python3 -m build
+"$BMK_PYTHON_CMD" -m build
 exit_code=$?
 set -e
 

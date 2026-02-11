@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "2.0.16"
+version = "2.1.0"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -253,6 +253,8 @@ ignore-vulns = [
   "PYSEC-2022-43012",  # setuptools 65.5.0 — build-time only, not a runtime dependency
   "PYSEC-2025-49",     # setuptools 65.5.0 — build-time only, not a runtime dependency
   "CVE-2024-6345",     # setuptools 65.5.0 — build-time only, not a runtime dependency
+  "PYSEC-2024-44",     # rpyc 5.3.1 — environment-level package, not a project dependency
+  "CVE-2026-24049",    # wheel 0.45.1 — environment-level package, not a project dependency
 ]
 
 [tool.bandit]

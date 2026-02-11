@@ -2,6 +2,7 @@
 # Reads ignore-vulns from [tool.pip-audit] in pyproject.toml
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\_resolve_python.ps1"
 
 if (-not $env:BMK_PROJECT_DIR) {
     throw "BMK_PROJECT_DIR environment variable must be set"
@@ -36,7 +37,15 @@ ignores = data.get("tool", {}).get("pip-audit", {}).get("ignore-vulns", [])
 for vuln_id in ignores:
     print(f"--ignore-vuln={vuln_id}")
 '@
-    $result = python3 -c $pythonCode 2>$null
+    # Write code to temp file — python -c on Windows mangles multiline strings
+    $tempScript = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.py'
+    try {
+        [System.IO.File]::WriteAllText($tempScript, $pythonCode)
+        $result = & $BMK_PYTHON_CMD $tempScript 2>$null
+    }
+    finally {
+        Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
+    }
     if ($result) {
         $ignoreFlags = @($result -split "`n" | Where-Object { $_ })
     }

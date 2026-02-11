@@ -1,3 +1,4 @@
 # Stage 02: Clean build artifacts after coverage
 $ErrorActionPreference = "Stop"
-python3 "$PSScriptRoot\_clean.py" --project-dir $env:BMK_PROJECT_DIR
+. "$PSScriptRoot\_resolve_python.ps1"
+& $BMK_PYTHON_CMD "$PSScriptRoot\_clean.py" --project-dir $env:BMK_PROJECT_DIR

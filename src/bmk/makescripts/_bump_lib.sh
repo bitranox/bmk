@@ -11,6 +11,7 @@ _bump_init() {
     # BASH_SOURCE[1] is the caller's script path
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
     export SCRIPT_DIR
+    source "${SCRIPT_DIR}/_resolve_python.sh"
 }
 
 # Print human-readable explanation for exit codes.
@@ -29,7 +30,7 @@ _bump_run() {
     printf 'Bumping %s version...\n' "$bump_type"
 
     set +e
-    python3 "${SCRIPT_DIR}/_bump_version.py" "$bump_type" --project-dir "$BMK_PROJECT_DIR"
+    "$BMK_PYTHON_CMD" "${SCRIPT_DIR}/_bump_version.py" "$bump_type" --project-dir "$BMK_PROJECT_DIR"
     local exit_code=$?
     set -e
 

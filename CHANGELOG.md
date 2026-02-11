@@ -6,6 +6,20 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.1.0] 2026-02-11 21:13:49
+
+### Added
+- **Shared Python resolver for makescripts**: new `_resolve_python.ps1` and `_resolve_python.sh` helpers that all makescripts source to find the correct Python interpreter
+- **`BMK_PYTHON_CMD` propagation**: the Python CLI passes `sys.executable` via `BMK_PYTHON_CMD` environment variable; all shell and PowerShell makescripts now honour it, ensuring the uvx-managed interpreter is used instead of whatever `python`/`python3` is in PATH
+
+### Fixed
+- **Windows Python detection across all PS1 makescripts**: replaced hardcoded `python3` with resolved `$BMK_PYTHON_CMD` in all 15 PowerShell stage scripts; the resolver skips the Windows Store alias stub (exit code 9009) by filtering out `Microsoft\WindowsApps` paths via `Get-Command -All`
+- **Bash makescripts use resolved Python**: replaced hardcoded `python3` with `"$BMK_PYTHON_CMD"` in all 15 bash stage scripts for consistency with the PowerShell side
+- **PowerShell ANSI color codes**: replaced `` `e `` escape (PowerShell 7+ only) with `[char]0x1B` for Windows PowerShell 5.1 compatibility
+- **PowerShell `python -c` multiline string failure**: `test_040_pip_audit.ps1` now writes inline Python code to a temp file (same approach as stagerunner) instead of passing via `-c`
+- **Stagerunner `Invoke-SingleScript` output leaking into return value**: captured stdout via `2>&1` and replayed via `Write-Host` to prevent PowerShell from including script output in the function's return value
+- **Stagerunner parallel job error handling**: wrapped `Start-Job` script blocks in `try/catch` to prevent `$ErrorActionPreference = "Stop"` in child scripts from turning stderr into terminating errors in PS 5.1
+
 ## [2.0.16] 2026-02-11 19:36:31
 
 ### Fixed

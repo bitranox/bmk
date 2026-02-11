@@ -1,6 +1,8 @@
 # Shared library for bump scripts - dot-source this, don't execute directly.
 # Prefixed with underscore so stagerunner ignores it.
 
+. "$PSScriptRoot\_resolve_python.ps1"
+
 function Initialize-Bump {
     <#
     .SYNOPSIS
@@ -52,7 +54,7 @@ function Invoke-Bump {
 
     Write-Host "Bumping $BumpType version..."
 
-    python3 "$ScriptDir\_bump_version.py" $BumpType --project-dir $env:BMK_PROJECT_DIR
+    & $BMK_PYTHON_CMD "$ScriptDir\_bump_version.py" $BumpType --project-dir $env:BMK_PROJECT_DIR
     $exitCode = $LASTEXITCODE
 
     Explain-BumpExitCode $exitCode

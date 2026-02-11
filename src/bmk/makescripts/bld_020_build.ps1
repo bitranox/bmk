@@ -1,6 +1,7 @@
 # Stage 02: Build Python wheel and sdist artifacts
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\_resolve_python.ps1"
 
 if (-not $env:BMK_PROJECT_DIR) {
     throw "BMK_PROJECT_DIR environment variable must be set"
@@ -20,7 +21,7 @@ function Explain-ExitCode {
 
 Write-Host "Building wheel/sdist via python -m build"
 
-python3 -m build
+& $BMK_PYTHON_CMD -m build
 $exitCode = $LASTEXITCODE
 
 Explain-ExitCode $exitCode

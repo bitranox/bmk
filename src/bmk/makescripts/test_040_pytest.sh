@@ -7,6 +7,7 @@ set -Eeu -o pipefail
 : "${BMK_PROJECT_DIR:?BMK_PROJECT_DIR environment variable must be set}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/_resolve_python.sh"
 
 # Run pytest with coverage and upload to Codecov
-python3 "${SCRIPT_DIR}/_coverage.py" --run --project-dir "$BMK_PROJECT_DIR"
+"$BMK_PYTHON_CMD" "${SCRIPT_DIR}/_coverage.py" --run --project-dir "$BMK_PROJECT_DIR"

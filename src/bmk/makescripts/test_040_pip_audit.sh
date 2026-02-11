@@ -4,6 +4,7 @@
 # Reads ignore-vulns from [tool.pip-audit] in pyproject.toml
 
 set -Eeu -o pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_resolve_python.sh"
 
 : "${BMK_PROJECT_DIR:?BMK_PROJECT_DIR environment variable must be set}"
 cd "$BMK_PROJECT_DIR" || exit 1
@@ -20,7 +21,7 @@ explain_exit_code() {
 # Extract ignore-vulns from pyproject.toml and build CLI flags
 IGNORE_FLAGS=""
 if [[ -f "pyproject.toml" ]]; then
-    IGNORE_FLAGS=$(python3 -c '
+    IGNORE_FLAGS=$("$BMK_PYTHON_CMD" -c '
 import sys
 import rtoml
 from pathlib import Path

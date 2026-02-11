@@ -472,7 +472,7 @@ def upload_coverage_report(
     commit_sha = _resolve_commit_sha()
     if commit_sha is None:
         print("[codecov] Unable to resolve git commit; skipping upload", file=sys.stderr)
-        return False
+        return True
 
     # Get repo metadata from git
     repo_host, repo_owner, repo_name = _get_repo_metadata_from_git()
