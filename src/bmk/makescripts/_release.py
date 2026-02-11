@@ -169,9 +169,6 @@ def release(*, project_dir: Path, remote: str | None = None) -> int:
 
     _ensure_clean()
 
-    # Remove stray 'v' tag (local and remote)
-    _git_delete_tag("v", remote=remote)
-
     # Push branch
     branch = _git_branch()
     print(f"[release] Pushing branch {branch} to {remote}")

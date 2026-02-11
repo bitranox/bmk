@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Sync __init__conf__.py version from pyproject.toml.
+"""Sync __init__conf__.py and bundled Makefile version from pyproject.toml.
 
 Reads the version string from pyproject.toml and patches it into
-__init__conf__.py so both stay in sync after version bumps.
+__init__conf__.py and src/<pkg>/makefile/Makefile so both stay in sync
+after version bumps.
 
 Derives the package name using the same heuristics as _btx_stagerunner:
     1. hatch wheel packages
@@ -25,6 +26,7 @@ except ModuleNotFoundError:
     from bmk.makescripts._loader import load_pyproject_config
 
 _VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
+_MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")
 
 
 def derive_package_name(project_dir: Path) -> str:
@@ -113,14 +115,48 @@ def sync_initconf_version(project_dir: Path) -> bool:
     return True
 
 
+def sync_makefile_version(project_dir: Path) -> bool:
+    """Patch the version sentinel in the bundled Makefile to match pyproject.toml.
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        True if the file was updated, False if already in sync or not found.
+    """
+    pyproject_path = project_dir / "pyproject.toml"
+    config = load_pyproject_config(pyproject_path)
+    version = config.project.version
+    if not version:
+        print("Warning: no [project].version in pyproject.toml", file=sys.stderr)
+        return False
+
+    package_name = derive_package_name(project_dir)
+    makefile_path = project_dir / "src" / package_name / "makefile" / "Makefile"
+
+    if not makefile_path.exists():
+        return False
+
+    content = makefile_path.read_text(encoding="utf-8")
+    new_content = _MAKEFILE_VERSION_RE.sub(rf"\g<1>{version}", content, count=1)
+
+    if new_content == content:
+        return False
+
+    makefile_path.write_text(new_content, encoding="utf-8")
+    print(f"Synced Makefile version to {version}")
+    return True
+
+
 def main() -> int:
     """CLI entry point."""
-    parser = argparse.ArgumentParser(description="Sync __init__conf__.py version from pyproject.toml")
+    parser = argparse.ArgumentParser(description="Sync __init__conf__.py and Makefile version from pyproject.toml")
     parser.add_argument("--project-dir", type=Path, default=Path.cwd(), help="Project directory")
     args, _unknown = parser.parse_known_args()
 
     try:
         sync_initconf_version(args.project_dir)
+        sync_makefile_version(args.project_dir)
     except (ValueError, FileNotFoundError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

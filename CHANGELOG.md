@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.6] 2026-02-11 01:28:04
+
+### Added
+- **Auto-sync bundled Makefile version from `pyproject.toml`**: `_sync_initconf.py` now also patches the `# BMK MAKEFILE X.Y.Z` sentinel on line 1 of `src/<pkg>/makefile/Makefile`, keeping it in sync alongside `__init__conf__.py` after version bumps
+
 ## [2.0.5] 2026-02-11 00:39:28
 
 ### Changed
