@@ -1,6 +1,6 @@
 """CLI commands for building Python wheel and sdist artifacts.
 
-Provides ``build``, ``bld``, and ``b`` commands that execute external shell
+Provides ``build`` and ``bld`` commands that execute external shell
 scripts via the stagerunner with local override support.
 
 Scripts are searched in priority order:
@@ -14,7 +14,6 @@ Environment variables set for scripts:
 Contents:
     * :func:`cli_build` - Build command.
     * :func:`cli_bld` - Alias for ``cli_build``.
-    * :func:`cli_b` - Short alias for ``cli_build``.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
-from .test_cmd import execute_script, get_script_name
+from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
 

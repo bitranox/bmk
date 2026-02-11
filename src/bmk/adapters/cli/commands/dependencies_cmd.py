@@ -27,7 +27,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
-from .test_cmd import execute_script, get_script_name
+from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
 

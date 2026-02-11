@@ -228,8 +228,8 @@ def test_cli_custom_executes_with_correct_env(
     tmp_path: Path,
     clear_config_cache: None,
 ) -> None:
-    """execute_custom_script sets BMK_COMMAND_PREFIX and BMK_OVERRIDE_DIR."""
-    from bmk.adapters.cli.commands.custom_cmd import execute_custom_script
+    """execute_script sets BMK_COMMAND_PREFIX and BMK_OVERRIDE_DIR."""
+    from bmk.adapters.cli.commands._shared import execute_script
 
     output_file = tmp_path / "env_output.txt"
     script = tmp_path / "capture_env.sh"
@@ -239,7 +239,7 @@ def test_cli_custom_executes_with_correct_env(
     override_dir = tmp_path / "overrides"
     override_dir.mkdir()
 
-    execute_custom_script(script, tmp_path, (), command_prefix="deploy", override_dir=override_dir)
+    execute_script(script, tmp_path, (), command_prefix="deploy", override_dir=str(override_dir))
 
     parts = output_file.read_text().strip().split("|")
     assert parts[0] == "deploy"
@@ -252,7 +252,7 @@ def test_cli_custom_forwards_extra_arguments(
     clear_config_cache: None,
 ) -> None:
     """Extra arguments are passed through to the script."""
-    from bmk.adapters.cli.commands.custom_cmd import execute_custom_script
+    from bmk.adapters.cli.commands._shared import execute_script
 
     output_file = tmp_path / "args_output.txt"
     script = tmp_path / "capture_args.sh"
@@ -262,12 +262,12 @@ def test_cli_custom_forwards_extra_arguments(
     override_dir = tmp_path / "overrides"
     override_dir.mkdir()
 
-    execute_custom_script(
+    execute_script(
         script,
         tmp_path,
         ("--verbose", "--dry-run"),
         command_prefix="deploy",
-        override_dir=override_dir,
+        override_dir=str(override_dir),
     )
 
     assert output_file.read_text().strip() == "--verbose --dry-run"
@@ -279,7 +279,7 @@ def test_cli_custom_propagates_nonzero_exit_code(
     clear_config_cache: None,
 ) -> None:
     """Non-zero exit code from script is returned."""
-    from bmk.adapters.cli.commands.custom_cmd import execute_custom_script
+    from bmk.adapters.cli.commands._shared import execute_script
 
     script = tmp_path / "fail.sh"
     script.write_text("#!/bin/bash\nexit 42\n")
@@ -288,12 +288,12 @@ def test_cli_custom_propagates_nonzero_exit_code(
     override_dir = tmp_path / "overrides"
     override_dir.mkdir()
 
-    result = execute_custom_script(
+    result = execute_script(
         script,
         tmp_path,
         (),
         command_prefix="deploy",
-        override_dir=override_dir,
+        override_dir=str(override_dir),
     )
 
     assert result == 42

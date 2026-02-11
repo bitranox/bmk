@@ -92,7 +92,7 @@ def test_cli_run_executes_script_with_run_command_prefix(
     clear_config_cache: None,
 ) -> None:
     """run command sets BMK_COMMAND_PREFIX=run in subprocess."""
-    from bmk.adapters.cli.commands.test_cmd import execute_script
+    from bmk.adapters.cli.commands._shared import execute_script
 
     output_file = tmp_path / "env_output.txt"
     script = tmp_path / "capture_env.sh"
@@ -110,7 +110,7 @@ def test_cli_run_forwards_extra_arguments(
     clear_config_cache: None,
 ) -> None:
     """Extra arguments are passed through to the script."""
-    from bmk.adapters.cli.commands.test_cmd import execute_script
+    from bmk.adapters.cli.commands._shared import execute_script
 
     output_file = tmp_path / "args_output.txt"
     script = tmp_path / "capture_args.sh"
@@ -128,7 +128,7 @@ def test_cli_run_propagates_nonzero_exit_code(
     clear_config_cache: None,
 ) -> None:
     """Non-zero exit code from script is returned."""
-    from bmk.adapters.cli.commands.test_cmd import execute_script
+    from bmk.adapters.cli.commands._shared import execute_script
 
     script = tmp_path / "fail.sh"
     script.write_text("#!/bin/bash\nexit 7\n")

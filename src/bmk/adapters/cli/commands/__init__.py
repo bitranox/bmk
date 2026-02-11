@@ -8,7 +8,7 @@ Contents:
     * Config commands from :mod:`.config`
     * Email commands from :mod:`.email` (subpackage)
     * Logging commands from :mod:`.logging`
-    * Test commands from :mod:`.test_cmd`
+    * Test commands from :mod:`.testsuite_cmd`
     * Commit commands from :mod:`.commit_cmd`
     * Bump commands from :mod:`.bump_cmd`
     * Build commands from :mod:`.build_cmd`
@@ -39,8 +39,8 @@ from .logging import cli_logdemo
 from .push_cmd import cli_psh, cli_push, cli_push_p
 from .release_cmd import cli_r, cli_rel, cli_release
 from .run_cmd import cli_run
-from .test_cmd import cli_t, cli_test
 from .test_integration_cmd import cli_testi, cli_testintegration, cli_ti
+from .testsuite_cmd import cli_t, cli_test
 
 __all__ = [
     "cli_b",

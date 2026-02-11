@@ -6,6 +6,19 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.14] 2026-02-11 18:57:25
+
+### Changed
+- **Shared script infrastructure moved to `_shared.py`**: extracted `execute_script`, `get_script_name`, `normalize_returncode`, and `resolve_script_path` from `test_cmd.py` into `_shared.py`; all 12 command modules now import from the shared module
+- **Renamed `test_cmd.py` to `testsuite_cmd.py`**: avoids confusion with test files; file now contains only `cli_test` and `cli_t` click commands
+- **Eliminated `execute_custom_script` duplication**: `custom_cmd.py` now reuses `execute_script` from `_shared.py` instead of maintaining a near-identical copy
+- **Coverage threshold raised**: `fail_under` increased from 70% to 73% to better guard against regressions
+
+### Fixed
+- **`install_cmd.py` missing structured logging context**: added `lib_log_rich.runtime.bind(job_id="cli-install")` for consistency with all other CLI commands
+- **`build_cmd.py` phantom alias in docstring**: removed reference to nonexistent `cli_b` short alias (that alias belongs to the bump command)
+- **`install_cmd.py` leaking private function in `__all__`**: removed `_extract_version` from public exports
+
 ## [2.0.13] 2026-02-11 13:15:15
 
 ### Fixed

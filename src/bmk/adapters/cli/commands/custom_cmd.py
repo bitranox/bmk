@@ -20,19 +20,20 @@ Contents:
 from __future__ import annotations
 
 import logging
-import os
 import re
-import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import lib_log_rich.runtime
 import rich_click as click
 
-from bmk.adapters.config.loader import get_config
-
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from ..context import get_cli_context
 from ..exit_codes import ExitCode
-from .test_cmd import get_script_name, normalize_returncode
+from ._shared import execute_script, get_script_name
+
+if TYPE_CHECKING:
+    from lib_layered_config import Config
 
 _RE_COMMAND_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
@@ -97,64 +98,13 @@ def find_custom_scripts(override_dir: Path, command_name: str) -> list[Path]:
     return sorted(override_dir.glob(pattern))
 
 
-def execute_custom_script(
-    script_path: Path,
-    cwd: Path,
-    extra_args: tuple[str, ...],
-    *,
-    command_prefix: str,
-    override_dir: Path,
-    package_name: str = "",
-    show_warnings: bool = True,
-) -> int:
-    """Execute stagerunner with forced ``BMK_OVERRIDE_DIR``.
-
-    Pure function: receives all configuration values as parameters instead
-    of reaching for global state. Callers are responsible for loading config.
-
-    Args:
-        script_path: Path to the stagerunner script.
-        cwd: Current working directory (set as BMK_PROJECT_DIR env var).
-        extra_args: Additional arguments to pass to the script.
-        command_prefix: Command prefix for staged scripts.
-        override_dir: Override directory forced into the environment.
-        package_name: Package name override (set as BMK_PACKAGE_NAME if non-empty).
-        show_warnings: Show warnings from passing parallel jobs (set as BMK_SHOW_WARNINGS env var).
-
-    Returns:
-        Exit code from the script execution.
-    """
-    env = os.environ.copy()
-    env["BMK_PROJECT_DIR"] = str(cwd)
-    env["BMK_COMMAND_PREFIX"] = command_prefix
-    env["BMK_OVERRIDE_DIR"] = str(override_dir)
-    env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
-
-    if package_name:
-        env["BMK_PACKAGE_NAME"] = str(package_name)
-
-    if script_path.suffix == ".ps1":
-        cmd = [
-            "powershell",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script_path),
-            *extra_args,
-        ]
-    else:
-        cmd = [str(script_path), *extra_args]
-
-    result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
-    return normalize_returncode(result.returncode)
-
-
-def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
+def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> None:
     """Resolve override dir, check for scripts, invoke stagerunner.
 
     Args:
         command_name: User-supplied command prefix.
         args: Arguments to forward to the scripts.
+        config: Loaded layered configuration (with profile and overrides applied).
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if override dir missing or
@@ -162,7 +112,7 @@ def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
     """
     validate_command_name(command_name)
     cwd = Path.cwd()
-    bmk_config = get_config().as_dict().get("bmk", {})
+    bmk_config = config.as_dict().get("bmk", {})
     override_dir = resolve_override_dir(cwd, bmk_config)
 
     if not override_dir.is_dir():
@@ -193,12 +143,12 @@ def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
         bundled_script,
         override_dir,
     )
-    exit_code = execute_custom_script(
+    exit_code = execute_script(
         bundled_script,
         cwd,
         args,
         command_prefix=command_name,
-        override_dir=override_dir,
+        override_dir=str(override_dir),
         package_name=bmk_config.get("package_name", ""),
         show_warnings=bmk_config.get("show_warnings", True),
     )
@@ -210,7 +160,8 @@ def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
 @click.command("custom", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
 @click.argument("command_name")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def cli_custom(command_name: str, args: tuple[str, ...]) -> None:
+@click.pass_context
+def cli_custom(ctx: click.Context, command_name: str, args: tuple[str, ...]) -> None:
     """Run a custom command from the override directory.
 
     Executes user-defined staged scripts matching COMMAND_NAME from the
@@ -224,9 +175,10 @@ def cli_custom(command_name: str, args: tuple[str, ...]) -> None:
         bmk custom deploy              # Run deploy_*.sh scripts
         bmk custom deploy --verbose    # Forward --verbose to scripts
     """
+    cli_ctx = get_cli_context(ctx)
     with lib_log_rich.runtime.bind(job_id="cli-custom", extra={"command": "custom", "prefix": command_name}):
         logger.info("Executing custom command '%s'", command_name)
-        _run_custom(command_name, args)
+        _run_custom(command_name, args, cli_ctx.config)
 
 
 __all__ = ["cli_custom"]

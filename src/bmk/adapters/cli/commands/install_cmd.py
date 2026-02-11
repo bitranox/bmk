@@ -15,6 +15,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
@@ -82,24 +83,25 @@ def cli_install() -> None:
     Example:
         bmk install          # fresh install or update
     """
-    if not _BUNDLED_MAKEFILE.is_file():
-        click.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    with lib_log_rich.runtime.bind(job_id="cli-install", extra={"command": "install"}):
+        if not _BUNDLED_MAKEFILE.is_file():
+            click.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
+            raise SystemExit(ExitCode.FILE_NOT_FOUND)
 
-    target = Path.cwd() / "Makefile"
+        target = Path.cwd() / "Makefile"
 
-    if target.exists():
-        first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
-        if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
-            click.echo("Makefile exists but is not managed by bmk — skipping", err=True)
-            raise SystemExit(ExitCode.GENERAL_ERROR)
-        logger.info("Updating existing bmk Makefile")
-        click.echo("Updating existing bmk Makefile")
-    else:
-        logger.info("Installing bmk Makefile")
-        click.echo("Installing bmk Makefile")
+        if target.exists():
+            first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
+            if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
+                click.echo("Makefile exists but is not managed by bmk — skipping", err=True)
+                raise SystemExit(ExitCode.GENERAL_ERROR)
+            logger.info("Updating existing bmk Makefile")
+            click.echo("Updating existing bmk Makefile")
+        else:
+            logger.info("Installing bmk Makefile")
+            click.echo("Installing bmk Makefile")
 
-    shutil.copy2(_BUNDLED_MAKEFILE, target)
+        shutil.copy2(_BUNDLED_MAKEFILE, target)
 
 
-__all__ = ["_extract_version", "check_makefile_update", "cli_install"]
+__all__ = ["check_makefile_update", "cli_install"]

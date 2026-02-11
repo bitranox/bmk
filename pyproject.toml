@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "2.0.13"
+version = "2.0.14"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -174,7 +174,7 @@ source = ["src/bmk"]
 omit = [
   "tests/*",
 ]
-fail_under = 70
+fail_under = 73
 show_missing = true
 
 [tool.coverage.json]
@@ -256,7 +256,7 @@ ignore-vulns = [
 ]
 
 [tool.bandit]
-# Skip warnings for subprocess usage in test_cmd.py and commit_cmd.py — these modules
+# Skip warnings for subprocess usage in _shared.py and commit_cmd.py — these modules
 # intentionally execute external scripts (test runners, git) as part of core functionality.
 skips = [
   "B404",  # Consider possible security implications associated with subprocess module

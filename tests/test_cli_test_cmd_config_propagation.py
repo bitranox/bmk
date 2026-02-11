@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from bmk.adapters.cli.commands.test_cmd import execute_script
+from bmk.adapters.cli.commands._shared import execute_script
 from bmk.adapters.config.loader import get_config
 
 # ---------------------------------------------------------------------------

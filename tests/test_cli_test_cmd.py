@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner, Result
 
 from bmk.adapters import cli as cli_mod
-from bmk.adapters.cli.commands.test_cmd import (
+from bmk.adapters.cli.commands._shared import (
     execute_script,
     get_script_name,
     resolve_script_path,
@@ -235,7 +235,7 @@ def test_cli_test_passes_cwd_as_first_argument(
         "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
-    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
 
     cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
 
@@ -268,7 +268,7 @@ def test_cli_test_passes_extra_arguments(
         "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
-    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
 
     cli_runner.invoke(cli_mod.cli, ["test", "--verbose", "--coverage"], obj=production_factory)
 
@@ -299,7 +299,7 @@ def test_cli_test_propagates_script_exit_code(
         mock_resolve,
     )
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.test_cmd.execute_script",
+        "bmk.adapters.cli.commands.testsuite_cmd.execute_script",
         mock_execute,
     )
 
@@ -333,7 +333,7 @@ def test_cli_t_behaves_same_as_test(
         "bmk.adapters.cli.commands._shared.resolve_script_path",
         mock_resolve,
     )
-    monkeypatch.setattr("bmk.adapters.cli.commands.test_cmd.execute_script", mock_execute)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
 
     cli_runner.invoke(cli_mod.cli, ["t", "--fast"], obj=production_factory)
 
