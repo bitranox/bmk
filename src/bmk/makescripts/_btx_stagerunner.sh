@@ -35,8 +35,11 @@ fi
 : "${BMK_COMMAND_PREFIX:?BMK_COMMAND_PREFIX environment variable must be set}"
 export BMK_PROJECT_DIR BMK_COMMAND_PREFIX
 
+# Directory containing this stagerunner script (for co-located helpers)
+_STAGERUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default stages directory is the directory containing this script
-BMK_STAGES_DIR="${BMK_STAGES_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+BMK_STAGES_DIR="${BMK_STAGES_DIR:-${_STAGERUNNER_DIR}}"
 export BMK_STAGES_DIR
 
 # Per-project override directory (checked before bundled stages)
@@ -98,45 +101,8 @@ derive_package_name() {
         die "Neither 'python3' nor 'python' found in PATH"
     fi
 
-    BMK_PACKAGE_NAME=$("$python_cmd" -c '
-import sys
-import rtoml
-from pathlib import Path
-
-pyproject_path = Path(sys.argv[1])
-with pyproject_path.open("r", encoding="utf-8") as f:
-    data = rtoml.load(f)
-
-# Try to derive import package from hatch wheel packages
-tool = data.get("tool", {})
-hatch = tool.get("hatch", {})
-build = hatch.get("build", {})
-targets = build.get("targets", {})
-wheel = targets.get("wheel", {})
-packages = wheel.get("packages", [])
-
-if packages:
-    print(Path(packages[0]).name)
-    sys.exit(0)
-
-# Try to derive from project.scripts entry points
-project = data.get("project", {})
-scripts = project.get("scripts", {})
-
-for spec in scripts.values():
-    if ":" in spec:
-        module = spec.split(":", 1)[0]
-        print(module.split(".", 1)[0])
-        sys.exit(0)
-
-# Fallback to project name with hyphens replaced by underscores
-name = project.get("name", "")
-if name:
-    print(name.replace("-", "_"))
-    sys.exit(0)
-
-sys.exit(1)
-' "$pyproject_path") || die "Failed to derive package name from pyproject.toml"
+    BMK_PACKAGE_NAME=$("$python_cmd" "${_STAGERUNNER_DIR}/_derive_package_name.py" "$pyproject_path") \
+        || die "Failed to derive package name from pyproject.toml"
 
     export BMK_PACKAGE_NAME
 }

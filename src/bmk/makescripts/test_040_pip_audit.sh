@@ -19,23 +19,10 @@ explain_exit_code() {
 }
 
 # Extract ignore-vulns from pyproject.toml and build CLI flags
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IGNORE_FLAGS=""
 if [[ -f "pyproject.toml" ]]; then
-    IGNORE_FLAGS=$("$BMK_PYTHON_CMD" -c '
-import sys
-import rtoml
-from pathlib import Path
-
-pyproject = Path("pyproject.toml")
-if not pyproject.exists():
-    sys.exit(0)
-
-data = rtoml.load(pyproject.open("r", encoding="utf-8"))
-ignores = data.get("tool", {}).get("pip-audit", {}).get("ignore-vulns", [])
-
-for vuln_id in ignores:
-    print(f"--ignore-vuln={vuln_id}")
-' 2>/dev/null || true)
+    IGNORE_FLAGS=$("$BMK_PYTHON_CMD" "${SCRIPT_DIR}/_extract_pip_audit_ignores.py" 2>/dev/null || true)
 fi
 
 printf 'Running pip-audit...\n'

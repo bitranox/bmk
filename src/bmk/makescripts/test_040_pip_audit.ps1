@@ -22,30 +22,7 @@ function Explain-ExitCode {
 # Extract ignore-vulns from pyproject.toml and build CLI flags
 $ignoreFlags = @()
 if (Test-Path "pyproject.toml") {
-    $pythonCode = @'
-import sys
-import rtoml
-from pathlib import Path
-
-pyproject = Path("pyproject.toml")
-if not pyproject.exists():
-    sys.exit(0)
-
-data = rtoml.load(pyproject.open("r", encoding="utf-8"))
-ignores = data.get("tool", {}).get("pip-audit", {}).get("ignore-vulns", [])
-
-for vuln_id in ignores:
-    print(f"--ignore-vuln={vuln_id}")
-'@
-    # Write code to temp file — python -c on Windows mangles multiline strings
-    $tempScript = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.py'
-    try {
-        [System.IO.File]::WriteAllText($tempScript, $pythonCode)
-        $result = & $BMK_PYTHON_CMD $tempScript 2>$null
-    }
-    finally {
-        Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
-    }
+    $result = & $BMK_PYTHON_CMD "$PSScriptRoot\_extract_pip_audit_ignores.py" 2>$null
     if ($result) {
         $ignoreFlags = @($result -split "`n" | Where-Object { $_ })
     }

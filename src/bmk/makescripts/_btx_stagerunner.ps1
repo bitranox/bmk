@@ -88,46 +88,6 @@ function Get-PackageName {
         Write-Die "pyproject.toml not found in $($env:BMK_PROJECT_DIR)"
     }
 
-    $pythonCode = @'
-import sys
-import rtoml
-from pathlib import Path
-
-pyproject_path = Path(sys.argv[1])
-with pyproject_path.open("r", encoding="utf-8") as f:
-    data = rtoml.load(f)
-
-# Try to derive import package from hatch wheel packages
-tool = data.get("tool", {})
-hatch = tool.get("hatch", {})
-build = hatch.get("build", {})
-targets = build.get("targets", {})
-wheel = targets.get("wheel", {})
-packages = wheel.get("packages", [])
-
-if packages:
-    print(Path(packages[0]).name)
-    sys.exit(0)
-
-# Try to derive from project.scripts entry points
-project = data.get("project", {})
-scripts = project.get("scripts", {})
-
-for spec in scripts.values():
-    if ":" in spec:
-        module = spec.split(":", 1)[0]
-        print(module.split(".", 1)[0])
-        sys.exit(0)
-
-# Fallback to project name with hyphens replaced by underscores
-name = project.get("name", "")
-if name:
-    print(name.replace("-", "_"))
-    sys.exit(0)
-
-sys.exit(1)
-'@
-
     # Resolve Python interpreter — prefer BMK_PYTHON_CMD from parent process
     $pythonCmd = $null
     if ($env:BMK_PYTHON_CMD -and (Test-Path $env:BMK_PYTHON_CMD)) {
@@ -146,15 +106,7 @@ sys.exit(1)
         }
     }
     if (-not $pythonCmd) { Write-Die "Neither 'python' nor 'python3' found in PATH" }
-    # Write code to temp file — python -c on Windows mangles multiline strings
-    $tempScript = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.py'
-    try {
-        [System.IO.File]::WriteAllText($tempScript, $pythonCode)
-        $result = & $pythonCmd $tempScript $pyprojectPath 2>&1
-    }
-    finally {
-        Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
-    }
+    $result = & $pythonCmd "$PSScriptRoot/_derive_package_name.py" $pyprojectPath 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Die "Failed to derive package name from pyproject.toml"
     }

@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.2.0] 2026-02-11 22:09:03
+
+### Changed
+- **Extracted inline Python to standalone scripts**: moved inline `python -c` code from stagerunners and `test_040_pip_audit` into `_derive_package_name.py` and `_extract_pip_audit_ignores.py`, eliminating the temp-file write-execute-delete pattern that triggered Windows Defender false positives
+- **Makefile local-dev invocation**: replaced `uvx --reinstall` (no longer supported) with `uv cache prune --quiet && uvx --refresh`
+
+### Fixed
+- **Windows Defender false positive**: the stagerunner's temp-file pattern (write Python to `.py`, execute, delete) was flagged as a malicious "script dropper"; standalone `.py` scripts eliminate the trigger entirely
+
 ## [2.1.0] 2026-02-11 21:13:49
 
 ### Added
