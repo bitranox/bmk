@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.11] 2026-02-11 12:47:59
+
+### Changed
+- **Codecov token warning color**: changed from bright red (`\033[91m`) to yellow (`\033[33m`) to match stagerunner warning styling
+
 ## [2.0.10] 2026-02-11 12:41:22
 
 ### Fixed

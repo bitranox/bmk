@@ -670,7 +670,7 @@ def main(
         token = ensure_codecov_token(project_dir)
         if not token:
             print(
-                "\033[91m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
+                "\033[33m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
                 "(set CODECOV_TOKEN in environment or .env)\033[0m",
                 file=sys.stderr,
             )
