@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.10] 2026-02-11 12:41:22
+
+### Fixed
+- **Missing codecov token not surfaced by warning scanner**: `_coverage.py` message changed from `[codecov] CODECOV_TOKEN not found` to `[codecov] warning: CODECOV_TOKEN not found` so the stagerunner warning scanner picks it up
+
 ## [2.0.9] 2026-02-11 12:28:32
 
 ### Added
