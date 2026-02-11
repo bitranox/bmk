@@ -12,6 +12,8 @@
 #                        (default: $BMK_PROJECT_DIR/makescripts)
 #                        If scripts matching the command prefix exist here,
 #                        they replace the bundled scripts entirely for that command.
+#   BMK_SHOW_WARNINGS  - Show warnings from passing parallel jobs (default: "1")
+#                        Set to "0" to suppress warning output.
 #
 # This script coordinates execution in STAGED PARALLEL BATCHES:
 # - Stage 01: Run all {prefix}_01_*.sh in parallel, wait for all to complete
@@ -49,6 +51,7 @@ FAILED_SCRIPTS=()  # Track failed script names across stages
 # ANSI color codes
 COLOR_GREEN='\033[32m'
 COLOR_RED='\033[31m'
+COLOR_YELLOW='\033[33m'
 COLOR_RESET='\033[0m'
 
 die() {
@@ -200,6 +203,38 @@ run_single_script() {
     fi
 }
 
+print_warnings_from_passed() {
+    local -a passed_names=("$@")
+    local show_warnings="${BMK_SHOW_WARNINGS:-1}"
+
+    [[ "$show_warnings" == "0" ]] && return 0
+    [[ ${#passed_names[@]} -eq 0 ]] && return 0
+
+    local found_any=false
+    local script_name output_file warnings
+
+    for script_name in "${passed_names[@]}"; do
+        output_file="$TEMP_DIR/${script_name}.out"
+        [[ -f "$output_file" ]] || continue
+
+        warnings=$(grep -i 'warning' "$output_file" 2>/dev/null || true)
+        [[ -z "$warnings" ]] && continue
+
+        if [[ "$found_any" == false ]]; then
+            printf '\n'
+            found_any=true
+        fi
+
+        printf "${COLOR_YELLOW}  ⚠ %s warnings:${COLOR_RESET}\n" "$script_name"
+        while IFS= read -r line; do
+            printf "${COLOR_YELLOW}    %s${COLOR_RESET}\n" "$line"
+        done <<< "$warnings"
+    done
+
+    [[ "$found_any" == true ]] && printf '\n'
+    return 0
+}
+
 run_stage_parallel() {
     # Runs all scripts for a stage in parallel, returns 0 if all pass
     local stage="$1"
@@ -285,6 +320,9 @@ run_stage_parallel() {
             printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$script_name" "$exit_code"
         fi
     done
+
+    # Show warnings from passed scripts
+    print_warnings_from_passed "${passed[@]}"
 
     # Print output of failed scripts
     if [[ ${#failed[@]} -gt 0 ]]; then

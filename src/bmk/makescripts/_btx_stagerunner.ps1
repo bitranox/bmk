@@ -10,6 +10,8 @@
 #                        (default: $BMK_PROJECT_DIR/makescripts)
 #                        If scripts matching the command prefix exist here,
 #                        they replace the bundled scripts entirely for that command.
+#   BMK_SHOW_WARNINGS  - Show warnings from passing parallel jobs (default: "1")
+#                        Set to "0" to suppress warning output.
 #
 # This script coordinates execution in STAGED PARALLEL BATCHES:
 # - Stage 01: Run all {prefix}_01_*.ps1 in parallel, wait for all to complete
@@ -51,6 +53,7 @@ $script:FailedScripts = [System.Collections.Generic.List[string]]::new()
 # ANSI color codes
 $ColorGreen = "`e[32m"
 $ColorRed = "`e[31m"
+$ColorYellow = "`e[33m"
 $ColorReset = "`e[0m"
 
 # ---------------------------------------------------------------------------
@@ -190,6 +193,40 @@ function Invoke-SingleScript {
     }
 }
 
+function Show-WarningsFromPassed {
+    param(
+        [System.Collections.Generic.List[string]]$PassedNames,
+        [hashtable]$AllOutput
+    )
+
+    if ($env:BMK_SHOW_WARNINGS -eq "0") { return }
+    if ($PassedNames.Count -eq 0) { return }
+
+    $foundAny = $false
+
+    foreach ($scriptName in $PassedNames) {
+        $output = $AllOutput[$scriptName]
+        if (-not $output) { continue }
+
+        $warningLines = @($output | Out-String -Stream |
+            Where-Object { $_ -match '(?i)warning' })
+
+        if ($warningLines.Count -eq 0) { continue }
+
+        if (-not $foundAny) {
+            Write-Host ""
+            $foundAny = $true
+        }
+
+        Write-Host "${ColorYellow}  $([char]0x26A0) $scriptName warnings:${ColorReset}"
+        foreach ($wline in $warningLines) {
+            Write-Host "${ColorYellow}    $wline${ColorReset}"
+        }
+    }
+
+    if ($foundAny) { Write-Host "" }
+}
+
 function Invoke-StageParallel {
     param([int]$Stage)
 
@@ -232,8 +269,9 @@ function Invoke-StageParallel {
 
     # Wait for ALL jobs to complete before printing results
     $exitCodes = @{}
+    $allOutput = @{}
     $failed = [System.Collections.Generic.List[string]]::new()
-    $failedOutput = @{}
+    $passed = [System.Collections.Generic.List[string]]::new()
     $firstFailureCode = $null
 
     foreach ($scriptName in $scriptNames) {
@@ -243,12 +281,15 @@ function Invoke-StageParallel {
         if ($null -eq $exitCode) { $exitCode = if ($job.State -eq 'Failed') { 1 } else { 0 } }
         $output = Receive-Job $job 2>&1
         $exitCodes[$scriptName] = $exitCode
+        $allOutput[$scriptName] = $output
 
         if ($exitCode -ne 0) {
             $failed.Add($scriptName)
-            $failedOutput[$scriptName] = $output
             $script:FailedScripts.Add("${scriptName}:${exitCode}")
             if ($null -eq $firstFailureCode) { $firstFailureCode = $exitCode }
+        }
+        else {
+            $passed.Add($scriptName)
         }
 
         Remove-Job $job -Force
@@ -265,12 +306,15 @@ function Invoke-StageParallel {
         }
     }
 
+    # Show warnings from passed scripts
+    Show-WarningsFromPassed -PassedNames $passed -AllOutput $allOutput
+
     # Print output of failed scripts
     if ($failed.Count -gt 0) {
         foreach ($scriptName in $failed) {
             Write-Host ""
-            Write-Host "${ColorRed}[$scriptName] (exit code: $($failedOutput[$scriptName]))${ColorReset}"
-            $output = $failedOutput[$scriptName]
+            Write-Host "${ColorRed}[$scriptName] (exit code: $($exitCodes[$scriptName]))${ColorReset}"
+            $output = $allOutput[$scriptName]
             if ($output) {
                 $output | ForEach-Object { Write-Host $_ }
             }

@@ -295,14 +295,24 @@ def run_coverage_tests(
 # ---------------------------------------------------------------------------
 
 
+def _find_dotenv_upward(start_dir: Path) -> Path | None:
+    """Search for .env file in start_dir and its parents up to filesystem root."""
+    current = start_dir.resolve()
+    for directory in [current, *current.parents]:
+        candidate = directory / ".env"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def ensure_codecov_token(project_dir: Path | None = None) -> str | None:
     """Find and return codecov token without mutating os.environ.
 
-    Checks the ``CODECOV_TOKEN`` environment variable first, then falls
-    back to reading the ``.env`` file in *project_dir*.
+    Checks ``CODECOV_TOKEN`` env var first, then searches for a ``.env``
+    file starting from *project_dir* and walking up to filesystem root.
 
     Args:
-        project_dir: Directory containing .env file. Defaults to cwd.
+        project_dir: Directory to start searching for .env file. Defaults to cwd.
 
     Returns:
         The token string if found, or ``None`` if unavailable.
@@ -310,22 +320,16 @@ def ensure_codecov_token(project_dir: Path | None = None) -> str | None:
     existing = os.getenv("CODECOV_TOKEN")
     if existing:
         return existing
-    if project_dir is None:
-        project_dir = Path.cwd()
-    env_path = project_dir / ".env"
-    if not env_path.is_file():
+
+    from dotenv import dotenv_values
+
+    start = project_dir or Path.cwd()
+    env_path = _find_dotenv_upward(start)
+    if env_path is None:
         return None
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        if key.strip() == "CODECOV_TOKEN":
-            token = value.strip().strip("\"'")
-            if token:
-                return token
-            break
-    return None
+
+    values = dotenv_values(env_path)
+    return values.get("CODECOV_TOKEN") or None
 
 
 # ---------------------------------------------------------------------------
@@ -663,12 +667,16 @@ def main(
 
     # Upload coverage if requested
     if upload:
-        print(f"[codecov] Uploading coverage from {project_dir}...")
-
-        # Discover token without mutating global environment
         token = ensure_codecov_token(project_dir)
+        if not token:
+            print(
+                "\033[91m[codecov] CODECOV_TOKEN not found; skipping upload "
+                "(set CODECOV_TOKEN in environment or .env)\033[0m",
+                file=sys.stderr,
+            )
+            return 0
 
-        # Upload coverage
+        print(f"[codecov] Uploading coverage from {project_dir}...")
         success = upload_coverage_report(project_dir=project_dir, codecov_token=token)
         if not success:
             return 1

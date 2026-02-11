@@ -30,3 +30,9 @@ override_dir = ""
 # Override the auto-derived package name (from pyproject.toml).
 # Empty string = auto-derive.
 package_name = ""
+
+# Show warnings from passing parallel jobs in stagerunner output.
+# When true, output from successful parallel scripts is scanned for
+# lines containing "warning" (case-insensitive) and displayed after
+# the pass/fail summary.
+show_warnings = true

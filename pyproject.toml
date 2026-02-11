@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "2.0.7"
+version = "2.0.9"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ dependencies = [
     "orjson>=3.11.7",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "hypothesis>=6.151.5",
+    "hypothesis>=6.151.6",
     "ruff>=0.15.0",
     "pyright[nodejs]>=1.1.408",
     "bandit>=1.9.3",
@@ -26,6 +26,7 @@ dependencies = [
     "import-linter>=2.10",
     "rtoml>=0.13.0",
     "httpx>=0.28.1",
+    "python-dotenv>=1.2.1",
     # Transitive CVE pins (genuine transitive deps needing minimum version)
     "jaraco-context>=6.1.0",       # CVE-2026-23949  (twine -> keyring -> jaraco.context)
     "urllib3>=2.6.3",              # CVE-2025-66471, CVE-2025-66418, CVE-2026-21441  (twine, codecov-cli, pip-audit)

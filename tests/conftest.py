@@ -69,14 +69,11 @@ def pytest_configure(config: pytest.Config) -> None:
 
 def _load_dotenv() -> None:
     """Load .env file when it exists for integration test configuration."""
-    try:
-        from dotenv import load_dotenv
+    from dotenv import load_dotenv
 
-        env_file = Path(__file__).parent.parent / ".env"
-        if env_file.exists():
-            load_dotenv(env_file)
-    except ImportError:
-        pass
+    env_file = Path(__file__).parent.parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file)
 
 
 _load_dotenv()

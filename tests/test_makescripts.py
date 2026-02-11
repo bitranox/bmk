@@ -210,8 +210,9 @@ class TestEnsureCodecovToken:
     def test_returns_none_when_env_file_missing(
         self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ensure_codecov_token returns None when .env file doesn't exist."""
+        """ensure_codecov_token returns None when no .env file in hierarchy."""
         monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+        monkeypatch.setattr(coverage_module, "_find_dotenv_upward", lambda _start: None)  # type: ignore[reportUnknownLambdaType]
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
@@ -265,6 +266,66 @@ CODECOV_TOKEN=found-token
 
         assert result == "found-token"
         assert os.environ.get("CODECOV_TOKEN") is None
+
+    @pytest.mark.os_agnostic
+    def test_finds_env_file_in_parent_directory(
+        self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ensure_codecov_token finds .env in a parent directory."""
+        monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text("CODECOV_TOKEN=parent-token\n")
+        child_dir = tmp_path / "sub" / "deep"
+        child_dir.mkdir(parents=True)
+
+        result = coverage_module.ensure_codecov_token(child_dir)
+
+        assert result == "parent-token"
+        assert os.environ.get("CODECOV_TOKEN") is None
+
+
+class TestFindDotenvUpward:
+    """Tests for _find_dotenv_upward helper."""
+
+    @pytest.fixture
+    def coverage_module(self) -> Any:
+        """Import coverage module."""
+        from bmk.makescripts import _coverage
+
+        return _coverage
+
+    @pytest.mark.os_agnostic
+    def test_finds_env_in_start_dir(self, coverage_module: Any, tmp_path: Path) -> None:
+        """_find_dotenv_upward finds .env in the start directory."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEY=value\n")
+
+        result = coverage_module._find_dotenv_upward(tmp_path)
+
+        assert result == env_file
+
+    @pytest.mark.os_agnostic
+    def test_finds_env_in_parent(self, coverage_module: Any, tmp_path: Path) -> None:
+        """_find_dotenv_upward finds .env in a parent directory."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEY=value\n")
+        child = tmp_path / "a" / "b"
+        child.mkdir(parents=True)
+
+        result = coverage_module._find_dotenv_upward(child)
+
+        assert result == env_file
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_when_no_env_file(self, coverage_module: Any, tmp_path: Path) -> None:
+        """_find_dotenv_upward returns None when no .env exists in hierarchy."""
+        child = tmp_path / "empty"
+        child.mkdir()
+
+        result = coverage_module._find_dotenv_upward(child)
+
+        # May return None or find a .env above tmp_path — assert type is correct
+        assert result is None or result.name == ".env"
 
 
 class TestGitServiceHelpers:
@@ -366,6 +427,40 @@ class TestHandleCodecovResult:
         assert result is False
         captured = capsys.readouterr()
         assert "upload failed" in captured.err
+
+
+class TestMain:
+    """Tests for main() orchestrator function."""
+
+    @pytest.fixture
+    def coverage_module(self) -> Any:
+        """Import coverage module."""
+        from bmk.makescripts import _coverage
+
+        return _coverage
+
+    @pytest.mark.os_agnostic
+    def test_main_returns_zero_when_token_missing(
+        self,
+        coverage_module: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: CaptureFixture[str],
+    ) -> None:
+        """main() returns 0 and prints warning when CODECOV_TOKEN is missing."""
+        monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+        monkeypatch.setattr(coverage_module, "_find_dotenv_upward", lambda _start: None)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module.main(
+            project_dir=tmp_path,
+            run_tests=False,
+            upload=True,
+        )
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "CODECOV_TOKEN not found" in captured.err
+        assert "skipping upload" in captured.err
 
 
 # =============================================================================

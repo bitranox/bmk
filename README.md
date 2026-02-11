@@ -390,7 +390,15 @@ bmk deps u                # short form
 
 ### codecov
 
-Upload the coverage report to Codecov. Requires `CODECOV_TOKEN` in environment or `.env`.
+Upload the coverage report to Codecov.
+
+The token is discovered by checking `CODECOV_TOKEN` in the environment first, then
+searching for a `.env` file starting from the project directory and walking up to the
+filesystem root.
+
+If no token is found, the upload is **skipped gracefully** — a bright red warning is
+printed to stderr and the command exits with code 0 (success). This means `make test`
+will not fail in environments where no Codecov token is available.
 
 |                  |                                                        |
 |------------------|--------------------------------------------------------|

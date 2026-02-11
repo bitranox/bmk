@@ -105,6 +105,7 @@ def execute_custom_script(
     command_prefix: str,
     override_dir: Path,
     package_name: str = "",
+    show_warnings: bool = True,
 ) -> int:
     """Execute stagerunner with forced ``BMK_OVERRIDE_DIR``.
 
@@ -118,6 +119,7 @@ def execute_custom_script(
         command_prefix: Command prefix for staged scripts.
         override_dir: Override directory forced into the environment.
         package_name: Package name override (set as BMK_PACKAGE_NAME if non-empty).
+        show_warnings: Show warnings from passing parallel jobs (set as BMK_SHOW_WARNINGS env var).
 
     Returns:
         Exit code from the script execution.
@@ -126,6 +128,7 @@ def execute_custom_script(
     env["BMK_PROJECT_DIR"] = str(cwd)
     env["BMK_COMMAND_PREFIX"] = command_prefix
     env["BMK_OVERRIDE_DIR"] = str(override_dir)
+    env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
 
     if package_name:
         env["BMK_PACKAGE_NAME"] = str(package_name)
@@ -197,6 +200,7 @@ def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
         command_prefix=command_name,
         override_dir=override_dir,
         package_name=bmk_config.get("package_name", ""),
+        show_warnings=bmk_config.get("show_warnings", True),
     )
 
     if exit_code != 0:

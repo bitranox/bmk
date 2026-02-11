@@ -6,6 +6,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.9] 2026-02-11 12:28:32
+
+### Added
+- **Show warnings from passing parallel stagerunner jobs**: output from successful parallel scripts is scanned for lines containing "warning" (case-insensitive) and displayed in yellow after the pass/fail summary
+- New `[bmk].show_warnings` config option (default `true`) to control warning display; set `BMK_SHOW_WARNINGS=0` or `show_warnings = false` in config to suppress
+- `print_warnings_from_passed()` in bash stagerunner and `Show-WarningsFromPassed` in PowerShell stagerunner
+
+### Fixed
+- **PowerShell stagerunner exit code display bug**: failed-job output header showed raw output instead of exit code (`$failedOutput[$scriptName]` → `$exitCodes[$scriptName]`)
+
+## [2.0.8] 2026-02-11 12:23:30
+
 ### Changed
 - **Root Makefile switched to local dev source**: `BMK` variable now uses `uvx --refresh --from /path bmk` instead of `uvx bmk@latest`, and sentinel line removed to prevent `bmk install` from overwriting local changes
 

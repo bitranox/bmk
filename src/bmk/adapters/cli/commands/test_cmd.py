@@ -90,6 +90,7 @@ def execute_script(
     command_prefix: str = "test",
     override_dir: str = "",
     package_name: str = "",
+    show_warnings: bool = True,
 ) -> int:
     """Execute script with BMK environment variables.
 
@@ -103,6 +104,7 @@ def execute_script(
         command_prefix: Command prefix for staged scripts (set as BMK_COMMAND_PREFIX env var).
         override_dir: Override directory path (set as BMK_OVERRIDE_DIR if non-empty).
         package_name: Package name override (set as BMK_PACKAGE_NAME if non-empty).
+        show_warnings: Show warnings from passing parallel jobs (set as BMK_SHOW_WARNINGS env var).
 
     Returns:
         Exit code from the script execution.
@@ -110,6 +112,7 @@ def execute_script(
     env = os.environ.copy()
     env["BMK_PROJECT_DIR"] = str(cwd)
     env["BMK_COMMAND_PREFIX"] = command_prefix
+    env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
 
     if override_dir:
         env["BMK_OVERRIDE_DIR"] = str(override_dir)
@@ -157,6 +160,7 @@ def _run_test(args: tuple[str, ...]) -> None:
         args,
         override_dir=bmk_config.get("override_dir", ""),
         package_name=bmk_config.get("package_name", ""),
+        show_warnings=bmk_config.get("show_warnings", True),
     )
 
     if exit_code != 0:
