@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.16] 2026-02-11 19:36:31
+
+### Fixed
+- **Stagerunner Python command detection**: both `_btx_stagerunner.ps1` and `_btx_stagerunner.sh` now detect the available Python command (`python` / `python3`) instead of hardcoding `python3`, fixing failures on Windows where only `python` exists
+
 ## [2.0.15] 2026-02-11 19:03:25
 
 ### Fixed

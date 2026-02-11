@@ -86,7 +86,17 @@ derive_package_name() {
         die "pyproject.toml not found in ${BMK_PROJECT_DIR}"
     fi
 
-    BMK_PACKAGE_NAME=$(python3 -c '
+    # Prefer python3, fall back to python (e.g. Windows Git Bash)
+    local python_cmd
+    if command -v python3 &>/dev/null; then
+        python_cmd="python3"
+    elif command -v python &>/dev/null; then
+        python_cmd="python"
+    else
+        die "Neither 'python3' nor 'python' found in PATH"
+    fi
+
+    BMK_PACKAGE_NAME=$("$python_cmd" -c '
 import sys
 import rtoml
 from pathlib import Path

@@ -127,7 +127,9 @@ if name:
 sys.exit(1)
 '@
 
-    $result = python3 -c $pythonCode $pyprojectPath 2>&1
+    # Use 'python' on Windows (python3 is not available); fall back to python3 elsewhere
+    $pythonCmd = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { Write-Die "Neither 'python' nor 'python3' found in PATH"; return }
+    $result = & $pythonCmd -c $pythonCode $pyprojectPath 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Die "Failed to derive package name from pyproject.toml"
     }
