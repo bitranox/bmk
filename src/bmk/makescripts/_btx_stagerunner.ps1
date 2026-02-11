@@ -209,7 +209,8 @@ function Show-WarningsFromPassed {
         if (-not $output) { continue }
 
         $warningLines = @($output | Out-String -Stream |
-            Where-Object { $_ -match '(?i)warning' })
+            Where-Object { $_ -match '(?i)warning' } |
+            Where-Object { $_ -notmatch '\d+\s+warnings?' })
 
         if ($warningLines.Count -eq 0) { continue }
 

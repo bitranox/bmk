@@ -19,7 +19,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-BMK := uvx --refresh --from . bmk
+BMK := uv cache clean bmk && uvx --refresh --from /media/srv-main-softdev/projects/apps/utils/bmk bmk
 ARGS ?=
 
 # ──────────────────────────────────────────────────────────────

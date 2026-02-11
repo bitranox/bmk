@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.0.13] 2026-02-11 13:15:15
+
+### Fixed
+- **Warning scanner false positives**: exclude summary lines containing `N warnings` (e.g. pyright's `0 errors, 0 warnings, 0 informations`) from stagerunner warning output in both bash and PowerShell
+
 ## [2.0.12] 2026-02-11 12:54:51
 
 ### Fixed

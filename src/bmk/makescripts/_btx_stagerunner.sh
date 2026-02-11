@@ -217,7 +217,9 @@ print_warnings_from_passed() {
         output_file="$TEMP_DIR/${script_name}.out"
         [[ -f "$output_file" ]] || continue
 
-        warnings=$(grep -i 'warning' "$output_file" 2>/dev/null || true)
+        warnings=$(grep -i 'warning' "$output_file" 2>/dev/null \
+            | grep -v -E '[0-9]+ warnings?' \
+            || true)
         [[ -z "$warnings" ]] && continue
 
         if [[ "$found_any" == false ]]; then
