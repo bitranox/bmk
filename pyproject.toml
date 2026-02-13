@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "2.2.0"
+version = "2.2.1"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,7 +15,7 @@ dependencies = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "hypothesis>=6.151.6",
-    "ruff>=0.15.0",
+    "ruff>=0.15.1",
     "pyright[nodejs]>=1.1.408",
     "bandit>=1.9.3",
     "build>=1.4.0",
@@ -211,10 +211,11 @@ default-remote = "origin"
 
 
 [tool.scripts.test]
-# Configuration for scripts/test.py test runner
+# Configuration for CICD test runner
 pytest-verbosity = "-vv"
 coverage-report-file = "coverage.xml"
 src-path = "src"
+
 [tool.importlinter]
 root_package = "bmk"
 exclude_type_checking_imports = true

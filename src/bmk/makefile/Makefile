@@ -1,4 +1,4 @@
-# BMK MAKEFILE 2.2.0
+# BMK MAKEFILE 2.2.1
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx
@@ -200,7 +200,8 @@ version-current:  ## Print current version
 
 .PHONY: dev
 dev:  ## Install package with dev extras (editable)
-	uv pip install -e "."
+	uv pip install -e ".[dev]"
+
 
 .PHONY: install
 install:  ## Editable install (no dev extras)

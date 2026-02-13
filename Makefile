@@ -201,7 +201,7 @@ version-current:  ## Print current version
 
 .PHONY: dev
 dev:  ## Install package with dev extras (editable)
-	uv pip install -e "."
+	uv pip install -e ".[dev]"
 
 .PHONY: install
 install:  ## Editable install (no dev extras)

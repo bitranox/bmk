@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.2.1] 2026-02-13 10:35:26
+
+### Fixed
+- **`make dev` now installs `[dev]` extras**: changed `uv pip install -e "."` to `uv pip install -e ".[dev]"` so customers with a `[dev]` optional-dependencies group get those extras installed
+
 ## [2.2.0] 2026-02-11 22:09:03
 
 ### Changed
