@@ -1,4 +1,4 @@
-# BMK MAKEFILE 2.3.1
+# BMK MAKEFILE 2.3.2
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx
@@ -53,17 +53,20 @@ endif
 .PHONY: test t
 test:  ## Run test suite [alias: t]
 	$(BMK) test $(ARGS)
-t: test
+t:
+	$(BMK) test $(ARGS)
 
 .PHONY: testintegration testi ti
 testintegration:  ## Run integration tests only [aliases: testi, ti]
 	$(BMK) testintegration $(ARGS)
-testi ti: testintegration
+testi ti:
+	$(BMK) testintegration $(ARGS)
 
 .PHONY: codecov coverage cov
 codecov:  ## Upload coverage report to Codecov [aliases: coverage, cov]
 	$(BMK) codecov $(ARGS)
-coverage cov: codecov
+coverage cov:
+	$(BMK) codecov $(ARGS)
 
 # ──────────────────────────────────────────────────────────────
 # Build & Clean
@@ -72,12 +75,14 @@ coverage cov: codecov
 .PHONY: build bld
 build:  ## Build wheel and sdist artifacts [alias: bld]
 	$(BMK) build $(ARGS)
-bld: build
+bld:
+	$(BMK) build $(ARGS)
 
 .PHONY: clean cln cl
 clean:  ## Remove build artifacts and caches [aliases: cln, cl]
 	$(BMK) clean $(ARGS)
-cln cl: clean
+cln cl:
+	$(BMK) clean $(ARGS)
 
 # ──────────────────────────────────────────────────────────────
 # Run
@@ -113,17 +118,20 @@ bump: bump-patch  ## Bump patch version (default for bump)
 .PHONY: commit c
 commit:  ## Create a git commit with timestamped message [alias: c]
 	$(BMK) commit $(ARGS)
-c: commit
+c:
+	$(BMK) commit $(ARGS)
 
 .PHONY: push psh p
 push:  ## Run tests, commit, and push to remote [aliases: psh, p]
 	$(BMK) push $(ARGS)
-psh p: push
+psh p:
+	$(BMK) push $(ARGS)
 
 .PHONY: release rel r
 release:  ## Create a versioned release (tag + GitHub release) [aliases: rel, r]
 	$(BMK) release $(ARGS)
-rel r: release
+rel r:
+	$(BMK) release $(ARGS)
 
 # ──────────────────────────────────────────────────────────────
 # Dependencies
@@ -132,7 +140,8 @@ rel r: release
 .PHONY: dependencies deps d
 dependencies:  ## Check and list project dependencies [aliases: deps, d]
 	$(BMK) dependencies $(ARGS)
-deps d: dependencies
+deps d:
+	$(BMK) dependencies $(ARGS)
 
 .PHONY: dependencies-update
 dependencies-update:  ## Update dependencies to latest versions

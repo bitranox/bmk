@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.3.2] 2026-02-13 18:14:14
+
+### Fixed
+- **Makefile alias targets firing as prerequisites during argument forwarding**: `make push coverage test` no longer executes the real `codecov` target — alias targets (`coverage cov:`, `t:`, `bld:`, `cln cl:`, `c:`, `psh p:`, `rel r:`, `deps d:`, `testi ti:`) now use standalone recipes instead of prerequisite chains, allowing the trailing-argument no-op override block to properly suppress them; GNU Make accumulates prerequisites across rules (never overridden), but recipes follow "last rule wins"
+
 ## [2.3.1] 2026-02-13 17:59:34
 
 ### Added
