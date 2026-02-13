@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 05: Git push to remote
 
 $ErrorActionPreference = "Stop"
@@ -9,10 +10,10 @@ if (-not $env:BMK_PROJECT_DIR) {
 Set-Location $env:BMK_PROJECT_DIR
 
 # Configuration: remote and branch
-$gitRemote = if ($env:BMK_GIT_REMOTE) { $env:BMK_GIT_REMOTE } else { "origin" }
-$gitBranch = if ($env:BMK_GIT_BRANCH) { $env:BMK_GIT_BRANCH } else { (git rev-parse --abbrev-ref HEAD) }
+$gitRemote = $env:BMK_GIT_REMOTE ? $env:BMK_GIT_REMOTE : "origin"
+$gitBranch = $env:BMK_GIT_BRANCH ? $env:BMK_GIT_BRANCH : (git rev-parse --abbrev-ref HEAD)
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -24,10 +25,10 @@ function Explain-ExitCode {
 }
 
 # Push to remote
-Write-Host "Pushing to $gitRemote/$gitBranch..."
+Write-Output "Pushing to $gitRemote/$gitBranch..."
 
 git push -u $gitRemote $gitBranch
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

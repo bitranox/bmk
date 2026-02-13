@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "2.2.2"
+version = "2.3.0"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,9 +24,13 @@ dependencies = [
     "pip-audit>=2.10.0",
     "textual>=7.5.0",
     "import-linter>=2.10",
+    "shellcheck-py>=0.11.0.1",
+    "shfmt-py>=3.12.0.2",
+    "bashate>=2.1.1",
     "rtoml>=0.13.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.2.1",
+    "hatchling>=1.28.0",           # needed for bild system - additionally added here by design
     # Transitive CVE pins (genuine transitive deps needing minimum version)
     "jaraco-context>=6.1.0",       # CVE-2026-23949  (twine -> keyring -> jaraco.context)
     "urllib3>=2.6.3",              # CVE-2025-66471, CVE-2025-66418, CVE-2026-21441  (twine, codecov-cli, pip-audit)
@@ -204,6 +208,19 @@ patterns = [
   ".cache",
   "result",
 ]
+
+[tool.psscriptanalyzer]
+# PSScriptAnalyzer rules to exclude when linting .ps1 files
+exclude-rules = [
+  "PSAvoidUsingWriteHost",              # intentional: stagerunner colored console UI
+  "PSUseBOMForUnicodeEncodedFile",      # BOM-less UTF-8 is the modern standard
+  "PSUseUsingScopeModifierInNewRunspaces",  # false positive: param() + -ArgumentList in Start-Job
+]
+
+[tool.bashate]
+# bashate style settings for .sh files (E003 excluded: indent handled by shfmt)
+max-line-length = 120
+ignores = ["E003"]
 
 [tool.git]
 # Default git remote for push/release commands

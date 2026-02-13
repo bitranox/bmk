@@ -1,4 +1,4 @@
-"""CLI core stories: traceback, main entry, help, hello, fail, info, unknown command."""
+"""CLI core stories: traceback, main entry, help, fail, info, unknown command."""
 
 from __future__ import annotations
 
@@ -149,18 +149,6 @@ def test_traceback_flag_displays_full_exception_traceback(
 
 
 @pytest.mark.os_agnostic
-def test_hello_command_outputs_greeting(
-    cli_runner: CliRunner,
-    production_factory: Callable[[], Any],
-) -> None:
-    """hello command outputs Hello World greeting."""
-    result: Result = cli_runner.invoke(cli_mod.cli, ["hello"], obj=production_factory)
-
-    assert result.exit_code == 0
-    assert "Hello World" in result.output
-
-
-@pytest.mark.os_agnostic
 def test_fail_command_raises_runtime_error(
     cli_runner: CliRunner,
     production_factory: Callable[[], Any],
@@ -204,7 +192,7 @@ def test_restore_traceback_false_keeps_flags_enabled(
     """restore_traceback=False leaves traceback flags enabled after command."""
     cli_mod.apply_traceback_preferences(False)
 
-    cli_mod.main(["--traceback", "hello"], restore_traceback=False, services_factory=build_production)
+    cli_mod.main(["--traceback", "info"], restore_traceback=False, services_factory=build_production)
 
     assert lib_cli_exit_tools.config.traceback is True
     assert lib_cli_exit_tools.config.traceback_force_color is True

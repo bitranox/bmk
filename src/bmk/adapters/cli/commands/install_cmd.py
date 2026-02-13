@@ -84,24 +84,37 @@ def cli_install() -> None:
         bmk install          # fresh install or update
     """
     with lib_log_rich.runtime.bind(job_id="cli-install", extra={"command": "install"}):
+        makefile_error: SystemExit | None = None
+
         if not _BUNDLED_MAKEFILE.is_file():
             click.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
-            raise SystemExit(ExitCode.FILE_NOT_FOUND)
-
-        target = Path.cwd() / "Makefile"
-
-        if target.exists():
-            first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
-            if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
-                click.echo("Makefile exists but is not managed by bmk — skipping", err=True)
-                raise SystemExit(ExitCode.GENERAL_ERROR)
-            logger.info("Updating existing bmk Makefile")
-            click.echo("Updating existing bmk Makefile")
+            makefile_error = SystemExit(ExitCode.FILE_NOT_FOUND)
         else:
-            logger.info("Installing bmk Makefile")
-            click.echo("Installing bmk Makefile")
+            target = Path.cwd() / "Makefile"
 
-        shutil.copy2(_BUNDLED_MAKEFILE, target)
+            if target.exists():
+                first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
+                if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
+                    click.echo("Makefile exists but is not managed by bmk — skipping", err=True)
+                    makefile_error = SystemExit(ExitCode.GENERAL_ERROR)
+                else:
+                    logger.info("Updating existing bmk Makefile")
+                    click.echo("Updating existing bmk Makefile")
+                    shutil.copy2(_BUNDLED_MAKEFILE, target)
+            else:
+                logger.info("Installing bmk Makefile")
+                click.echo("Installing bmk Makefile")
+                shutil.copy2(_BUNDLED_MAKEFILE, target)
+
+        from ._prerequisites import check_prerequisites, format_prerequisites_report
+
+        results = check_prerequisites()
+        report = format_prerequisites_report(results)
+        click.echo("")
+        click.echo(report)
+
+        if makefile_error is not None:
+            raise makefile_error
 
 
 __all__ = ["check_makefile_update", "cli_install"]

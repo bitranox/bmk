@@ -18,6 +18,8 @@ __all__ = [
     "CoverageReportConfig",
     "BanditConfig",
     "PipAuditConfig",
+    "PSScriptAnalyzerConfig",
+    "BashateConfig",
     "ScriptsTestConfig",
     "ToolConfig",
     "ProjectSection",
@@ -128,6 +130,34 @@ class PipAuditConfig:
         """Create from dict parsed from TOML."""
         ignore_vulns = _get_str_list(data, "ignore-vulns")
         return cls(ignore_vulns=tuple(ignore_vulns))
+
+
+@dataclass(frozen=True)
+class PSScriptAnalyzerConfig:
+    """Configuration for [tool.psscriptanalyzer] section."""
+
+    exclude_rules: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PSScriptAnalyzerConfig:
+        """Create from dict parsed from TOML."""
+        rules = _get_str_list(data, "exclude-rules")
+        return cls(exclude_rules=tuple(rules))
+
+
+@dataclass(frozen=True)
+class BashateConfig:
+    """Configuration for [tool.bashate] section."""
+
+    max_line_length: int = 120
+    ignores: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BashateConfig:
+        """Create from dict parsed from TOML."""
+        max_line_length = _get_int(data, "max-line-length", 120)
+        ignores = _get_str_list(data, "ignores")
+        return cls(max_line_length=max_line_length, ignores=tuple(ignores))
 
 
 @dataclass(frozen=True)
@@ -278,6 +308,8 @@ class ToolConfig:
     coverage: CoverageReportConfig = field(default_factory=CoverageReportConfig)
     bandit: BanditConfig = field(default_factory=BanditConfig)
     pip_audit: PipAuditConfig = field(default_factory=PipAuditConfig)
+    psscriptanalyzer: PSScriptAnalyzerConfig = field(default_factory=PSScriptAnalyzerConfig)
+    bashate: BashateConfig = field(default_factory=BashateConfig)
     scripts: ScriptsTestConfig = field(default_factory=ScriptsTestConfig)
     poetry: PoetryConfig = field(default_factory=PoetryConfig)
     pdm: PdmConfig = field(default_factory=PdmConfig)
@@ -291,6 +323,8 @@ class ToolConfig:
             coverage=CoverageReportConfig.from_dict(_get_dict(data, "coverage")),
             bandit=BanditConfig.from_dict(_get_dict(data, "bandit")),
             pip_audit=PipAuditConfig.from_dict(_get_dict(data, "pip-audit")),
+            psscriptanalyzer=PSScriptAnalyzerConfig.from_dict(_get_dict(data, "psscriptanalyzer")),
+            bashate=BashateConfig.from_dict(_get_dict(data, "bashate")),
             scripts=ScriptsTestConfig.from_dict(_get_dict(data, "scripts")),
             poetry=PoetryConfig.from_dict(_get_dict(data, "poetry")),
             pdm=PdmConfig.from_dict(_get_dict(data, "pdm")),

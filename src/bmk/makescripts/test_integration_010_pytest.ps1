@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 01: Integration tests with pytest (marker: integration)
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +17,7 @@ else {
     $env:PYTHONPATH = $srcPath
 }
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -29,10 +30,10 @@ function Explain-ExitCode {
     }
 }
 
-Write-Host "Running pytest (integration tests only)..."
+Write-Output "Running pytest (integration tests only)..."
 
 pytest -m integration --tb=short -q $args
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

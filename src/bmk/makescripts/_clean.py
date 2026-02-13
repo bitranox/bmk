@@ -55,34 +55,16 @@ _FALLBACK_PATTERNS: tuple[str, ...] = (
 __all__ = ["clean", "get_clean_patterns", "main"]
 
 
-_MISSING_SECTION_WARNING = """\
-WARNING: No [tool.clean] patterns found in pyproject.toml.
-Using built-in fallback patterns. For proper cleaning, add to your pyproject.toml:
-
-[tool.clean]
-# Patterns to remove when running `make clean`
-patterns = [
-  "**/__pycache__",
-  ".hypothesis",
-  ".import_linter_cache",
-  ".pytest_cache",
-  ".ruff_cache",
-  ".pyright",
-  ".mypy_cache",
-  ".tox",
-  ".nox",
-  ".eggs",
-  "*.egg-info",
-  "build",
-  "dist",
-  "htmlcov",
-  ".coverage",
-  "coverage.xml",
-  "codecov.sh",
-  ".cache",
-  "result",
-]
-"""
+def _build_missing_section_warning() -> str:
+    """Build warning message dynamically from ``_FALLBACK_PATTERNS``."""
+    items = ",\n".join(f'  "{p}"' for p in _FALLBACK_PATTERNS)
+    return (
+        "WARNING: No [tool.clean] patterns found in pyproject.toml.\n"
+        "Using built-in fallback patterns. For proper cleaning, add to your pyproject.toml:\n\n"
+        "[tool.clean]\n"
+        "# Patterns to remove when running `make clean`\n"
+        f"patterns = [\n{items},\n]\n"
+    )
 
 
 def get_clean_patterns(pyproject: Path = Path("pyproject.toml")) -> tuple[str, ...]:
@@ -103,7 +85,7 @@ def get_clean_patterns(pyproject: Path = Path("pyproject.toml")) -> tuple[str, .
     if patterns:
         return patterns
 
-    print(_MISSING_SECTION_WARNING, file=sys.stderr)
+    print(_build_missing_section_warning(), file=sys.stderr)
     return _FALLBACK_PATTERNS
 
 

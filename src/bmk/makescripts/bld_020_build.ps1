@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 02: Build Python wheel and sdist artifacts
 
 $ErrorActionPreference = "Stop"
@@ -9,7 +10,7 @@ if (-not $env:BMK_PROJECT_DIR) {
 
 Set-Location $env:BMK_PROJECT_DIR
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -19,10 +20,10 @@ function Explain-ExitCode {
     }
 }
 
-Write-Host "Building wheel/sdist via python -m build"
+Write-Output "Building wheel/sdist via python -m build"
 
 & $BMK_PYTHON_CMD -m build
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

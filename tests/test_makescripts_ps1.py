@@ -291,6 +291,8 @@ class TestToolScriptValidation:
             "test_040_lint_imports.ps1",
             "test_040_pip_audit.ps1",
             "test_040_pytest.ps1",
+            "test_040_psscriptanalyzer.ps1",
+            "test_060_shellcheck.ps1",
             "push_050_push.ps1",
             "bld_020_build.ps1",
         ],
@@ -333,7 +335,7 @@ class TestDelegatorScriptValidation:
             "push_020_build.ps1",
             "push_030_clean.ps1",
             "push_040_commit.ps1",
-            "test_050_clean.ps1",
+            "test_900_clean.ps1",
         ],
     )
     def test_fails_without_required_env_vars(self, script_name: str) -> None:

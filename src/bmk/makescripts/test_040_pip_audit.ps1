@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 03: pip-audit dependency vulnerability scan
 # Reads ignore-vulns from [tool.pip-audit] in pyproject.toml
 
@@ -10,7 +11,7 @@ if (-not $env:BMK_PROJECT_DIR) {
 
 Set-Location $env:BMK_PROJECT_DIR
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -28,10 +29,10 @@ if (Test-Path "pyproject.toml") {
     }
 }
 
-Write-Host "Running pip-audit..."
+Write-Output "Running pip-audit..."
 
 pip-audit @ignoreFlags
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

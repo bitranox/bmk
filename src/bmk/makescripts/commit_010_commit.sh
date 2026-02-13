@@ -52,10 +52,11 @@ printf 'Staging changes...\n'
 git add -A
 
 # Warn about potentially sensitive files being staged
-sensitive_files=$(git diff --cached --name-only | grep -iE '\.env$|\.env\.|credentials|secret|\.key$|\.pem$|id_rsa' || true)
+sensitive_pattern='\.env$|\.env\.|credentials|secret|\.key$|\.pem$|id_rsa'
+sensitive_files=$(git diff --cached --name-only | grep -iE "$sensitive_pattern" || true)
 if [[ -n "$sensitive_files" ]]; then
     printf 'Warning: Potentially sensitive files staged:\n' >&2
-    printf '  %s\n' $sensitive_files >&2
+    printf '  %s\n' "$sensitive_files" >&2
     printf 'These files will be committed. Ensure .gitignore is correct.\n' >&2
 fi
 

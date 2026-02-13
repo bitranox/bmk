@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 02: Ruff linting
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +9,7 @@ if (-not $env:BMK_PROJECT_DIR) {
 
 Set-Location $env:BMK_PROJECT_DIR
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -18,10 +19,10 @@ function Explain-ExitCode {
     }
 }
 
-Write-Host "Running ruff lint..."
+Write-Output "Running ruff lint..."
 
 ruff check .
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Shared library for bump scripts - dot-source this, don't execute directly.
 # Prefixed with underscore so stagerunner ignores it.
 
@@ -16,7 +17,7 @@ function Initialize-Bump {
     Set-Location $env:BMK_PROJECT_DIR
 }
 
-function Explain-BumpExitCode {
+function Write-BumpExitCodeError {
     <#
     .SYNOPSIS
         Print human-readable explanation for bump exit codes.
@@ -52,11 +53,11 @@ function Invoke-Bump {
         [string]$ScriptDir
     )
 
-    Write-Host "Bumping $BumpType version..."
+    Write-Output "Bumping $BumpType version..."
 
     & $BMK_PYTHON_CMD "$ScriptDir\_bump_version.py" $BumpType --project-dir $env:BMK_PROJECT_DIR
     $exitCode = $LASTEXITCODE
 
-    Explain-BumpExitCode $exitCode
+    Write-BumpExitCodeError $exitCode
     exit $exitCode
 }

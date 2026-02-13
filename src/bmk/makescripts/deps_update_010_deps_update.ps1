@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 01: Update outdated dependencies to latest versions
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_resolve_python.ps1"

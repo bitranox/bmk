@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 02: Bandit security scan
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +12,7 @@ if (-not $env:BMK_PACKAGE_NAME) {
 
 Set-Location $env:BMK_PROJECT_DIR
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -20,10 +21,10 @@ function Explain-ExitCode {
     }
 }
 
-Write-Host "Running bandit on src/$($env:BMK_PACKAGE_NAME)..."
+Write-Output "Running bandit on src/$($env:BMK_PACKAGE_NAME)..."
 
 bandit -q -r -c pyproject.toml "src/$($env:BMK_PACKAGE_NAME)"
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

@@ -86,11 +86,9 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
     Example:
         >>> from click.testing import CliRunner
         >>> runner = CliRunner()
-        >>> result = runner.invoke(cli, ["hello"])
+        >>> result = runner.invoke(cli, ["info"])
         >>> result.exit_code
         0
-        >>> "Hello World" in result.output
-        True
     """
     # ctx.obj is always the services factory (production or test)
     if not callable(ctx.obj):
@@ -147,7 +145,6 @@ def _register_commands() -> None:
         cli_dependencies,
         cli_deps,
         cli_fail,
-        cli_hello,
         cli_info,
         cli_install,
         cli_logdemo,
@@ -187,7 +184,6 @@ def _register_commands() -> None:
         cli_deps,
         cli_info,
         cli_install,
-        cli_hello,
         cli_fail,
         cli_config,
         cli_config_deploy,

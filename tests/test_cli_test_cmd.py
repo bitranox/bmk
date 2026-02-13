@@ -67,8 +67,8 @@ def test_resolve_script_path_returns_none_when_not_found(tmp_path: Path) -> None
 
 
 @pytest.mark.os_agnostic
-def test_execute_script_uses_powershell_for_ps1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PowerShell scripts are invoked with powershell.exe."""
+def test_execute_script_uses_pwsh_for_ps1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PowerShell scripts are invoked with pwsh."""
     captured_cmd: list[list[str]] = []
     captured_env: list[dict[str, str]] = []
 
@@ -86,9 +86,9 @@ def test_execute_script_uses_powershell_for_ps1(tmp_path: Path, monkeypatch: pyt
 
     execute_script(script_path, cwd, ("arg1", "arg2"))
 
-    assert captured_cmd[0][0] == "powershell"
-    assert "-ExecutionPolicy" in captured_cmd[0]
-    assert "Bypass" in captured_cmd[0]
+    assert captured_cmd[0][0] == "pwsh"
+    assert "-NoProfile" in captured_cmd[0]
+    assert "-NonInteractive" in captured_cmd[0]
     assert "-File" in captured_cmd[0]
     assert str(script_path) in captured_cmd[0]
     assert "arg1" in captured_cmd[0]

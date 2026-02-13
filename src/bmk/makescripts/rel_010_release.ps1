@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 02: Create git tag and GitHub release
 
 $ErrorActionPreference = "Stop"

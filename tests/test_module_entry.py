@@ -99,7 +99,6 @@ def test_module_entry_cli_exports_all_registered_commands() -> None:
         "cli_config_deploy",
         "cli_config_generate_examples",
         "cli_fail",
-        "cli_hello",
         "cli_info",
         "cli_logdemo",
         "cli_send_email",

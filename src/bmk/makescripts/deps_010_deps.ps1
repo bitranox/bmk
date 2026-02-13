@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 01: Check project dependencies against PyPI
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_resolve_python.ps1"

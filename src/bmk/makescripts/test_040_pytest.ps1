@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 04: Unit tests with pytest, coverage, and Codecov upload (excludes integration tests)
 
 $ErrorActionPreference = "Stop"

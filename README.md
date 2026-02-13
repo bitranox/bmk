@@ -67,7 +67,9 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
   | 020   | sequential   | `test_020_ruff_format_apply.sh`                                                                                                                                                  |
   | 030   | sequential   | `test_030_ruff_fix_apply.sh`                                                                                                                                                     |
   | 040   | **parallel** | `test_040_ruff_format_check.sh`, `test_040_ruff_lint.sh`, `test_040_pyright.sh`, `test_040_bandit.sh`, `test_040_pip_audit.sh`, `test_040_lint_imports.sh`, `test_040_pytest.sh` |
-  | 050   | sequential   | `test_050_clean.sh`                                                                                                                                                              |
+  | 050   | sequential   | `test_050_psscriptanalyzer.sh`                                                                                                                                                   |
+  | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                         |
+  | 900   | sequential   | `test_900_clean.sh`                                                                                                                                                              |
 
 - **Built-in commands** — `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
 - **Custom commands** — `bmk custom <name>` runs user-defined scripts from the override directory (no bundled scripts required).

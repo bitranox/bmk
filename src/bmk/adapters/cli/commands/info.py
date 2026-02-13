@@ -1,10 +1,9 @@
-"""Basic CLI commands for info, greeting, and failure testing.
+"""Basic CLI commands for info and failure testing.
 
 Provides simple commands that demonstrate success and failure paths.
 
 Contents:
     * :func:`cli_info` - Display package metadata.
-    * :func:`cli_hello` - Emit canonical greeting.
     * :func:`cli_fail` - Trigger intentional failure for testing.
 """
 
@@ -16,7 +15,6 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from bmk import __init__conf__
-from bmk.domain.behaviors import build_greeting
 
 from ..constants import CLICK_CONTEXT_SETTINGS
 
@@ -39,22 +37,6 @@ def cli_info() -> None:
         __init__conf__.print_info()
 
 
-@click.command("hello", context_settings=CLICK_CONTEXT_SETTINGS)
-def cli_hello() -> None:
-    """Demonstrate the success path by emitting the canonical greeting.
-
-    Example:
-        >>> from click.testing import CliRunner
-        >>> runner = CliRunner()
-        >>> result = runner.invoke(cli_hello)
-        >>> "Hello World" in result.output
-        True
-    """
-    with lib_log_rich.runtime.bind(job_id="cli-hello", extra={"command": "hello"}):
-        logger.info("Executing hello command")
-        click.echo(build_greeting())
-
-
 @click.command("fail", context_settings=CLICK_CONTEXT_SETTINGS)
 def cli_fail() -> None:
     """Trigger the intentional failure helper to test error handling.
@@ -71,4 +53,4 @@ def cli_fail() -> None:
         raise RuntimeError("I should fail")
 
 
-__all__ = ["cli_fail", "cli_hello", "cli_info"]
+__all__ = ["cli_fail", "cli_info"]

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 01: Run project CLI via uvx with local dependencies
 
 $ErrorActionPreference = "Stop"

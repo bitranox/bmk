@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 02: Import-linter architecture contracts
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +18,7 @@ else {
     $env:PYTHONPATH = $srcPath
 }
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -26,10 +27,10 @@ function Explain-ExitCode {
     }
 }
 
-Write-Host "Running import-linter..."
+Write-Output "Running import-linter..."
 
 lint-imports
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

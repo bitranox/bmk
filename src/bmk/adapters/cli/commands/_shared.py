@@ -111,9 +111,9 @@ def execute_script(
 
     if script_path.suffix == ".ps1":
         cmd = [
-            "powershell",
-            "-ExecutionPolicy",
-            "Bypass",
+            "pwsh",
+            "-NoProfile",
+            "-NonInteractive",
             "-File",
             str(script_path),
             *extra_args,

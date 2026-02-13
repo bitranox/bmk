@@ -6,6 +6,26 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.3.0] 2026-02-13 14:01:44
+
+### Added
+- **PSScriptAnalyzer lint stage** (`test_040_psscriptanalyzer`): new makescript that lints all `.ps1` files via PSScriptAnalyzer, with excluded rules driven by `[tool.psscriptanalyzer]` in `pyproject.toml`; auto-installs the PowerShell module if absent
+- **Shell lint stage** (`test_060_shellcheck`): new makescript that runs shellcheck, shfmt, and bashate against all `.sh` files, with bashate settings driven by `[tool.bashate]` in `pyproject.toml`; Windows `.ps1` variant skips gracefully
+- **Prerequisite checking on `bmk install`**: after Makefile deployment, prints a diagnostic summary showing which external tools (git, pwsh, shellcheck, shfmt, bashate, PSScriptAnalyzer) are found or missing, with platform-appropriate install hints (apt on Linux, brew on macOS, winget on Windows); report is informational only and always displays even when Makefile deployment is skipped
+- **New runtime dependencies**: `shellcheck-py`, `shfmt-py`, `bashate`, `hatchling` (build system, added to runtime deps by design)
+- **TOML config models**: `PSScriptAnalyzerConfig` and `BashateConfig` dataclasses in `_toml_config.py` for reading `[tool.psscriptanalyzer]` and `[tool.bashate]` sections
+
+### Changed
+- **Test clean stage renumbered**: `test_050_clean` → `test_900_clean` to make room for new lint stages (PSScriptAnalyzer at 040, shellcheck at 060)
+- **PowerShell scripts require pwsh 7+**: added `#Requires -Version 7.0` to stagerunner and key makescripts; replaced PS 5.1 compat workarounds (`[char]0x1B`, `if/else` ternaries) with native pwsh 7 syntax (`` `e ``, `??`, `?:`)
+- **Script executor uses `pwsh`**: `_shared.py` now invokes `.ps1` scripts via `pwsh -NoProfile -NonInteractive` instead of `powershell -ExecutionPolicy Bypass`
+- **PowerShell naming conventions**: renamed `Explain-ExitCode` to `Write-ExitCodeError` (approved verb), `Get-UniqueStages` to `Get-UniqueStage` (singular); replaced `Write-Host` with `Write-Output` where appropriate
+- **Commit script quoting fix**: `commit_010_commit.sh` now properly quotes `$sensitive_files` in `printf` to prevent word splitting
+- **Clean warning built dynamically**: `_clean.py` replaces static `_MISSING_SECTION_WARNING` string with `_build_missing_section_warning()` generated from `_FALLBACK_PATTERNS`
+
+### Removed
+- **`hello` command and `behaviors.py` domain module**: removed `cli_hello`, `build_greeting()`, and `CANONICAL_GREETING` — template scaffolding no longer needed
+
 ## [2.2.2] 2026-02-13 11:02:42
 
 ### Changed

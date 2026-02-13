@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 02: Clean build artifacts after coverage
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_resolve_python.ps1"

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Generic staged command runner - executes scripts in staged parallel batches
 #
 # Required environment variables (set by Python CLI):
@@ -50,12 +51,11 @@ $script:TotalScripts = 0
 $script:ScriptArgs = $args
 $script:FailedScripts = [System.Collections.Generic.List[string]]::new()
 
-# ANSI color codes — use [char]0x1B instead of `e for Windows PowerShell 5.1 compat
-$ESC = [char]0x1B
-$ColorGreen = "${ESC}[32m"
-$ColorRed = "${ESC}[31m"
-$ColorYellow = "${ESC}[33m"
-$ColorReset = "${ESC}[0m"
+# ANSI color codes
+$ColorGreen = "`e[32m"
+$ColorRed = "`e[31m"
+$ColorYellow = "`e[33m"
+$ColorReset = "`e[0m"
 
 # ---------------------------------------------------------------------------
 # Functions
@@ -123,7 +123,7 @@ function Get-StageNumber {
     return $null
 }
 
-function Get-UniqueStages {
+function Get-UniqueStage {
     # Discover unique stage numbers from matching scripts, sorted numerically
     $pattern = Join-Path $env:BMK_STAGES_DIR "$($env:BMK_COMMAND_PREFIX)_*_*.ps1"
     $scripts = @(Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue)
@@ -155,7 +155,7 @@ function Get-ScriptsForStage {
 }
 
 function Invoke-SingleScript {
-    param([int]$Stage, [System.IO.FileInfo]$Script)
+    param([System.IO.FileInfo]$Script)
 
     $script:TotalScripts++
 
@@ -221,7 +221,7 @@ function Invoke-StageParallel {
 
     # Single script: run directly with output to console
     if ($scripts.Count -eq 1) {
-        return (Invoke-SingleScript -Stage $Stage -Script $scripts[0])
+        return (Invoke-SingleScript -Script $scripts[0])
     }
 
     $script:TotalScripts += $scripts.Count
@@ -246,15 +246,8 @@ function Invoke-StageParallel {
 
         $job = Start-Job -ScriptBlock {
             param($Path, $Args_)
-            # Wrap in try/catch: child scripts set $ErrorActionPreference = "Stop"
-            # which turns native-command stderr into terminating errors in PS 5.1.
-            try {
-                & $Path @Args_
-            } catch {
-                # Allow $LASTEXITCODE from the native command to propagate
-            }
-            $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }
-            exit $code
+            & $Path @Args_
+            exit ($LASTEXITCODE ?? 1)
         } -ArgumentList $scriptPath, $jobArgs
 
         $jobs[$scriptName] = $job
@@ -271,7 +264,7 @@ function Invoke-StageParallel {
         $job = $jobs[$scriptName]
         $null = Wait-Job $job
         $exitCode = $job.ChildJobs[0].ExitCode
-        if ($null -eq $exitCode) { $exitCode = if ($job.State -eq 'Failed') { 1 } else { 0 } }
+        $exitCode ??= ($job.State -eq 'Failed') ? 1 : 0
         $output = Receive-Job $job 2>&1 -ErrorAction SilentlyContinue
         $exitCodes[$scriptName] = $exitCode
         $allOutput[$scriptName] = $output
@@ -279,7 +272,7 @@ function Invoke-StageParallel {
         if ($exitCode -ne 0) {
             $failed.Add($scriptName)
             $script:FailedScripts.Add("${scriptName}:${exitCode}")
-            if ($null -eq $firstFailureCode) { $firstFailureCode = $exitCode }
+            $firstFailureCode ??= $exitCode
         }
         else {
             $passed.Add($scriptName)
@@ -316,7 +309,7 @@ function Invoke-StageParallel {
             }
         }
         Write-Host ""
-        return $(if ($firstFailureCode) { $firstFailureCode } else { 1 })
+        return ($firstFailureCode ?? 1)
     }
 
     return 0
@@ -327,7 +320,7 @@ function Invoke-Run {
     Resolve-StagesDir
     Get-PackageName
 
-    $stages = @(Get-UniqueStages)
+    $stages = @(Get-UniqueStage)
 
     if ($stages.Count -eq 0) {
         Write-Host "No scripts found for $($env:BMK_COMMAND_PREFIX). Create $($env:BMK_COMMAND_PREFIX)_NN_*.ps1 scripts where NN is a two-digit stage number."
@@ -345,7 +338,7 @@ function Invoke-Run {
                 Write-Host "${ColorRed}  $([char]0x2717) $sname (exit code: $scode)${ColorReset}"
             }
             $firstCode = ($script:FailedScripts[0] -split ':', 2)[1]
-            exit $(if ($firstCode) { [int]$firstCode } else { 1 })
+            exit ($firstCode ? [int]$firstCode : 1)
         }
     }
 }

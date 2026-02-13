@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Git commit with timestamp prefix
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +9,7 @@ if (-not $env:BMK_PROJECT_DIR) {
 
 Set-Location $env:BMK_PROJECT_DIR
 
-function Explain-ExitCode {
+function Write-ExitCodeError {
     param([int]$Code)
     switch ($Code) {
         0 { }
@@ -48,7 +49,7 @@ $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $fullMessage = "$timestamp - $commitMessage"
 
 # Stage all changes
-Write-Host "Staging changes..."
+Write-Output "Staging changes..."
 git add -A
 
 # Warn about potentially sensitive files being staged
@@ -63,17 +64,17 @@ if ($sensitiveFiles) {
 
 # Build commit arguments
 $commitArgs = @()
-$stagedChanges = git diff --cached --quiet 2>$null
+$null = git diff --cached --quiet 2>$null
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "No staged changes detected; creating empty commit"
+    Write-Output "No staged changes detected; creating empty commit"
     $commitArgs += "--allow-empty"
 }
 
 # Commit with timestamped message
-Write-Host "Committing: $fullMessage"
+Write-Output "Committing: $fullMessage"
 
 git commit @commitArgs -m $fullMessage
 $exitCode = $LASTEXITCODE
 
-Explain-ExitCode $exitCode
+Write-ExitCodeError $exitCode
 exit $exitCode

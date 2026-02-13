@@ -7,6 +7,7 @@ dependencies (subprocess calls, network requests, etc.).
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -783,3 +784,587 @@ class TestBuildUpdatedSpec:
         result = deps_module._build_updated_spec(dep)
 
         assert result == "unknown>=1.0.0"
+
+
+class TestBuildUpdatedSpecExtended:
+    """Additional edge cases for _build_updated_spec."""
+
+    @pytest.fixture
+    def deps_module(self) -> Any:
+        """Import dependencies module."""
+        from bmk.makescripts import _dependencies
+
+        return _dependencies
+
+    @pytest.mark.os_agnostic
+    def test_preserves_extras(self, deps_module: Any) -> None:
+        """_build_updated_spec preserves extras bracket notation."""
+        dep = deps_module.DependencyInfo(
+            name="pkg",
+            source="test",
+            constraint=">=1.0",
+            current_min="1.0",
+            latest="2.0",
+            status="outdated",
+            original_spec="pkg[extra]>=1.0",
+        )
+
+        result = deps_module._build_updated_spec(dep)
+
+        assert "[extra]" in result
+        assert ">=2.0" in result
+
+    @pytest.mark.os_agnostic
+    def test_adds_constraint_to_bare_name(self, deps_module: Any) -> None:
+        """_build_updated_spec adds >=latest to a bare package name."""
+        dep = deps_module.DependencyInfo(
+            name="mypackage",
+            source="test",
+            constraint="",
+            current_min="",
+            latest="2.0",
+            status="outdated",
+            original_spec="mypackage",
+        )
+
+        result = deps_module._build_updated_spec(dep)
+
+        assert "mypackage" in result
+        assert ">=2.0" in result
+
+    @pytest.mark.os_agnostic
+    def test_double_equals(self, deps_module: Any) -> None:
+        """_build_updated_spec updates == constraints."""
+        dep = deps_module.DependencyInfo(
+            name="pkg",
+            source="test",
+            constraint="==1.0",
+            current_min="1.0",
+            latest="2.0",
+            status="outdated",
+            original_spec="pkg==1.0",
+        )
+
+        result = deps_module._build_updated_spec(dep)
+
+        assert "==2.0" in result
+
+    @pytest.mark.os_agnostic
+    def test_tilde_equals(self, deps_module: Any) -> None:
+        """_build_updated_spec updates ~= constraints."""
+        dep = deps_module.DependencyInfo(
+            name="pkg",
+            source="test",
+            constraint="~=1.4",
+            current_min="1.4",
+            latest="2.0",
+            status="outdated",
+            original_spec="pkg~=1.4",
+        )
+
+        result = deps_module._build_updated_spec(dep)
+
+        assert "~=2.0" in result
+
+
+class TestPrintReport:
+    """Tests for print_report function."""
+
+    @pytest.fixture
+    def deps_module(self) -> Any:
+        """Import dependencies module."""
+        from bmk.makescripts import _dependencies
+
+        return _dependencies
+
+    def _make_dep(self, deps_module: Any, **overrides: Any) -> Any:
+        """Build a DependencyInfo with sensible defaults."""
+        defaults = {
+            "name": "pkg",
+            "source": "[project].dependencies",
+            "constraint": ">=1.0.0",
+            "current_min": "1.0.0",
+            "latest": "1.0.0",
+            "status": "up-to-date",
+            "original_spec": "pkg>=1.0.0",
+            "upper_bound": "",
+        }
+        defaults.update(overrides)
+        return deps_module.DependencyInfo(**defaults)
+
+    @pytest.mark.os_agnostic
+    def test_returns_zero_when_no_deps(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """print_report returns 0 for empty list."""
+        result = deps_module.print_report([])
+
+        assert result == 0
+        assert "No dependencies found" in capsys.readouterr().out
+
+    @pytest.mark.os_agnostic
+    def test_returns_zero_when_all_up_to_date(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """print_report returns 0 when all deps are up-to-date."""
+        deps = [self._make_dep(deps_module)]
+
+        result = deps_module.print_report(deps)
+
+        assert result == 0
+
+    @pytest.mark.os_agnostic
+    def test_returns_one_when_any_outdated(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """print_report returns 1 when any dep is outdated."""
+        deps = [self._make_dep(deps_module, name="old-pkg", latest="2.0.0", status="outdated")]
+
+        result = deps_module.print_report(deps)
+
+        assert result == 1
+
+    @pytest.mark.os_agnostic
+    def test_verbose_shows_all_deps(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """print_report verbose mode shows up-to-date deps too."""
+        deps = [
+            self._make_dep(deps_module, name="ok-pkg"),
+            self._make_dep(deps_module, name="old-pkg", latest="2.0.0", status="outdated"),
+        ]
+
+        deps_module.print_report(deps, verbose=True)
+        out = capsys.readouterr().out
+
+        assert "ok-pkg" in out
+        assert "old-pkg" in out
+
+    @pytest.mark.os_agnostic
+    def test_non_verbose_hides_up_to_date(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """print_report non-verbose mode hides up-to-date deps."""
+        deps = [
+            self._make_dep(deps_module, name="ok-pkg"),
+            self._make_dep(deps_module, name="old-pkg", latest="2.0.0", status="outdated"),
+        ]
+
+        deps_module.print_report(deps, verbose=False)
+        out = capsys.readouterr().out
+
+        assert "ok-pkg" not in out
+        assert "old-pkg" in out
+
+    @pytest.mark.os_agnostic
+    def test_prints_summary_counts(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """print_report includes a summary section with counts."""
+        deps = [
+            self._make_dep(deps_module, name="ok"),
+            self._make_dep(deps_module, name="old", latest="2.0.0", status="outdated"),
+            self._make_dep(deps_module, name="pinned", status="pinned"),
+        ]
+
+        deps_module.print_report(deps)
+        out = capsys.readouterr().out
+
+        assert "Summary: 3 dependencies checked" in out
+        assert "Up-to-date: 1" in out
+        assert "Outdated:   1" in out
+        assert "Pinned:     1" in out
+
+
+class TestPrintInstallReport:
+    """Tests for _print_install_report function."""
+
+    @pytest.fixture
+    def deps_module(self) -> Any:
+        """Import dependencies module."""
+        from bmk.makescripts import _dependencies
+
+        return _dependencies
+
+    @pytest.mark.os_agnostic
+    def test_shows_not_installed_label(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """_print_install_report shows NOT INSTALLED for missing packages."""
+        deps_module._print_install_report([("mypkg", None, "1.0")], dry_run=False)
+        out = capsys.readouterr().out
+
+        assert "NOT INSTALLED" in out
+
+    @pytest.mark.os_agnostic
+    def test_shows_current_version(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """_print_install_report shows installed version."""
+        deps_module._print_install_report([("mypkg", "0.9", "1.0")], dry_run=False)
+        out = capsys.readouterr().out
+
+        assert "0.9" in out
+        assert ">=1.0" in out
+
+    @pytest.mark.os_agnostic
+    def test_dry_run_prefix(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
+        """_print_install_report prefixes output with [DRY RUN] in dry run mode."""
+        deps_module._print_install_report([("mypkg", None, "1.0")], dry_run=True)
+        out = capsys.readouterr().out
+
+        assert "[DRY RUN]" in out
+
+
+class TestExtractDependenciesFromList:
+    """Tests for _extract_dependencies_from_list function."""
+
+    @pytest.fixture
+    def deps_module(self) -> Any:
+        """Import dependencies module."""
+        from bmk.makescripts import _dependencies
+
+        return _dependencies
+
+    @pytest.mark.os_agnostic
+    def test_simple_up_to_date(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Up-to-date when latest equals minimum."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "1.0.0")  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
+
+        assert len(results) == 1
+        assert results[0].status == "up-to-date"
+
+    @pytest.mark.os_agnostic
+    def test_simple_outdated(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Outdated when latest exceeds minimum."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "2.0.0")  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
+
+        assert results[0].status == "outdated"
+
+    @pytest.mark.os_agnostic
+    def test_package_not_found(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Error status when fetch returns None."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: None)  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
+
+        assert results[0].status == "error"
+        assert results[0].latest == "not found"
+
+    @pytest.mark.os_agnostic
+    def test_no_constraint_is_unknown(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Unknown status for bare package name without constraint."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "1.0.0")  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["mypackage"], "test")
+
+        assert results[0].status == "unknown"
+
+    @pytest.mark.os_agnostic
+    def test_skips_empty_strings(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty strings in the dependency list are skipped."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "1.0.0")  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["", "pkg>=1.0.0"], "test")
+
+        assert len(results) == 1
+
+    @pytest.mark.os_agnostic
+    def test_upper_bound_pinned(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pinned when latest exceeds upper bound and no version in range."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "9.0.0")  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(deps_module, "_fetch_latest_version_below", lambda _name, _bound: None)  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
+
+        assert results[0].status == "pinned"
+
+    @pytest.mark.os_agnostic
+    def test_upper_bound_outdated_within_range(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Outdated when a newer version exists within the allowed range."""
+        monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "9.0.0")  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(deps_module, "_fetch_latest_version_below", lambda _name, _bound: "8.5.0")  # type: ignore[reportUnknownLambdaType]
+
+        results = deps_module._extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
+
+        assert results[0].status == "outdated"
+
+
+# =============================================================================
+# _coverage.py — MIXED function tests
+# =============================================================================
+
+
+class TestResolveCommitSha:
+    """Tests for _resolve_commit_sha function."""
+
+    @pytest.fixture
+    def coverage_module(self) -> Any:
+        """Import coverage module."""
+        from bmk.makescripts import _coverage
+
+        return _coverage
+
+    @pytest.mark.os_agnostic
+    def test_returns_github_sha_env(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns GITHUB_SHA env var when set."""
+        monkeypatch.setenv("GITHUB_SHA", "abc123")
+
+        result = coverage_module._resolve_commit_sha()
+
+        assert result == "abc123"
+
+    @pytest.mark.os_agnostic
+    def test_strips_whitespace_from_github_sha(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Strips whitespace from GITHUB_SHA."""
+        monkeypatch.setenv("GITHUB_SHA", "  abc123  \n")
+
+        result = coverage_module._resolve_commit_sha()
+
+        assert result == "abc123"
+
+    @pytest.mark.os_agnostic
+    def test_falls_back_to_git(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Falls back to git rev-parse when no GITHUB_SHA."""
+        monkeypatch.delenv("GITHUB_SHA", raising=False)
+        fake = subprocess.CompletedProcess([], 0, stdout="def456\n")
+        monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._resolve_commit_sha()
+
+        assert result == "def456"
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_on_git_failure(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns None when git rev-parse fails."""
+        monkeypatch.delenv("GITHUB_SHA", raising=False)
+        fake = subprocess.CompletedProcess([], 1, stdout="", stderr="fatal")
+        monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._resolve_commit_sha()
+
+        assert result is None
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_on_empty_output(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns None when git output is empty."""
+        monkeypatch.delenv("GITHUB_SHA", raising=False)
+        fake = subprocess.CompletedProcess([], 0, stdout="   \n")
+        monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._resolve_commit_sha()
+
+        assert result is None
+
+
+class TestResolveGitBranch:
+    """Tests for _resolve_git_branch function."""
+
+    @pytest.fixture
+    def coverage_module(self) -> Any:
+        """Import coverage module."""
+        from bmk.makescripts import _coverage
+
+        return _coverage
+
+    @pytest.mark.os_agnostic
+    def test_returns_github_ref_name_env(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns GITHUB_REF_NAME env var when set."""
+        monkeypatch.setenv("GITHUB_REF_NAME", "main")
+
+        result = coverage_module._resolve_git_branch()
+
+        assert result == "main"
+
+    @pytest.mark.os_agnostic
+    def test_falls_back_to_git(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Falls back to git rev-parse --abbrev-ref when no GITHUB_REF_NAME."""
+        monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+        fake = subprocess.CompletedProcess([], 0, stdout="develop\n")
+        monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._resolve_git_branch()
+
+        assert result == "develop"
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_for_detached_head(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns None when git reports detached HEAD."""
+        monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+        fake = subprocess.CompletedProcess([], 0, stdout="HEAD\n")
+        monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._resolve_git_branch()
+
+        assert result is None
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_on_failure(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns None when git command fails."""
+        monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+        fake = subprocess.CompletedProcess([], 1, stdout="", stderr="fatal")
+        monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._resolve_git_branch()
+
+        assert result is None
+
+
+class TestCheckCodecovPrerequisites:
+    """Tests for _check_codecov_prerequisites function."""
+
+    @pytest.fixture
+    def coverage_module(self) -> Any:
+        """Import coverage module."""
+        from bmk.makescripts import _coverage
+
+        return _coverage
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_when_report_missing(self, coverage_module: Any, tmp_path: Path) -> None:
+        """Returns None when coverage report file does not exist."""
+        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+
+        assert result is None
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_when_no_token_no_ci(
+        self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Returns None when no token and not in CI."""
+        (tmp_path / "coverage.xml").write_text("<coverage/>")
+        monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+        monkeypatch.delenv("CI", raising=False)
+
+        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+
+        assert result is None
+
+    @pytest.mark.os_agnostic
+    def test_returns_none_when_codecovcli_missing(
+        self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Returns None when codecovcli is not on PATH."""
+        (tmp_path / "coverage.xml").write_text("<coverage/>")
+        monkeypatch.setenv("CODECOV_TOKEN", "tok")
+        monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: None)  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+
+        assert result is None
+
+    @pytest.mark.os_agnostic
+    def test_returns_path_when_all_met(
+        self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Returns uploader path when all prerequisites are met."""
+        (tmp_path / "coverage.xml").write_text("<coverage/>")
+        monkeypatch.setenv("CODECOV_TOKEN", "tok")
+        monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: "/usr/bin/codecovcli")  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+
+        assert result == "/usr/bin/codecovcli"
+
+    @pytest.mark.os_agnostic
+    def test_accepts_ci_env_without_token(
+        self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CI environment is sufficient without explicit token."""
+        (tmp_path / "coverage.xml").write_text("<coverage/>")
+        monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+        monkeypatch.setenv("CI", "true")
+        monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: "/usr/bin/codecovcli")  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+
+        assert result == "/usr/bin/codecovcli"
+
+    @pytest.mark.os_agnostic
+    def test_accepts_passed_token_param(
+        self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Accepts codecov_token kwarg as alternative to env var."""
+        (tmp_path / "coverage.xml").write_text("<coverage/>")
+        monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: "/usr/bin/codecovcli")  # type: ignore[reportUnknownLambdaType]
+
+        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="my-token")
+
+        assert result == "/usr/bin/codecovcli"
+
+
+class TestBuildCodecovArgs:
+    """Tests for _build_codecov_args function."""
+
+    @pytest.fixture
+    def coverage_module(self) -> Any:
+        """Import coverage module."""
+        from bmk.makescripts import _coverage
+
+        return _coverage
+
+    @pytest.mark.os_agnostic
+    def test_includes_required_args(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Required args (file, sha, name) are always present."""
+        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+
+        args = coverage_module._build_codecov_args(
+            uploader="/usr/bin/codecovcli",
+            commit_sha="abc123",
+            coverage_report_file="coverage.xml",
+        )
+
+        assert "--file" in args
+        assert "coverage.xml" in args
+        assert "--sha" in args
+        assert "abc123" in args
+        assert "--name" in args
+
+    @pytest.mark.os_agnostic
+    def test_includes_branch_when_resolved(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Includes --branch when git branch is resolved."""
+        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: "main")
+
+        args = coverage_module._build_codecov_args(
+            uploader="/usr/bin/codecovcli",
+            commit_sha="abc123",
+        )
+
+        assert "--branch" in args
+        assert "main" in args
+
+    @pytest.mark.os_agnostic
+    def test_includes_git_service_for_known_host(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Includes --git-service for known hosts."""
+        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+
+        args = coverage_module._build_codecov_args(
+            uploader="/usr/bin/codecovcli",
+            commit_sha="abc123",
+            repo_host="github.com",
+        )
+
+        assert "--git-service" in args
+        assert "github" in args
+
+    @pytest.mark.os_agnostic
+    def test_includes_slug_when_complete(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Includes --slug when owner and name are both present."""
+        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+
+        args = coverage_module._build_codecov_args(
+            uploader="/usr/bin/codecovcli",
+            commit_sha="abc123",
+            repo_owner="myorg",
+            repo_name="myrepo",
+        )
+
+        assert "--slug" in args
+        assert "myorg/myrepo" in args
+
+    @pytest.mark.os_agnostic
+    def test_excludes_optional_when_none(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Omits --branch, --git-service, --slug when values are None."""
+        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+
+        args = coverage_module._build_codecov_args(
+            uploader="/usr/bin/codecovcli",
+            commit_sha="abc123",
+            repo_host="unknown.example.com",
+            repo_owner=None,
+            repo_name=None,
+        )
+
+        assert "--branch" not in args
+        assert "--git-service" not in args
+        assert "--slug" not in args

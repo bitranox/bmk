@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Stage 01: Run tests with coverage and upload to Codecov
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_resolve_python.ps1"

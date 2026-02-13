@@ -1,4 +1,4 @@
-# BMK MAKEFILE 2.2.2
+# BMK MAKEFILE 2.3.0
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx
@@ -37,7 +37,7 @@ _BMK_TARGETS := test t testintegration testi ti codecov coverage cov \
 	dependencies deps d dependencies-update \
 	config config-deploy config-generate-examples \
 	send-email send-notification custom \
-	info hello logdemo
+	info logdemo
 
 ifneq (,$(filter $(_BMK_TARGETS),$(firstword $(MAKECMDGOALS))))
   # Capture everything after the first word as extra arguments
@@ -181,10 +181,6 @@ custom:  ## Run a custom command (make custom <name> [args...])
 .PHONY: info
 info:  ## Print resolved package metadata
 	$(BMK) info $(ARGS)
-
-.PHONY: hello
-hello:  ## Emit the canonical greeting
-	$(BMK) hello
 
 .PHONY: logdemo
 logdemo:  ## Run logging demonstration

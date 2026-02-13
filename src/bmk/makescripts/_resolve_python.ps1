@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # Shared helper: resolve the Python interpreter command.
 # Dot-source this from any makescript that needs to call Python:
 #

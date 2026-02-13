@@ -33,7 +33,7 @@ from .cov_cmd import cli_codecov, cli_cov, cli_coverage
 from .custom_cmd import cli_custom
 from .dependencies_cmd import cli_d, cli_dependencies, cli_deps
 from .email import cli_send_email, cli_send_notification
-from .info import cli_fail, cli_hello, cli_info
+from .info import cli_fail, cli_info
 from .install_cmd import cli_install
 from .logging import cli_logdemo
 from .push_cmd import cli_psh, cli_push, cli_push_p
@@ -64,7 +64,6 @@ __all__ = [
     "cli_dependencies",
     "cli_deps",
     "cli_fail",
-    "cli_hello",
     "cli_info",
     "cli_install",
     "cli_logdemo",
