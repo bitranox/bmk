@@ -1,4 +1,4 @@
-# BMK MAKEFILE 2.3.2
+# BMK MAKEFILE 2.3.3
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx

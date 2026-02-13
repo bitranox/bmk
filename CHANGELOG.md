@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.3.3] 2026-02-13 20:23:26
+
+### Removed
+- **test_900_clean stage**: removed `test_900_clean.sh` and `test_900_clean.ps1` from the test pipeline to preserve coverage data for post-test analysis and reporting
+
+### Changed
+- **Dependency floors updated**: `lib_cli_exit_tools >=2.2.4 → >=2.3.0`, `lib_log_rich >=6.3.1 → >=6.3.3`
+
 ## [2.3.2] 2026-02-13 18:14:14
 
 ### Fixed

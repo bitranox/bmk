@@ -335,7 +335,6 @@ class TestDelegatorScriptValidation:
             "push_020_build.ps1",
             "push_030_clean.ps1",
             "push_040_commit.ps1",
-            "test_900_clean.ps1",
         ],
     )
     def test_fails_without_required_env_vars(self, script_name: str) -> None:
