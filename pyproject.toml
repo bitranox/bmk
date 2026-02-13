@@ -178,7 +178,7 @@ source = ["src/bmk"]
 omit = [
   "tests/*",
 ]
-fail_under = 70
+fail_under = 80
 show_missing = true
 
 [tool.coverage.json]

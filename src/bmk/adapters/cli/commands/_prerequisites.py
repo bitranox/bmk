@@ -50,6 +50,26 @@ def _check_psscriptanalyzer(pwsh_path: str) -> bool:
         return False
 
 
+def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
+    """Check PSScriptAnalyzer availability and append result to the list.
+
+    Only probes the module when pwsh is already found in *results*.
+    """
+    pwsh_result = next(r for r in results if r.name == "pwsh")
+    if pwsh_result.found:
+        pwsh_path = shutil.which("pwsh") or "pwsh"
+        found = _check_psscriptanalyzer(pwsh_path)
+    else:
+        found = False
+    results.append(
+        ToolCheck(
+            name="PSScriptAnalyzer",
+            found=found,
+            install_hint="Install-Module PSScriptAnalyzer -Force -Scope CurrentUser (requires pwsh)",
+        )
+    )
+
+
 def _posix_tools() -> list[ToolCheck]:
     macos = _is_macos()
     tools: list[tuple[str, str]] = [
@@ -67,20 +87,7 @@ def _posix_tools() -> list[ToolCheck]:
     results: list[ToolCheck] = []
     for name, hint in tools:
         results.append(ToolCheck(name=name, found=_check_tool_on_path(name), install_hint=hint))
-
-    pwsh_result = next(r for r in results if r.name == "pwsh")
-    if pwsh_result.found:
-        pwsh_path = shutil.which("pwsh") or "pwsh"
-        found = _check_psscriptanalyzer(pwsh_path)
-    else:
-        found = False
-    results.append(
-        ToolCheck(
-            name="PSScriptAnalyzer",
-            found=found,
-            install_hint="Install-Module PSScriptAnalyzer -Force -Scope CurrentUser (requires pwsh)",
-        )
-    )
+    _append_psscriptanalyzer_check(results)
     return results
 
 
@@ -104,20 +111,7 @@ def _windows_tools() -> list[ToolCheck]:
             install_hint="winget install Microsoft.PowerShell",
         ),
     ]
-
-    pwsh_result = next(r for r in results if r.name == "pwsh")
-    if pwsh_result.found:
-        pwsh_path = shutil.which("pwsh") or "pwsh"
-        found = _check_psscriptanalyzer(pwsh_path)
-    else:
-        found = False
-    results.append(
-        ToolCheck(
-            name="PSScriptAnalyzer",
-            found=found,
-            install_hint="Install-Module PSScriptAnalyzer -Force -Scope CurrentUser (requires pwsh)",
-        )
-    )
+    _append_psscriptanalyzer_check(results)
     return results
 
 

@@ -1,7 +1,8 @@
-"""Behaviour tests for makescripts._psscriptanalyzer: config reading, pwsh detection, file discovery."""
+"""Behaviour tests for makescripts._psscriptanalyzer: config reading, pwsh detection, file discovery, and orchestration."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,8 +10,11 @@ import pytest
 
 from bmk.makescripts._psscriptanalyzer import (
     check_pwsh,
+    ensure_psscriptanalyzer,
     find_ps1_files,
     get_excluded_rules,
+    main,
+    run_psscriptanalyzer,
 )
 
 # ---------------------------------------------------------------------------
@@ -152,3 +156,168 @@ def test_find_ps1_files_returns_sorted(tmp_path: Path) -> None:
     assert files[0].name == "a_script.ps1"
     assert files[1].name == "m_script.ps1"
     assert files[2].name == "z_script.ps1"
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
+def _make_completed(returncode: int, *, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+# ---------------------------------------------------------------------------
+# ensure_psscriptanalyzer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_ensure_psscriptanalyzer_skips_install_when_present() -> None:
+    """Does not install when PSScriptAnalyzer is already available."""
+    with patch(
+        "bmk.makescripts._psscriptanalyzer.subprocess.run",
+        return_value=_make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
+    ) as mock_run:
+        ensure_psscriptanalyzer("/usr/bin/pwsh")
+
+    mock_run.assert_called_once()
+    assert "Get-Module" in mock_run.call_args[0][0][3]
+
+
+@pytest.mark.os_agnostic
+def test_ensure_psscriptanalyzer_installs_when_missing() -> None:
+    """Installs module when PSScriptAnalyzer is not found."""
+    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            _make_completed(0, stdout=""),
+            _make_completed(0),
+        ]
+        ensure_psscriptanalyzer("/usr/bin/pwsh")
+
+    assert mock_run.call_count == 2
+    install_cmd = mock_run.call_args_list[1][0][0]
+    assert "Install-Module" in install_cmd[3]
+
+
+# ---------------------------------------------------------------------------
+# run_psscriptanalyzer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_run_psscriptanalyzer_returns_zero_on_clean(tmp_path: Path) -> None:
+    """Returns 0 when PSScriptAnalyzer reports no violations."""
+    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)) as mock_run:
+        result = run_psscriptanalyzer(
+            pwsh="/usr/bin/pwsh",
+            project_dir=tmp_path,
+            exclude_rules=("PSAvoidUsingWriteHost",),
+        )
+
+    assert result == 0
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0] == "/usr/bin/pwsh"
+    assert "Invoke-ScriptAnalyzer" in cmd[3]
+    assert "PSAvoidUsingWriteHost" in cmd[3]
+
+
+@pytest.mark.os_agnostic
+def test_run_psscriptanalyzer_returns_nonzero_on_violations(tmp_path: Path) -> None:
+    """Returns non-zero when PSScriptAnalyzer finds violations."""
+    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=_make_completed(3)):
+        result = run_psscriptanalyzer(
+            pwsh="/usr/bin/pwsh",
+            project_dir=tmp_path,
+            exclude_rules=(),
+        )
+
+    assert result == 3
+
+
+@pytest.mark.os_agnostic
+def test_run_psscriptanalyzer_verbose_prints_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verbose mode prints the command being run."""
+    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)):
+        run_psscriptanalyzer(
+            pwsh="/usr/bin/pwsh",
+            project_dir=tmp_path,
+            exclude_rules=("PSAvoidUsingWriteHost",),
+            verbose=True,
+        )
+
+    assert "Running:" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_main_returns_zero_when_pwsh_not_found(capsys: pytest.CaptureFixture[str]) -> None:
+    """Returns 0 and prints skip message when pwsh is absent."""
+    with patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value=None):
+        result = main(project_dir=Path("/nonexistent"))
+
+    assert result == 0
+    assert "pwsh not found" in capsys.readouterr().out
+
+
+@pytest.mark.os_agnostic
+def test_main_returns_zero_when_no_ps1_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Returns 0 and prints skip message when no .ps1 files exist."""
+    with (
+        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "bmk.makescripts._psscriptanalyzer.subprocess.run",
+            return_value=_make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
+        ),
+    ):
+        result = main(project_dir=tmp_path)
+
+    assert result == 0
+    assert "No .ps1 files found" in capsys.readouterr().out
+
+
+@pytest.mark.os_agnostic
+def test_main_returns_zero_when_lint_passes(tmp_path: Path) -> None:
+    """Returns 0 when PSScriptAnalyzer finds no violations."""
+    (tmp_path / "script.ps1").write_text("Write-Output 'hello'\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "test"\n\n[tool.psscriptanalyzer]\nexclude-rules = ["PSAvoidUsingWriteHost"]\n'
+    )
+
+    with (
+        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run,
+    ):
+        mock_run.side_effect = [
+            _make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
+            _make_completed(0),
+        ]
+        result = main(project_dir=tmp_path)
+
+    assert result == 0
+
+
+@pytest.mark.os_agnostic
+def test_main_returns_nonzero_when_lint_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Returns non-zero and prints error when PSScriptAnalyzer finds violations."""
+    (tmp_path / "script.ps1").write_text("Write-Output 'hello'\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "test"\n\n[tool.psscriptanalyzer]\nexclude-rules = ["PSAvoidUsingWriteHost"]\n'
+    )
+
+    with (
+        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run,
+    ):
+        mock_run.side_effect = [
+            _make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
+            _make_completed(2),
+        ]
+        result = main(project_dir=tmp_path)
+
+    assert result == 2
+    assert "PSScriptAnalyzer found lint violations" in capsys.readouterr().err
