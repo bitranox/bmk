@@ -273,6 +273,7 @@ ignore-vulns = [
   "CVE-2024-6345",     # setuptools 65.5.0 — build-time only, not a runtime dependency
   "PYSEC-2024-44",     # rpyc 5.3.1 — environment-level package, not a project dependency
   "CVE-2026-24049",    # wheel 0.45.1 — environment-level package, not a project dependency
+  "CVE-2026-26007",    # cryptography 46.0.3 — environment-level package, not a project dependency
 ]
 
 [tool.bandit]
