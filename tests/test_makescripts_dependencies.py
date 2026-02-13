@@ -1,6 +1,6 @@
 """Behaviour tests for makescripts._dependencies: version parsing, PyPI queries, and dependency management."""
 
-# pyright: reportPrivateUsage=false
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false
 
 from __future__ import annotations
 
