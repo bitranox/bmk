@@ -19,7 +19,6 @@ from bmk.adapters.config.overrides import apply_overrides
 
 from .constants import CLICK_CONTEXT_SETTINGS
 from .context import apply_traceback_preferences, store_cli_context
-from .exit_codes import ExitCode
 
 if TYPE_CHECKING:
     from bmk.composition import AppServices
@@ -114,8 +113,7 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
         try:
             from .commands.install_cmd import check_makefile_update
 
-            if check_makefile_update():
-                raise SystemExit(ExitCode.SUCCESS)
+            check_makefile_update()
         except (OSError, click.Abort):
             pass
 

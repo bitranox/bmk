@@ -31,6 +31,7 @@ except ModuleNotFoundError:
 
 
 _FALLBACK_PATTERNS: tuple[str, ...] = (
+    "**/__pycache__",
     ".hypothesis",
     ".import_linter_cache",
     ".pytest_cache",
@@ -54,6 +55,36 @@ _FALLBACK_PATTERNS: tuple[str, ...] = (
 __all__ = ["clean", "get_clean_patterns", "main"]
 
 
+_MISSING_SECTION_WARNING = """\
+WARNING: No [tool.clean] patterns found in pyproject.toml.
+Using built-in fallback patterns. For proper cleaning, add to your pyproject.toml:
+
+[tool.clean]
+# Patterns to remove when running `make clean`
+patterns = [
+  "**/__pycache__",
+  ".hypothesis",
+  ".import_linter_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".pyright",
+  ".mypy_cache",
+  ".tox",
+  ".nox",
+  ".eggs",
+  "*.egg-info",
+  "build",
+  "dist",
+  "htmlcov",
+  ".coverage",
+  "coverage.xml",
+  "codecov.sh",
+  ".cache",
+  "result",
+]
+"""
+
+
 def get_clean_patterns(pyproject: Path = Path("pyproject.toml")) -> tuple[str, ...]:
     """Read clean patterns from pyproject.toml [tool.clean].patterns.
 
@@ -71,6 +102,8 @@ def get_clean_patterns(pyproject: Path = Path("pyproject.toml")) -> tuple[str, .
     patterns = config.tool.clean.patterns
     if patterns:
         return patterns
+
+    print(_MISSING_SECTION_WARNING, file=sys.stderr)
     return _FALLBACK_PATTERNS
 
 

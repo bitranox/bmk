@@ -112,7 +112,7 @@ def test_outdated_user_accepts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Outdated Makefile + user accepts → file updated, exit 0, subcommand NOT run."""
+    """Outdated Makefile + user accepts → file updated, subcommand continues."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\nold\n", encoding="utf-8")
 

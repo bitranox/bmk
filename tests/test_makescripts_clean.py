@@ -24,14 +24,19 @@ def test_get_clean_patterns_returns_fallback_when_no_pyproject(tmp_path: Path) -
 
 
 @pytest.mark.os_agnostic
-def test_get_clean_patterns_returns_fallback_when_no_clean_section(tmp_path: Path) -> None:
-    """Falls back to built-in patterns when [tool.clean] is absent."""
+def test_get_clean_patterns_returns_fallback_when_no_clean_section(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Falls back to built-in patterns and warns when [tool.clean] is absent."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text("[project]\nname = 'test'\n")
 
     patterns = get_clean_patterns(pyproject)
 
     assert ".pytest_cache" in patterns
+    captured = capsys.readouterr()
+    assert "WARNING: No [tool.clean] patterns found" in captured.err
+    assert "[tool.clean]" in captured.err
 
 
 @pytest.mark.os_agnostic

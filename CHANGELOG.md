@@ -6,6 +6,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.2.2] 2026-02-13 11:02:42
+
+### Changed
+- **`make clean` warns on missing `[tool.clean]` config**: prints a warning with example `[tool.clean].patterns` section to stderr when `pyproject.toml` exists but has no clean patterns configured
+- **Makefile update no longer aborts the command**: accepting a Makefile version update now continues running the original subcommand instead of exiting
+
 ## [2.2.1] 2026-02-13 10:35:26
 
 ### Fixed
