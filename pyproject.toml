@@ -207,6 +207,7 @@ patterns = [
   "codecov.sh",
   ".cache",
   "result",
+  ".venv",
 ]
 
 [tool.psscriptanalyzer]

@@ -50,6 +50,7 @@ _FALLBACK_PATTERNS: tuple[str, ...] = (
     "codecov.sh",
     ".cache",
     "result",
+    ".venv",
 )
 
 __all__ = ["clean", "get_clean_patterns", "main"]
