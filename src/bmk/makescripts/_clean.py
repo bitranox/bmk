@@ -51,6 +51,7 @@ _FALLBACK_PATTERNS: tuple[str, ...] = (
     ".cache",
     "result",
     ".venv",
+    ".data_arch_violations.json",
 )
 
 __all__ = ["clean", "get_clean_patterns", "main"]
