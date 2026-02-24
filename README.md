@@ -136,7 +136,7 @@ For alternative install paths (pip, pipx, source builds, etc.), see
 
 ---
 
-## Configurationok, 
+## Configuration 
 
 See [CONFIG.md](CONFIG.md) for detailed documentation on the layered configuration system, including precedence rules, profile support, and customization best practices.
 
