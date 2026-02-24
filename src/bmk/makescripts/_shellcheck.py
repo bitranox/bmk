@@ -106,17 +106,21 @@ def find_sh_files(project_dir: Path) -> list[Path]:
     return sorted(files)
 
 
-def run_shellcheck(*, files: list[Path], verbose: bool = False) -> int:
+def run_shellcheck(*, files: list[Path], verbose: bool = False, output_format: str = "text") -> int:
     """Invoke shellcheck against the given files.
 
     Args:
         files: List of ``.sh`` files to lint.
         verbose: If True, print the command being run.
+        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
 
     Returns:
         Exit code (0 = clean, non-zero = violations found).
     """
-    cmd = ["shellcheck", "-S", "warning", "-x", *[str(f) for f in files]]
+    cmd = ["shellcheck", "-S", "warning", "-x"]
+    if output_format == "json":
+        cmd.extend(["-f", "json1"])
+    cmd.extend(str(f) for f in files)
     if verbose:
         print(f"Running: {' '.join(cmd)}")
 
@@ -182,12 +186,13 @@ def run_bashate(
     return result.returncode
 
 
-def main(*, project_dir: Path | None = None, verbose: bool = False) -> int:
+def main(*, project_dir: Path | None = None, verbose: bool = False, output_format: str = "text") -> int:
     """Orchestrate the full shell lint flow.
 
     Args:
         project_dir: Root directory to lint. Defaults to cwd.
         verbose: If True, print additional diagnostic output.
+        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
 
     Returns:
         Exit code (0 on success, 1 on lint violations).
@@ -208,7 +213,7 @@ def main(*, project_dir: Path | None = None, verbose: bool = False) -> int:
     overall_exit = 0
 
     print("Running shellcheck...")
-    if run_shellcheck(files=files, verbose=verbose) != 0:
+    if run_shellcheck(files=files, verbose=verbose, output_format=output_format) != 0:
         print("shellcheck found lint violations", file=sys.stderr)
         overall_exit = 1
 
@@ -240,5 +245,11 @@ if __name__ == "__main__":  # pragma: no cover
         action="store_true",
         help="Print additional diagnostic output",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=["json", "text"],
+        default="text",
+        help="Output format: json for machine-readable, text for human-readable (default: text)",
+    )
     args, _unknown = parser.parse_known_args()
-    sys.exit(main(project_dir=args.project_dir, verbose=args.verbose))
+    sys.exit(main(project_dir=args.project_dir, verbose=args.verbose, output_format=args.output_format))

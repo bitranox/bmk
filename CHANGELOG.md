@@ -6,6 +6,24 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.4.0] 2026-02-24 11:20:14
+
+### Added
+- **JSON-by-default output**: `bmk test` and `bmk testintegration` now emit JSON output from tools (ruff, pyright, bandit, pip-audit, shellcheck, PSScriptAnalyzer) for machine-readable consumption
+- **`--human` flag**: use `bmk test --human` or `bmk testintegration --human` to restore traditional text output
+- **`BMK_OUTPUT_FORMAT` environment variable**: set to `json` (default) or `text` to control tool output format; `--human` flag takes precedence
+- **Virtual environment isolation for uvx**: `execute_script()` now sets `VIRTUAL_ENV` to the target project's `.venv/` (if present) or unsets it, ensuring pyright, pip-audit, and other tools resolve packages from the correct environment
+
+### Changed
+- **Stage scripts read `BMK_OUTPUT_FORMAT`**: all `.sh` and `.ps1` stage scripts now read the environment variable and pass tool-specific JSON flags accordingly
+- **Python helpers accept `--output-format`**: `_shellcheck.py`, `_psscriptanalyzer.py`, and `_coverage.py` accept a new `--output-format` CLI argument
+- **Dependency floors updated**: `hatchling >=1.28.0 → >=1.29.0`, `hypothesis >=6.151.6 → >=6.151.9`, `lib_layered_config >=5.4.0 → >=5.4.1`, `ruff >=0.15.1 → >=0.15.2`, `textual >=7.5.0 → >=8.0.0`
+
+### Fixed
+- **CI/CD runner configuration**: fixed runner setup in GitHub Actions workflow
+- **Bandit configuration**: bandit now reads settings from `pyproject.toml`
+- **Clean list**: added `.venv` to clean targets; removed `.idea` directory from repository
+
 ## [2.3.3] 2026-02-13 20:23:26
 
 ### Removed

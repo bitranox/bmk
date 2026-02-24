@@ -19,8 +19,16 @@ explain_exit_code() {
 
 printf 'Running bandit on src/%s...\n' "$BMK_PACKAGE_NAME"
 
+_output_format="${BMK_OUTPUT_FORMAT:-json}"
+_bandit_args=()
+if [[ "$_output_format" == "json" ]]; then
+    _bandit_args+=(-f json)
+else
+    _bandit_args+=(-q)
+fi
+
 set +e
-bandit -q -r -c pyproject.toml "src/${BMK_PACKAGE_NAME}"
+bandit -r -c pyproject.toml "${_bandit_args[@]}" "src/${BMK_PACKAGE_NAME}"
 exit_code=$?
 set -e
 

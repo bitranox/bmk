@@ -21,8 +21,14 @@ explain_exit_code() {
 
 printf 'Running pyright...\n'
 
+_output_format="${BMK_OUTPUT_FORMAT:-json}"
+_pyright_args=()
+if [[ "$_output_format" == "json" ]]; then
+    _pyright_args+=(--outputjson)
+fi
+
 set +e
-pyright
+pyright "${_pyright_args[@]}"
 exit_code=$?
 set -e
 

@@ -11,6 +11,7 @@ The stage runner discovers and executes scripts matching ``test_integration_NN_*
 Environment variables set for scripts:
     * ``BMK_PROJECT_DIR`` - Path to the current working directory
     * ``BMK_COMMAND_PREFIX`` - Set to "test_integration" for script discovery
+    * ``BMK_OUTPUT_FORMAT`` - Tool output format (``json`` or ``text``)
 
 Contents:
     * :func:`cli_testintegration` - Run integration tests only.
@@ -21,6 +22,7 @@ Contents:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import lib_log_rich.runtime
@@ -32,11 +34,12 @@ from ._shared import execute_script, get_script_name
 logger = logging.getLogger(__name__)
 
 
-def _run_test_integration(args: tuple[str, ...]) -> None:
+def _run_test_integration(args: tuple[str, ...], *, human: bool = False) -> None:
     """Shared implementation for integration test commands.
 
     Args:
         args: Arguments to pass through to the test script.
+        human: Use human-readable text output instead of JSON.
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
@@ -49,20 +52,30 @@ def _run_test_integration(args: tuple[str, ...]) -> None:
     script_path = require_script_path(script_name, cwd, "Test runner")
 
     logger.debug("Executing integration test script: %s", script_path)
-    exit_code = execute_script(script_path, cwd, args, command_prefix="test_integration")
+    exit_code = execute_script(
+        script_path,
+        cwd,
+        args,
+        command_prefix="test_integration",
+        output_format="text" if human else os.environ.get("BMK_OUTPUT_FORMAT", "json"),
+    )
 
     if exit_code != 0:
         raise SystemExit(exit_code)
 
 
 @click.command("testintegration", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
+@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def cli_testintegration(args: tuple[str, ...]) -> None:
+def cli_testintegration(human: bool, args: tuple[str, ...]) -> None:
     """Run integration tests only (pytest -m integration).
 
     Executes _btx_stagerunner.sh (Linux/macOS) or _btx_stagerunner.ps1 (Windows)
     with BMK_COMMAND_PREFIX=test_integration, which discovers and runs scripts
     matching test_integration_NN_*.sh.
+
+    Tool output defaults to JSON (machine-readable). Use --human for
+    traditional text output.
 
     Script lookup order:
     1. <cwd>/bmk_makescripts/_btx_stagerunner.sh (local override)
@@ -77,12 +90,13 @@ def cli_testintegration(args: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-test-integration", extra={"command": "testintegration"}):
         logger.info("Executing integration test command")
-        _run_test_integration(args)
+        _run_test_integration(args, human=human)
 
 
 @click.command("testi", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
+@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def cli_testi(args: tuple[str, ...]) -> None:
+def cli_testi(human: bool, args: tuple[str, ...]) -> None:
     """Run integration tests only (alias for 'testintegration').
 
     See ``bmk testintegration --help`` for full documentation.
@@ -96,12 +110,13 @@ def cli_testi(args: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-test-integration", extra={"command": "testi"}):
         logger.info("Executing integration test command (via alias 'testi')")
-        _run_test_integration(args)
+        _run_test_integration(args, human=human)
 
 
 @click.command("ti", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
+@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def cli_ti(args: tuple[str, ...]) -> None:
+def cli_ti(human: bool, args: tuple[str, ...]) -> None:
     """Run integration tests only (alias for 'testintegration').
 
     See ``bmk testintegration --help`` for full documentation.
@@ -115,7 +130,7 @@ def cli_ti(args: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-test-integration", extra={"command": "ti"}):
         logger.info("Executing integration test command (via alias 'ti')")
-        _run_test_integration(args)
+        _run_test_integration(args, human=human)
 
 
 __all__ = ["cli_testintegration", "cli_testi", "cli_ti"]

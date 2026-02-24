@@ -110,6 +110,7 @@ def test_cli_testintegration_uses_test_integration_command_prefix(
         extra_args: tuple[str, ...],
         *,
         command_prefix: str = "test",
+        **kwargs: Any,
     ) -> int:
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
@@ -152,6 +153,7 @@ def test_cli_testintegration_passes_extra_arguments(
         extra_args: tuple[str, ...],
         *,
         command_prefix: str = "test",
+        **kwargs: Any,
     ) -> int:
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
@@ -202,6 +204,7 @@ def test_cli_testintegration_propagates_script_exit_code(
         extra_args: tuple[str, ...],
         *,
         command_prefix: str = "test",
+        **kwargs: Any,
     ) -> int:
         return 42
 
@@ -221,6 +224,157 @@ def test_cli_testintegration_propagates_script_exit_code(
 
 
 @pytest.mark.os_agnostic
+def test_cli_testintegration_defaults_output_format_to_json(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default output_format is 'json' when --human is not passed."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(
+        script_path: Path,
+        cwd: Path,
+        extra_args: tuple[str, ...],
+        *,
+        command_prefix: str = "test",
+        **kwargs: Any,
+    ) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_integration_cmd.execute_script", mock_execute)
+    monkeypatch.delenv("BMK_OUTPUT_FORMAT", raising=False)
+
+    cli_runner.invoke(cli_mod.cli, ["testintegration"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "json"
+
+
+@pytest.mark.os_agnostic
+def test_cli_testintegration_human_flag_sets_text_output(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The --human flag sets output_format to 'text'."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(
+        script_path: Path,
+        cwd: Path,
+        extra_args: tuple[str, ...],
+        *,
+        command_prefix: str = "test",
+        **kwargs: Any,
+    ) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_integration_cmd.execute_script", mock_execute)
+
+    cli_runner.invoke(cli_mod.cli, ["testintegration", "--human"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "text"
+
+
+@pytest.mark.os_agnostic
+def test_cli_testintegration_respects_bmk_output_format_env_var(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BMK_OUTPUT_FORMAT env var is respected when --human is not passed."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(
+        script_path: Path,
+        cwd: Path,
+        extra_args: tuple[str, ...],
+        *,
+        command_prefix: str = "test",
+        **kwargs: Any,
+    ) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_integration_cmd.execute_script", mock_execute)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "text")
+
+    cli_runner.invoke(cli_mod.cli, ["testintegration"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "text"
+
+
+@pytest.mark.os_agnostic
+def test_cli_testintegration_human_flag_overrides_env_var(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The --human flag overrides BMK_OUTPUT_FORMAT env var."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(
+        script_path: Path,
+        cwd: Path,
+        extra_args: tuple[str, ...],
+        *,
+        command_prefix: str = "test",
+        **kwargs: Any,
+    ) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.test_integration_cmd.execute_script", mock_execute)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "json")
+
+    cli_runner.invoke(cli_mod.cli, ["testintegration", "--human"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "text"
+
+
+@pytest.mark.os_agnostic
 def test_cli_testi_behaves_same_as_testintegration(
     cli_runner: CliRunner,
     production_factory: Callable[[], Any],
@@ -236,6 +390,7 @@ def test_cli_testi_behaves_same_as_testintegration(
         extra_args: tuple[str, ...],
         *,
         command_prefix: str = "test",
+        **kwargs: Any,
     ) -> int:
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0
@@ -279,6 +434,7 @@ def test_cli_ti_behaves_same_as_testintegration(
         extra_args: tuple[str, ...],
         *,
         command_prefix: str = "test",
+        **kwargs: Any,
     ) -> int:
         captured_args.append((script_path, cwd, extra_args, command_prefix))
         return 0

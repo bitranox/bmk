@@ -309,6 +309,207 @@ def test_cli_test_propagates_script_exit_code(
 
 
 @pytest.mark.os_agnostic
+def test_cli_test_defaults_output_format_to_json(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default output_format is 'json' when --human is not passed."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
+    monkeypatch.delenv("BMK_OUTPUT_FORMAT", raising=False)
+
+    cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "json"
+
+
+@pytest.mark.os_agnostic
+def test_cli_test_human_flag_sets_text_output(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The --human flag sets output_format to 'text'."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
+
+    cli_runner.invoke(cli_mod.cli, ["test", "--human"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "text"
+
+
+@pytest.mark.os_agnostic
+def test_cli_test_respects_bmk_output_format_env_var(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BMK_OUTPUT_FORMAT env var is respected when --human is not passed."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "text")
+
+    cli_runner.invoke(cli_mod.cli, ["test"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "text"
+
+
+@pytest.mark.os_agnostic
+def test_cli_test_human_flag_overrides_env_var(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The --human flag overrides BMK_OUTPUT_FORMAT env var."""
+    captured_kwargs: list[dict[str, Any]] = []
+
+    def mock_execute(script_path: Path, cwd: Path, extra_args: tuple[str, ...], **kwargs: Any) -> int:
+        captured_kwargs.append(kwargs)
+        return 0
+
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    def mock_resolve(script_name: str, cwd: Path) -> Path:
+        return script_path
+
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setattr("bmk.adapters.cli.commands._shared.resolve_script_path", mock_resolve)
+    monkeypatch.setattr("bmk.adapters.cli.commands.testsuite_cmd.execute_script", mock_execute)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "json")
+
+    cli_runner.invoke(cli_mod.cli, ["test", "--human"], obj=production_factory)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["output_format"] == "text"
+
+
+@pytest.mark.os_agnostic
+def test_execute_script_sets_bmk_output_format_env_var(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """execute_script sets BMK_OUTPUT_FORMAT in the subprocess environment."""
+    captured_env: list[dict[str, str]] = []
+
+    def mock_run(
+        cmd: list[str], *, check: bool, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        captured_env.append(env or {})
+        return subprocess.CompletedProcess(cmd, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    execute_script(script_path, tmp_path, (), output_format="json")
+    assert captured_env[0]["BMK_OUTPUT_FORMAT"] == "json"
+
+    execute_script(script_path, tmp_path, (), output_format="text")
+    assert captured_env[1]["BMK_OUTPUT_FORMAT"] == "text"
+
+
+@pytest.mark.os_agnostic
+def test_execute_script_sets_virtual_env_to_project_venv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """execute_script sets VIRTUAL_ENV to the target project's .venv if it exists."""
+    captured_env: list[dict[str, str]] = []
+
+    def mock_run(
+        cmd: list[str], *, check: bool, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        captured_env.append(env or {})
+        return subprocess.CompletedProcess(cmd, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    # Create a .venv directory in the target project
+    (tmp_path / ".venv").mkdir()
+    monkeypatch.setenv("VIRTUAL_ENV", "/some/bmk/venv")
+
+    execute_script(script_path, tmp_path, ())
+
+    assert captured_env[0]["VIRTUAL_ENV"] == str(tmp_path / ".venv")
+
+
+@pytest.mark.os_agnostic
+def test_execute_script_unsets_virtual_env_when_no_project_venv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """execute_script removes VIRTUAL_ENV when the target project has no .venv."""
+    captured_env: list[dict[str, str]] = []
+
+    def mock_run(
+        cmd: list[str], *, check: bool, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        captured_env.append(env or {})
+        return subprocess.CompletedProcess(cmd, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    script_path = tmp_path / "_btx_stagerunner.sh"
+    script_path.write_text("#!/bin/bash\necho test")
+
+    # No .venv in the target project, but bmk's own VIRTUAL_ENV is set
+    monkeypatch.setenv("VIRTUAL_ENV", "/some/bmk/venv")
+
+    execute_script(script_path, tmp_path, ())
+
+    assert "VIRTUAL_ENV" not in captured_env[0]
+
+
+@pytest.mark.os_agnostic
 def test_cli_t_behaves_same_as_test(
     cli_runner: CliRunner,
     production_factory: Callable[[], Any],

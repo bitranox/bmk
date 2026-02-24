@@ -23,7 +23,15 @@ function Write-ExitCodeError {
 
 Write-Output "Running bandit on src/$($env:BMK_PACKAGE_NAME)..."
 
-bandit -q -r -c pyproject.toml "src/$($env:BMK_PACKAGE_NAME)"
+$outputFormat = if ($env:BMK_OUTPUT_FORMAT) { $env:BMK_OUTPUT_FORMAT } else { "json" }
+$banditArgs = @()
+if ($outputFormat -eq "json") {
+    $banditArgs += "-f", "json"
+} else {
+    $banditArgs += "-q"
+}
+
+bandit -r -c pyproject.toml @banditArgs "src/$($env:BMK_PACKAGE_NAME)"
 $exitCode = $LASTEXITCODE
 
 Write-ExitCodeError $exitCode

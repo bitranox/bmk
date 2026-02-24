@@ -19,6 +19,9 @@ explain_exit_code() {
 
 printf 'Running ruff format check...\n'
 
+# Note: ruff format --output-format json requires preview mode (unstable on stable ruff).
+# The formatter only reports file counts, not per-violation data, so JSON adds no value here.
+
 set +e
 ruff format --check .
 exit_code=$?

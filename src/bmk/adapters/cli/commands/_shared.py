@@ -80,6 +80,7 @@ def execute_script(
     override_dir: str = "",
     package_name: str = "",
     show_warnings: bool = True,
+    output_format: str = "json",
 ) -> int:
     """Execute script with BMK environment variables.
 
@@ -94,6 +95,8 @@ def execute_script(
         override_dir: Override directory path (set as BMK_OVERRIDE_DIR if non-empty).
         package_name: Package name override (set as BMK_PACKAGE_NAME if non-empty).
         show_warnings: Show warnings from passing parallel jobs (set as BMK_SHOW_WARNINGS env var).
+        output_format: Output format for tool results (set as BMK_OUTPUT_FORMAT env var).
+            ``"json"`` for machine-readable output, ``"text"`` for human-readable.
 
     Returns:
         Exit code from the script execution.
@@ -103,6 +106,15 @@ def execute_script(
     env["BMK_COMMAND_PREFIX"] = command_prefix
     env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
     env["BMK_PYTHON_CMD"] = sys.executable
+    env["BMK_OUTPUT_FORMAT"] = output_format
+
+    # Point tools at the target project's venv, not bmk's own (uvx) venv.
+    # Tools like pyright and pip-audit use VIRTUAL_ENV for environment resolution.
+    project_venv = cwd / ".venv"
+    if project_venv.is_dir():
+        env["VIRTUAL_ENV"] = str(project_venv)
+    else:
+        env.pop("VIRTUAL_ENV", None)
 
     if override_dir:
         env["BMK_OVERRIDE_DIR"] = str(override_dir)

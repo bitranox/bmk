@@ -33,6 +33,9 @@ Complete (v1.1.2+)
   - `main.py` — Entry point
   - `commands/info.py` — info, hello, fail commands
   - `commands/config.py` — config, config-deploy, config-generate-examples commands
+  - `commands/_shared.py` — Script resolution, execution with BMK env vars, VIRTUAL_ENV isolation
+  - `commands/testsuite_cmd.py` — test, t commands (--human flag, BMK_OUTPUT_FORMAT)
+  - `commands/test_integration_cmd.py` — testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT)
   - `commands/email.py` — send-email, send-notification commands
   - `commands/logging.py` — logdemo command
 
@@ -348,4 +351,4 @@ Use `composition.build_testing()` to wire all in-memory adapters.
 
 ---
 
-**Last Updated:** 2026-01-30 (attachment security)
+**Last Updated:** 2026-02-24 (JSON-by-default output, VIRTUAL_ENV isolation)

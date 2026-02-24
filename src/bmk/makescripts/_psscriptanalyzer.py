@@ -143,6 +143,7 @@ def run_psscriptanalyzer(
     project_dir: Path,
     exclude_rules: tuple[str, ...],
     verbose: bool = False,
+    output_format: str = "text",
 ) -> int:
     """Invoke PSScriptAnalyzer via subprocess.
 
@@ -151,17 +152,27 @@ def run_psscriptanalyzer(
         project_dir: Project root to scan.
         exclude_rules: Rule names to exclude.
         verbose: If True, print additional diagnostic output.
+        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
 
     Returns:
         Exit code from PSScriptAnalyzer (0 = clean, >0 = violation count).
     """
     exclude_csv = ",".join(exclude_rules)
-    command = (
-        f"Invoke-ScriptAnalyzer -Path '{project_dir}' -Recurse"
-        f" -Severity Error,Warning"
-        f" -ExcludeRule {exclude_csv}"
-        f" -EnableExit"
-    )
+    if output_format == "json":
+        command = (
+            f"$results = Invoke-ScriptAnalyzer -Path '{project_dir}' -Recurse"
+            f" -Severity Error,Warning"
+            f" -ExcludeRule {exclude_csv};"
+            f" $results | ConvertTo-Json -Depth 5;"
+            f" if ($results) {{ exit $results.Count }} else {{ exit 0 }}"
+        )
+    else:
+        command = (
+            f"Invoke-ScriptAnalyzer -Path '{project_dir}' -Recurse"
+            f" -Severity Error,Warning"
+            f" -ExcludeRule {exclude_csv}"
+            f" -EnableExit"
+        )
     if verbose:
         print(f'Running: pwsh -NoProfile -Command "{command}"')
 
@@ -172,12 +183,13 @@ def run_psscriptanalyzer(
     return result.returncode
 
 
-def main(*, project_dir: Path | None = None, verbose: bool = False) -> int:
+def main(*, project_dir: Path | None = None, verbose: bool = False, output_format: str = "text") -> int:
     """Orchestrate the full PSScriptAnalyzer lint flow.
 
     Args:
         project_dir: Root directory to lint. Defaults to cwd.
         verbose: If True, print additional diagnostic output.
+        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
 
     Returns:
         Exit code (0 on success, non-zero on lint violations or skip).
@@ -207,6 +219,7 @@ def main(*, project_dir: Path | None = None, verbose: bool = False) -> int:
         project_dir=project_dir,
         exclude_rules=exclude_rules,
         verbose=verbose,
+        output_format=output_format,
     )
 
     if exit_code != 0:
@@ -231,5 +244,11 @@ if __name__ == "__main__":  # pragma: no cover
         action="store_true",
         help="Print additional diagnostic output",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=["json", "text"],
+        default="text",
+        help="Output format: json for machine-readable, text for human-readable (default: text)",
+    )
     args, _unknown = parser.parse_known_args()
-    sys.exit(main(project_dir=args.project_dir, verbose=args.verbose))
+    sys.exit(main(project_dir=args.project_dir, verbose=args.verbose, output_format=args.output_format))

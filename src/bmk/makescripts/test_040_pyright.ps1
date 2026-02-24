@@ -23,7 +23,13 @@ function Write-ExitCodeError {
 
 Write-Output "Running pyright..."
 
-pyright
+$outputFormat = if ($env:BMK_OUTPUT_FORMAT) { $env:BMK_OUTPUT_FORMAT } else { "json" }
+$pyrightArgs = @()
+if ($outputFormat -eq "json") {
+    $pyrightArgs += "--outputjson"
+}
+
+pyright @pyrightArgs
 $exitCode = $LASTEXITCODE
 
 Write-ExitCodeError $exitCode

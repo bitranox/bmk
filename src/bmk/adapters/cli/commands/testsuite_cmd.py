@@ -10,6 +10,7 @@ Environment variables set for scripts:
     * ``BMK_COMMAND_PREFIX`` - Command prefix for staged scripts
     * ``BMK_OVERRIDE_DIR`` - Per-project override directory (from config, if set)
     * ``BMK_PACKAGE_NAME`` - Package name override (from config, if set)
+    * ``BMK_OUTPUT_FORMAT`` - Tool output format (``json`` or ``text``)
 
 Contents:
     * :func:`cli_test` - Run the project test script.
@@ -19,6 +20,7 @@ Contents:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,12 +37,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _run_test(args: tuple[str, ...], config: Config) -> None:
+def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> None:
     """Shared implementation for test commands.
 
     Args:
         args: Arguments to pass through to the test script.
         config: Loaded layered configuration (with profile and overrides applied).
+        human: Use human-readable text output instead of JSON.
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
@@ -62,6 +65,7 @@ def _run_test(args: tuple[str, ...], config: Config) -> None:
         override_dir=bmk_config.get("override_dir", ""),
         package_name=bmk_config.get("package_name", ""),
         show_warnings=bmk_config.get("show_warnings", True),
+        output_format="text" if human else os.environ.get("BMK_OUTPUT_FORMAT", "json"),
     )
 
     if exit_code != 0:
@@ -69,14 +73,18 @@ def _run_test(args: tuple[str, ...], config: Config) -> None:
 
 
 @click.command("test", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
+@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def cli_test(ctx: click.Context, args: tuple[str, ...]) -> None:
+def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """Run the project test script.
 
     Executes test.sh (Linux/macOS) or test.ps1 (Windows) with the current
     working directory as the first argument, followed by any additional
     arguments passed to this command.
+
+    Tool output defaults to JSON (machine-readable). Use --human for
+    traditional text output.
 
     Script lookup order:
     1. <cwd>/bmk_makescripts/test.sh (local override)
@@ -92,13 +100,14 @@ def cli_test(ctx: click.Context, args: tuple[str, ...]) -> None:
     cli_ctx = get_cli_context(ctx)
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "test"}):
         logger.info("Executing test command")
-        _run_test(args, cli_ctx.config)
+        _run_test(args, cli_ctx.config, human=human)
 
 
 @click.command("t", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
+@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def cli_t(ctx: click.Context, args: tuple[str, ...]) -> None:
+def cli_t(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """Run the project test script (alias for 'test').
 
     See ``bmk test --help`` for full documentation.
@@ -113,7 +122,7 @@ def cli_t(ctx: click.Context, args: tuple[str, ...]) -> None:
     cli_ctx = get_cli_context(ctx)
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "t"}):
         logger.info("Executing test command (via alias 't')")
-        _run_test(args, cli_ctx.config)
+        _run_test(args, cli_ctx.config, human=human)
 
 
 __all__ = [

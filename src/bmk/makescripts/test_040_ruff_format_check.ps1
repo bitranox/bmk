@@ -21,6 +21,9 @@ function Write-ExitCodeError {
 
 Write-Output "Running ruff format check..."
 
+# Note: ruff format --output-format json requires preview mode (unstable on stable ruff).
+# The formatter only reports file counts, not per-violation data, so JSON adds no value here.
+
 ruff format --check .
 $exitCode = $LASTEXITCODE
 

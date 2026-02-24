@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "2.3.3"
+version = "2.4.0"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,21 +8,21 @@ dependencies = [
     "rich-click>=1.9.7",
     "lib_cli_exit_tools>=2.3.0",
     "lib_log_rich>=6.3.3",
-    "lib_layered_config>=5.4.0",
+    "lib_layered_config>=5.4.1",
     "btx_lib_mail>=1.3.1",
     "pydantic>=2.12.5",
     "orjson>=3.11.7",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "hypothesis>=6.151.6",
-    "ruff>=0.15.1",
+    "hypothesis>=6.151.9",
+    "ruff>=0.15.2",
     "pyright[nodejs]>=1.1.408",
     "bandit>=1.9.3",
     "build>=1.4.0",
     "twine>=6.2.0",
     "codecov-cli>=11.2.6",
     "pip-audit>=2.10.0",
-    "textual>=7.5.0",
+    "textual>=8.0.0",
     "import-linter>=2.10",
     "shellcheck-py>=0.11.0.1",
     "shfmt-py>=3.12.0.2",
@@ -30,7 +30,7 @@ dependencies = [
     "rtoml>=0.13.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.2.1",
-    "hatchling>=1.28.0",           # needed for bild system - additionally added here by design
+    "hatchling>=1.29.0",           # needed for bild system - additionally added here by design
     # Transitive CVE pins (genuine transitive deps needing minimum version)
     "jaraco-context>=6.1.0",       # CVE-2026-23949  (twine -> keyring -> jaraco.context)
     "urllib3>=2.6.3",              # CVE-2025-66471, CVE-2025-66418, CVE-2026-21441  (twine, codecov-cli, pip-audit)
@@ -62,7 +62,7 @@ bmk = "bmk.entry:main"
 mk = "bmk.entry:main"
 
 [build-system]
-requires = ["hatchling>=1.28.0"]
+requires = ["hatchling>=1.29.0"]
 build-backend = "hatchling.build"
 
 

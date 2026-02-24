@@ -19,8 +19,14 @@ explain_exit_code() {
 
 printf 'Running ruff lint...\n'
 
+_output_format="${BMK_OUTPUT_FORMAT:-json}"
+_ruff_args=()
+if [[ "$_output_format" == "json" ]]; then
+    _ruff_args+=(--output-format json)
+fi
+
 set +e
-ruff check .
+ruff check "${_ruff_args[@]}" .
 exit_code=$?
 set -e
 

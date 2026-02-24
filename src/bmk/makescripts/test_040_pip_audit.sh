@@ -27,9 +27,15 @@ fi
 
 printf 'Running pip-audit...\n'
 
+_output_format="${BMK_OUTPUT_FORMAT:-json}"
+_pip_audit_args=()
+if [[ "$_output_format" == "json" ]]; then
+    _pip_audit_args+=(-f json)
+fi
+
 set +e
 # shellcheck disable=SC2086
-pip-audit $IGNORE_FLAGS
+pip-audit $IGNORE_FLAGS "${_pip_audit_args[@]}"
 exit_code=$?
 set -e
 

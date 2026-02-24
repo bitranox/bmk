@@ -23,8 +23,8 @@ Add project-specific targets or override existing ones — the Makefile is the s
 
 | Command                           | Options / Subcommands                                                        | Description                                          |
 |-----------------------------------|------------------------------------------------------------------------------|------------------------------------------------------|
-| `make test\|t`                    |                                                                              | Run test suite (lint, format, type-check, pytest)    |
-| `make testintegration\|testi\|ti` |                                                                              | Run integration tests only (`pytest -m integration`) |
+| `make test\|t`                    | `[--human]`                                                                  | Run test suite (lint, format, type-check, pytest)    |
+| `make testintegration\|testi\|ti` | `[--human]`                                                                  | Run integration tests only (`pytest -m integration`) |
 | `make codecov\|coverage\|cov`     |                                                                              | Upload coverage report to Codecov                    |
 | `make build\|bld`                 |                                                                              | Build wheel and sdist artifacts                      |
 | `make clean\|cln\|cl`             |                                                                              | Remove build artifacts and caches                    |
@@ -71,6 +71,8 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
   | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                         |
   | 900   | sequential   | `test_900_clean.sh`                                                                                                                                                              |
 
+- **JSON-by-default output** — tool output (ruff, pyright, bandit, pip-audit, shellcheck) defaults to JSON for machine-readable consumption. Use `--human` on `test`/`testintegration` commands for traditional text output, or set `BMK_OUTPUT_FORMAT=text`.
+- **Virtual environment isolation** — when bmk runs via `uvx`, it automatically points tools like pyright and pip-audit at the target project's `.venv/` (if present) instead of bmk's own isolated venv. This ensures type stubs and dependencies are resolved correctly.
 - **Built-in commands** — `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
 - **Custom commands** — `bmk custom <name>` runs user-defined scripts from the override directory (no bundled scripts required).
 - **Per-project overrides** — drop scripts into `makescripts/` or configure `bmk.override_dir` to override or extend built-in behaviour.
@@ -190,12 +192,17 @@ Profile names: alphanumeric, hyphens, underscores; max 64 characters; must start
 
 Run the project test suite via the stagerunner. All extra arguments are forwarded to the underlying scripts.
 
-|                  |                                                                                                                      |
-|------------------|----------------------------------------------------------------------------------------------------------------------|
-| **Aliases**      | `t`                                                                                                                  |
-| **Arguments**    | `[ARGS]...` — forwarded to scripts (unlimited, unprocessed)                                                          |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OVERRIDE_DIR` (if configured), `BMK_PACKAGE_NAME` (if configured) |
-| **Exit codes**   | `0` success, `2` script not found, or the script's own exit code                                                     |
+|                  |                                                                                                                                              |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| **Aliases**      | `t`                                                                                                                                          |
+| **Options**      | `--human` — use human-readable text output instead of JSON                                                                                   |
+| **Arguments**    | `[ARGS]...` — forwarded to scripts (unlimited, unprocessed)                                                                                  |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_OVERRIDE_DIR` (if configured), `BMK_PACKAGE_NAME` (if configured)    |
+| **Exit codes**   | `0` success, `2` script not found, or the script's own exit code                                                                             |
+
+Tool output defaults to **JSON** (machine-readable). Use `--human` for traditional text output.
+The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`) can also control output format;
+`--human` takes precedence over the env var.
 
 Script lookup order:
 1. `<cwd>/bmk_makescripts/_btx_stagerunner.sh` (local override)
@@ -204,7 +211,9 @@ Script lookup order:
 ```bash
 bmk test
 bmk t
+bmk test --human
 bmk test --verbose -k test_login
+BMK_OUTPUT_FORMAT=text bmk test
 ```
 
 ---
@@ -213,16 +222,19 @@ bmk test --verbose -k test_login
 
 Run integration tests only (tests marked `@pytest.mark.integration`).
 
-|                  |                                                          |
-|------------------|----------------------------------------------------------|
-| **Aliases**      | `testi`, `ti`                                            |
-| **Arguments**    | `[ARGS]...` — forwarded to scripts                       |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test_integration` |
-| **Exit codes**   | `0` success, `2` script not found, or script exit code   |
+|                  |                                                                          |
+|------------------|--------------------------------------------------------------------------|
+| **Aliases**      | `testi`, `ti`                                                            |
+| **Options**      | `--human` — use human-readable text output instead of JSON               |
+| **Arguments**    | `[ARGS]...` — forwarded to scripts                                       |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test_integration`, `BMK_OUTPUT_FORMAT` |
+| **Exit codes**   | `0` success, `2` script not found, or script exit code                   |
+
+Tool output defaults to **JSON**. Use `--human` for text output. See [test](#test) for details on output format control.
 
 ```bash
 bmk testintegration
-bmk testi
+bmk testi --human
 bmk ti
 ```
 

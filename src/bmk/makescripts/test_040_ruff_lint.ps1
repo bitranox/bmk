@@ -21,7 +21,13 @@ function Write-ExitCodeError {
 
 Write-Output "Running ruff lint..."
 
-ruff check .
+$outputFormat = if ($env:BMK_OUTPUT_FORMAT) { $env:BMK_OUTPUT_FORMAT } else { "json" }
+$ruffArgs = @()
+if ($outputFormat -eq "json") {
+    $ruffArgs += "--output-format", "json"
+}
+
+ruff check @ruffArgs .
 $exitCode = $LASTEXITCODE
 
 Write-ExitCodeError $exitCode

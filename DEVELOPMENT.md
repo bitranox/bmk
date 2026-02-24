@@ -39,6 +39,7 @@
   - `COVERAGE=on|auto|off` (default: `on`) -- controls pytest coverage run and Codecov upload
   - `SKIP_BOOTSTRAP=1` -- skip auto-install of dev tools if missing
   - `TEST_VERBOSE=1` -- echo each command executed by the test harness
+  - `BMK_OUTPUT_FORMAT=json|text` (default: `json`) -- tool output format; `--human` flag overrides to `text`
   - Also respects `CODECOV_TOKEN` when uploading to Codecov
 
 - **run**
@@ -86,7 +87,7 @@ make menu
 
 ### Target Details
 
-- `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`).
+- `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`). Tool output defaults to JSON; use `bmk test --human` or `BMK_OUTPUT_FORMAT=text` for traditional text output.
   - Auto-bootstrap: `make test` will try to install dev tools (`pip install -e .`) if `ruff`/`pyright`/`pytest` are missing. Set `SKIP_BOOTSTRAP=1` to skip this behavior.
 - `build`: creates wheel/sdist artifacts.
 - `version-current`: prints current version from `pyproject.toml`.
@@ -165,6 +166,22 @@ COVERAGE=on make test        # force coverage and generate coverage.xml/codecov.
 - The library reads its own metadata from static constants (see `src/bmk/__init__conf__.py`).
 - Do not duplicate the version in code; bump only `pyproject.toml` and update `CHANGELOG.md`.
 - Console script name is discovered from entry points; defaults to `bmk`.
+
+### Virtual Environment Isolation (uvx)
+
+When bmk is invoked via `uvx`, it runs in an ephemeral virtual environment that contains
+bmk's own dependencies (ruff, pyright, pytest, etc.) but not the target project's dependencies.
+This causes tools like pyright and pip-audit to fail if they resolve packages against bmk's venv
+instead of the project's.
+
+bmk handles this automatically:
+- If the target project has a `.venv/` directory, bmk sets `VIRTUAL_ENV` to point at it
+- If no `.venv/` exists, bmk unsets `VIRTUAL_ENV` so tools fall back to their own discovery
+  (e.g., pyright reads `[tool.pyright]` from the project's `pyproject.toml`)
+
+**Requirement:** The target project must have its dependencies installed in `.venv/`
+(the standard convention for uv-managed projects). Run `uv sync` or `pip install -e .`
+in the target project before running `bmk test`.
 
 ### Dependency Auditing
 

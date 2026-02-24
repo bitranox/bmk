@@ -31,7 +31,13 @@ if (Test-Path "pyproject.toml") {
 
 Write-Output "Running pip-audit..."
 
-pip-audit @ignoreFlags
+$outputFormat = if ($env:BMK_OUTPUT_FORMAT) { $env:BMK_OUTPUT_FORMAT } else { "json" }
+$pipAuditArgs = @()
+if ($outputFormat -eq "json") {
+    $pipAuditArgs += "-f", "json"
+}
+
+pip-audit @ignoreFlags @pipAuditArgs
 $exitCode = $LASTEXITCODE
 
 Write-ExitCodeError $exitCode

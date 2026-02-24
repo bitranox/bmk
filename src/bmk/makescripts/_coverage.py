@@ -730,6 +730,12 @@ Examples:
         action="store_true",
         help="Enable verbose output",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=["json", "text"],
+        default="text",
+        help="Output format (accepted for pipeline consistency; coverage XML is always generated)",
+    )
     args, _unknown = parser.parse_known_args()
     sys.exit(
         main(
