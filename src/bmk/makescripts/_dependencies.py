@@ -22,6 +22,7 @@ additional dependencies.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -588,6 +589,7 @@ def sync_installed_packages(
     deps: list[DependencyInfo],
     *,
     dry_run: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Ensure installed packages match pyproject.toml requirements.
 
@@ -597,6 +599,7 @@ def sync_installed_packages(
     Args:
         deps: List of dependency info objects from check_dependencies
         dry_run: If True, only show what would be installed without running pip
+        quiet: Suppress informational output
 
     Returns:
         Number of packages that needed updating
@@ -604,20 +607,25 @@ def sync_installed_packages(
     needs_install = _find_packages_needing_install(deps)
 
     if not needs_install:
-        print("\nAll installed packages match pyproject.toml requirements!")
+        if not quiet:
+            print("\nAll installed packages match pyproject.toml requirements!")
         return 0
 
-    _print_install_report(needs_install, dry_run=dry_run)
+    if not quiet:
+        _print_install_report(needs_install, dry_run=dry_run)
 
     if dry_run:
-        print(f"\n[DRY RUN] Would install/update {len(needs_install)} packages")
+        if not quiet:
+            print(f"\n[DRY RUN] Would install/update {len(needs_install)} packages")
         return len(needs_install)
 
-    print("\nInstalling/updating packages...")
+    if not quiet:
+        print("\nInstalling/updating packages...")
     exit_code = _run_pip_install(needs_install)
 
     if exit_code == 0:
-        print(f"\nSuccessfully installed/updated {len(needs_install)} packages")
+        if not quiet:
+            print(f"\nSuccessfully installed/updated {len(needs_install)} packages")
     else:
         print(f"\npip install failed with exit code {exit_code}", file=sys.stderr)
 
@@ -629,6 +637,7 @@ def update_dependencies(
     pyproject: Path = Path("pyproject.toml"),
     *,
     dry_run: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Update outdated dependencies in pyproject.toml to latest versions.
 
@@ -636,20 +645,23 @@ def update_dependencies(
         deps: List of dependency info objects from check_dependencies
         pyproject: Path to pyproject.toml file
         dry_run: If True, only show what would be changed without modifying
+        quiet: Suppress informational output
 
     Returns:
         Number of dependencies updated
     """
     outdated = [d for d in deps if d.status == "outdated"]
     if not outdated:
-        print("All dependencies are up-to-date!")
+        if not quiet:
+            print("All dependencies are up-to-date!")
         return 0
 
     # Read the file content
     content = pyproject.read_text(encoding="utf-8")
     updated_count = 0
 
-    print(f"\n{'[DRY RUN] ' if dry_run else ''}Updating {len(outdated)} dependencies:\n")
+    if not quiet:
+        print(f"\n{'[DRY RUN] ' if dry_run else ''}Updating {len(outdated)} dependencies:\n")
 
     for dep in outdated:
         if not dep.original_spec:
@@ -681,18 +693,21 @@ def update_dependencies(
                 break
 
         if replaced:
-            print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")
+            if not quiet:
+                print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")
             updated_count += 1
-        else:
+        elif not quiet:
             print(f"  {dep.name}: Could not locate in file (manual update needed)")
 
     if updated_count > 0:
         if dry_run:
-            print(f"\n[DRY RUN] Would update {updated_count} dependencies")
+            if not quiet:
+                print(f"\n[DRY RUN] Would update {updated_count} dependencies")
         else:
             pyproject.write_text(content, encoding="utf-8")
-            print(f"\nUpdated {updated_count} dependencies in {pyproject}")
-    else:
+            if not quiet:
+                print(f"\nUpdated {updated_count} dependencies in {pyproject}")
+    elif not quiet:
         print("\nNo dependencies were updated")
 
     return updated_count
@@ -703,6 +718,7 @@ def main(
     verbose: bool = False,
     update: bool = False,
     dry_run: bool = False,
+    quiet: bool = False,
     pyproject: Path = Path("pyproject.toml"),
 ) -> int:
     """Main entry point for dependency checking.
@@ -711,25 +727,30 @@ def main(
         verbose: Show all dependencies, not just outdated ones
         update: Update outdated dependencies to latest versions
         dry_run: Show what would be updated without making changes
+        quiet: Suppress informational output (JSON mode)
         pyproject: Path to pyproject.toml
 
     Returns:
         Exit code (0 if all up-to-date or update successful, 1 if any outdated)
     """
-    print(f"Checking dependencies in {pyproject}...")
+    if not quiet:
+        print(f"Checking dependencies in {pyproject}...")
     deps = check_dependencies(pyproject)
-    exit_code = print_report(deps, verbose=verbose)
+    if not quiet:
+        exit_code = print_report(deps, verbose=verbose)
+    else:
+        exit_code = 1 if any(d.status == "outdated" for d in deps) else 0
 
     if update:
         # Update pyproject.toml with latest versions
-        updated = update_dependencies(deps, pyproject, dry_run=dry_run)
+        updated = update_dependencies(deps, pyproject, dry_run=dry_run, quiet=quiet)
 
         # Re-check dependencies after pyproject.toml update
         if updated > 0 and not dry_run:
             deps = check_dependencies(pyproject)
 
         # Sync installed packages with pyproject.toml requirements
-        sync_installed_packages(deps, dry_run=dry_run)
+        sync_installed_packages(deps, dry_run=dry_run, quiet=quiet)
         return 0
 
     return exit_code
@@ -747,4 +768,5 @@ if __name__ == "__main__":  # pragma: no cover
     )
     args, _unknown = parser.parse_known_args()
     pyproject = args.project_dir / "pyproject.toml"
-    sys.exit(main(verbose=args.verbose, update=args.update, dry_run=args.dry_run, pyproject=pyproject))
+    quiet = os.environ.get("BMK_OUTPUT_FORMAT", "json") != "text"
+    sys.exit(main(verbose=args.verbose, update=args.update, dry_run=args.dry_run, quiet=quiet, pyproject=pyproject))

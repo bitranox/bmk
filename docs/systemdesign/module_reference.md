@@ -34,8 +34,8 @@ Complete (v1.1.2+)
   - `commands/info.py` — info, hello, fail commands
   - `commands/config.py` — config, config-deploy, config-generate-examples commands
   - `commands/_shared.py` — Script resolution, execution with BMK env vars, VIRTUAL_ENV isolation
-  - `commands/testsuite_cmd.py` — test, t commands (--human flag, BMK_OUTPUT_FORMAT)
-  - `commands/test_integration_cmd.py` — testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT)
+  - `commands/testsuite_cmd.py` — test, t commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
+  - `commands/test_integration_cmd.py` — testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
   - `commands/email.py` — send-email, send-notification commands
   - `commands/logging.py` — logdemo command
 
@@ -132,6 +132,18 @@ POSIX-conventional exit codes defined in `adapters/cli/exit_codes.py`:
 | `--profile NAME` | Load configuration from a named profile |
 | `--set SECTION.KEY=VALUE` | Override configuration setting (repeatable) |
 | `-h, --help` | Show help and exit |
+
+### Stagerunner Commands (test, testintegration, build, clean, push, etc.)
+
+Commands that delegate to the stagerunner (`test`, `testintegration`, `build`, `clean`,
+`push`, `release`, `dependencies`, etc.) respect `BMK_OUTPUT_FORMAT`:
+
+| Behaviour | JSON mode (default) | Text mode (`--human` / `BMK_OUTPUT_FORMAT=text`) |
+|-----------|---------------------|--------------------------------------------------|
+| Stagerunner output | Captured; shown only on stage failure | Shown immediately (verbose) |
+| Makefile version check | Auto-accepts updates | Prompts interactively |
+| Dependency checking | Silent (no report or summary) | Full report displayed |
+| Pytest | `--tb=short -q --no-header`; coverage report suppressed | Default verbose output |
 
 ### info
 
@@ -351,4 +363,4 @@ Use `composition.build_testing()` to wire all in-memory adapters.
 
 ---
 
-**Last Updated:** 2026-02-24 (JSON-by-default output, VIRTUAL_ENV isolation)
+**Last Updated:** 2026-02-24 (JSON mode output suppression, VIRTUAL_ENV isolation)

@@ -179,6 +179,7 @@ def run_coverage_tests(
     verbose: bool = False,
     generate_xml: bool = True,
     include_integration: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Run pytest under coverage and generate reports.
 
@@ -187,6 +188,7 @@ def run_coverage_tests(
         verbose: Enable verbose output.
         generate_xml: Generate XML coverage report for Codecov.
         include_integration: Include integration tests (excluded by default).
+        quiet: Minimize output (short tracebacks, no per-test lines).
 
     Returns:
         Exit code (0 for success, non-zero for failure).
@@ -224,14 +226,19 @@ def run_coverage_tests(
             marker_filter = f"not {config.exclude_markers}"
             coverage_cmd.extend(["-m", marker_filter])
 
-        coverage_cmd.append(config.pytest_verbosity)
+        # In quiet mode: short tracebacks, no per-test lines, no header
+        if quiet:
+            coverage_cmd.extend(["--tb=short", "-q", "--no-header"])
+        else:
+            coverage_cmd.append(config.pytest_verbosity)
 
         # Build display command
         marker_display = f"-m '{marker_filter}' " if marker_filter else ""
-        print(
-            f"[coverage] python -m coverage run --source={coverage_source} "
-            f"-m pytest {marker_display}{config.pytest_verbosity}"
-        )
+        if not quiet:
+            print(
+                f"[coverage] python -m coverage run --source={coverage_source} "
+                f"-m pytest {marker_display}{config.pytest_verbosity}"
+            )
 
         result = subprocess.run(
             coverage_cmd,
@@ -242,7 +249,7 @@ def run_coverage_tests(
         if result.returncode != 0:
             return result.returncode
 
-        # Generate terminal report
+        # Generate terminal report (skip in quiet mode — summary adds noise)
         report_cmd = [
             sys.executable,
             "-m",
@@ -251,13 +258,15 @@ def run_coverage_tests(
             "-m",
             f"--fail-under={config.fail_under}",
         ]
-        print(f"[coverage] python -m coverage report -m --fail-under={config.fail_under}")
+        if not quiet:
+            print(f"[coverage] python -m coverage report -m --fail-under={config.fail_under}")
 
         report_result = subprocess.run(
             report_cmd,
             env=env,
             cwd=project_dir,
             check=False,
+            **({"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}),
         )
         if report_result.returncode != 0:
             return report_result.returncode
@@ -272,7 +281,8 @@ def run_coverage_tests(
                 "-o",
                 config.coverage_report_file,
             ]
-            print(f"[coverage] python -m coverage xml -o {config.coverage_report_file}")
+            if not quiet:
+                print(f"[coverage] python -m coverage xml -o {config.coverage_report_file}")
 
             xml_result = subprocess.run(
                 xml_cmd,
@@ -636,6 +646,7 @@ def main(
     upload: bool = True,
     verbose: bool = False,
     include_integration: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Main entry point for coverage operations.
 
@@ -645,6 +656,7 @@ def main(
         upload: Upload coverage to Codecov after running tests.
         verbose: Enable verbose output.
         include_integration: Include integration tests (excluded by default).
+        quiet: Minimize output (short tracebacks, no per-test lines).
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -654,29 +666,34 @@ def main(
 
     # Run tests with coverage if requested
     if run_tests:
-        print(f"[coverage] Running tests with coverage in {project_dir}...")
+        if not quiet:
+            print(f"[coverage] Running tests with coverage in {project_dir}...")
         exit_code = run_coverage_tests(
             project_dir=project_dir,
             verbose=verbose,
             include_integration=include_integration,
+            quiet=quiet,
         )
         if exit_code != 0:
             print(f"[coverage] Tests failed (exit {exit_code})", file=sys.stderr)
             return exit_code
-        print("[coverage] Tests passed")
+        if not quiet:
+            print("[coverage] Tests passed")
 
     # Upload coverage if requested
     if upload:
         token = ensure_codecov_token(project_dir)
         if not token:
-            print(
-                "\033[33m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
-                "(set CODECOV_TOKEN in environment or .env)\033[0m",
-                file=sys.stderr,
-            )
+            if not quiet:
+                print(
+                    "\033[33m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
+                    "(set CODECOV_TOKEN in environment or .env)\033[0m",
+                    file=sys.stderr,
+                )
             return 0
 
-        print(f"[codecov] Uploading coverage from {project_dir}...")
+        if not quiet:
+            print(f"[codecov] Uploading coverage from {project_dir}...")
         success = upload_coverage_report(project_dir=project_dir, codecov_token=token)
         if not success:
             return 1
@@ -744,5 +761,6 @@ Examples:
             upload=not args.no_upload,
             verbose=args.verbose,
             include_integration=args.integration,
+            quiet=args.output_format == "json",
         )
     )

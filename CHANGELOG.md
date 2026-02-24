@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.5.0] 2026-02-24
+
+### Added
+- **JSON mode output suppression**: stagerunner captures all tool output in JSON mode and only displays it when a stage fails — a fully passing run produces zero tool output, designed for LLM-driven workflows to minimize context window consumption
+- **Makefile auto-update in JSON mode**: `check_makefile_update()` auto-accepts Makefile version updates without prompting when `BMK_OUTPUT_FORMAT` is not `text`
+- **JSON mode auto-accept for dependency updates**: `_dependencies.py` runs silently in JSON mode — no report, no per-dependency output, no summary
+- **Pytest concise mode**: in JSON mode, pytest runs with `--tb=short -q --no-header` and coverage report display is suppressed
+
 ## [2.4.0] 2026-02-24 11:20:14
 
 ### Added

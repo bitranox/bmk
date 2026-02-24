@@ -57,6 +57,9 @@ $ColorRed = "`e[31m"
 $ColorYellow = "`e[33m"
 $ColorReset = "`e[0m"
 
+# Output mode: non-text (json) suppresses passing output; text shows everything
+$bmkQuiet = ($env:BMK_OUTPUT_FORMAT ?? "json") -ne "text"
+
 # ---------------------------------------------------------------------------
 # Functions
 # ---------------------------------------------------------------------------
@@ -164,6 +167,23 @@ function Invoke-SingleScript {
     # 'return' value).  Display captured output via Write-Host afterwards.
     $scriptOutput = & $Script.FullName @script:ScriptArgs 2>&1
     $exitCode = $LASTEXITCODE
+
+    if ($bmkQuiet) {
+        # Quiet mode: only display output on failure
+        if ($exitCode -eq 0) {
+            return 0
+        }
+        $script:FailedScripts.Add("$($Script.Name):$exitCode")
+        Write-Host ""
+        Write-Host "${ColorRed}[$($Script.Name)] (exit code: $exitCode)${ColorReset}"
+        if ($scriptOutput) {
+            $scriptOutput | ForEach-Object { Write-Host $_ }
+        }
+        Write-Host ""
+        return $exitCode
+    }
+
+    # Verbose mode: display all output
     if ($scriptOutput) {
         $scriptOutput | ForEach-Object { Write-Host $_ }
     }
@@ -235,7 +255,9 @@ function Invoke-StageParallel {
         $friendlyNames.Add($friendly)
     }
     $joined = $friendlyNames -join ', '
-    Write-Host "  $([char]0x25B6) running $($scripts.Count) tasks in parallel: $joined"
+    if (-not $bmkQuiet) {
+        Write-Host "  $([char]0x25B6) running $($scripts.Count) tasks in parallel: $joined"
+    }
 
     # Start all scripts as PowerShell jobs
     $jobs = @{}
@@ -281,19 +303,21 @@ function Invoke-StageParallel {
         Remove-Job $job -Force
     }
 
-    # Print all results together
-    foreach ($scriptName in $scriptNames) {
-        $exitCode = $exitCodes[$scriptName]
-        if ($exitCode -eq 0) {
-            Write-Host "${ColorGreen}  $([char]0x2713) $scriptName${ColorReset}"
+    # Print results summary (suppressed in quiet mode)
+    if (-not $bmkQuiet) {
+        foreach ($scriptName in $scriptNames) {
+            $exitCode = $exitCodes[$scriptName]
+            if ($exitCode -eq 0) {
+                Write-Host "${ColorGreen}  $([char]0x2713) $scriptName${ColorReset}"
+            }
+            else {
+                Write-Host "${ColorRed}  $([char]0x2717) $scriptName (exit code: $exitCode)${ColorReset}"
+            }
         }
-        else {
-            Write-Host "${ColorRed}  $([char]0x2717) $scriptName (exit code: $exitCode)${ColorReset}"
-        }
-    }
 
-    # Show warnings from passed scripts
-    Show-WarningsFromPassed -PassedNames $passed -AllOutput $allOutput
+        # Show warnings from passed scripts
+        Show-WarningsFromPassed -PassedNames $passed -AllOutput $allOutput
+    }
 
     # Print output of failed scripts
     if ($failed.Count -gt 0) {
@@ -331,11 +355,13 @@ function Invoke-Run {
     foreach ($stage in $stages) {
         $result = Invoke-StageParallel -Stage $stage
         if ($result -ne 0) {
-            foreach ($entry in $script:FailedScripts) {
-                $parts = $entry -split ':', 2
-                $sname = $parts[0]
-                $scode = $parts[1]
-                Write-Host "${ColorRed}  $([char]0x2717) $sname (exit code: $scode)${ColorReset}"
+            if (-not $bmkQuiet) {
+                foreach ($entry in $script:FailedScripts) {
+                    $parts = $entry -split ':', 2
+                    $sname = $parts[0]
+                    $scode = $parts[1]
+                    Write-Host "${ColorRed}  $([char]0x2717) $sname (exit code: $scode)${ColorReset}"
+                }
             }
             $firstCode = ($script:FailedScripts[0] -split ':', 2)[1]
             exit ($firstCode ? [int]$firstCode : 1)

@@ -114,6 +114,7 @@ def test_outdated_user_accepts(
 ) -> None:
     """Outdated Makefile + user accepts → file updated, subcommand continues."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "text")
     (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\nold\n", encoding="utf-8")
 
     result: Result = cli_runner.invoke(
@@ -139,6 +140,7 @@ def test_outdated_user_declines(
 ) -> None:
     """Outdated Makefile + user declines → original preserved, subcommand runs."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "text")
     original = "# BMK MAKEFILE 0.0.1\nold\n"
     (tmp_path / "Makefile").write_text(original, encoding="utf-8")
 
@@ -151,6 +153,30 @@ def test_outdated_user_declines(
 
     assert result.exit_code == 0
     assert (tmp_path / "Makefile").read_text(encoding="utf-8") == original
+
+
+@pytest.mark.os_agnostic
+def test_outdated_auto_accepts_in_json_mode(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outdated Makefile in JSON mode → auto-updated without prompt."""
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "json")
+    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\nold\n", encoding="utf-8")
+
+    result: Result = cli_runner.invoke(
+        cli_mod.cli,
+        ["info"],
+        obj=production_factory,
+    )
+
+    assert result.exit_code == 0
+    updated = (tmp_path / "Makefile").read_text(encoding="utf-8")
+    assert updated.startswith("# BMK MAKEFILE")
+    assert "old" not in updated
 
 
 # =============================================================================

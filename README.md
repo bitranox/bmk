@@ -71,7 +71,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
   | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                         |
   | 900   | sequential   | `test_900_clean.sh`                                                                                                                                                              |
 
-- **JSON-by-default output** — tool output (ruff, pyright, bandit, pip-audit, shellcheck) defaults to JSON for machine-readable consumption. Use `--human` on `test`/`testintegration` commands for traditional text output, or set `BMK_OUTPUT_FORMAT=text`.
+- **JSON-by-default output** — in JSON mode (the default), the stagerunner captures all tool output and only displays it when a stage fails. When everything passes, there is zero tool output. Additionally, dependency checking runs silently, Makefile version updates are auto-accepted without prompting, and pytest runs with `--tb=short -q --no-header` for concise failure output. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`.
 - **Virtual environment isolation** — when bmk runs via `uvx`, it automatically points tools like pyright and pip-audit at the target project's `.venv/` (if present) instead of bmk's own isolated venv. This ensures type stubs and dependencies are resolved correctly.
 - **Built-in commands** — `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
 - **Custom commands** — `bmk custom <name>` runs user-defined scripts from the override directory (no bundled scripts required).
@@ -200,9 +200,14 @@ Run the project test suite via the stagerunner. All extra arguments are forwarde
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_OVERRIDE_DIR` (if configured), `BMK_PACKAGE_NAME` (if configured)    |
 | **Exit codes**   | `0` success, `2` script not found, or the script's own exit code                                                                             |
 
-Tool output defaults to **JSON** (machine-readable). Use `--human` for traditional text output.
-The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`) can also control output format;
-`--human` takes precedence over the env var.
+Tool output defaults to **JSON** (machine-readable). JSON mode is designed for LLM-driven
+workflows where minimizing output tokens and context window consumption matters — a fully
+passing run produces zero tool output, and failures surface only the relevant diagnostics.
+The stagerunner captures all tool output and only shows it when a stage fails. Dependency
+checking runs silently, Makefile version updates are auto-accepted, and pytest uses
+`--tb=short -q --no-header` for concise failure output. Use `--human` for full verbose
+output. The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`) can also control
+output format; `--human` takes precedence over the env var.
 
 Script lookup order:
 1. `<cwd>/bmk_makescripts/_btx_stagerunner.sh` (local override)
@@ -230,7 +235,7 @@ Run integration tests only (tests marked `@pytest.mark.integration`).
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test_integration`, `BMK_OUTPUT_FORMAT` |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code                   |
 
-Tool output defaults to **JSON**. Use `--human` for text output. See [test](#test) for details on output format control.
+Tool output defaults to **JSON**. In JSON mode, output is captured and only shown on failure. Use `--human` for full verbose output. See [test](#test) for details on output format control.
 
 ```bash
 bmk testintegration
@@ -378,6 +383,11 @@ bmk r
 ### dependencies
 
 Check and manage project dependencies. Without a subcommand, lists dependencies. The `-u` flag triggers an update.
+
+In JSON mode (`BMK_OUTPUT_FORMAT=json`, the default), dependency checking and updating
+runs silently -- no per-dependency output, no report, no summary. Dependencies are still
+checked and updated, just without console output. In text mode (`--human` or
+`BMK_OUTPUT_FORMAT=text`), the full dependency report is displayed.
 
 |             |             |
 |-------------|-------------|

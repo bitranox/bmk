@@ -39,7 +39,7 @@
   - `COVERAGE=on|auto|off` (default: `on`) -- controls pytest coverage run and Codecov upload
   - `SKIP_BOOTSTRAP=1` -- skip auto-install of dev tools if missing
   - `TEST_VERBOSE=1` -- echo each command executed by the test harness
-  - `BMK_OUTPUT_FORMAT=json|text` (default: `json`) -- tool output format; `--human` flag overrides to `text`
+  - `BMK_OUTPUT_FORMAT=json|text` (default: `json`) -- output format; JSON mode suppresses tool output on success, auto-accepts Makefile updates, runs dependencies silently, and uses concise pytest flags; `--human` flag overrides to `text` for full verbose output
   - Also respects `CODECOV_TOKEN` when uploading to Codecov
 
 - **run**
@@ -87,7 +87,7 @@ make menu
 
 ### Target Details
 
-- `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`). Tool output defaults to JSON; use `bmk test --human` or `BMK_OUTPUT_FORMAT=text` for traditional text output.
+- `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`). Tool output defaults to JSON mode, which suppresses all tool output when stages pass (only failures produce output). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header` with coverage report display suppressed. Use `bmk test --human` or `BMK_OUTPUT_FORMAT=text` for full verbose output showing all tool output, prompts, and reports.
   - Auto-bootstrap: `make test` will try to install dev tools (`pip install -e .`) if `ruff`/`pyright`/`pytest` are missing. Set `SKIP_BOOTSTRAP=1` to skip this behavior.
 - `build`: creates wheel/sdist artifacts.
 - `version-current`: prints current version from `pyproject.toml`.

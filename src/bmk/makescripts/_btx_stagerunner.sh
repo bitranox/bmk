@@ -57,6 +57,12 @@ COLOR_RED='\033[31m'
 COLOR_YELLOW='\033[33m'
 COLOR_RESET='\033[0m'
 
+# Output mode: non-text (json) suppresses passing output; text shows everything
+_BMK_QUIET=false
+if [[ "${BMK_OUTPUT_FORMAT:-json}" != "text" ]]; then
+    _BMK_QUIET=true
+fi
+
 die() {
     printf 'Error: %s\n' "$1" >&2
     exit 1
@@ -159,7 +165,7 @@ gather_scripts_for_stage() {
 }
 
 run_single_script() {
-    # Runs a single script with output directly to console
+    # Runs a single script; in quiet mode captures output and shows only on failure
     local stage="$1"
     local script="$2"
     local script_name exit_code
@@ -168,16 +174,35 @@ run_single_script() {
 
     TOTAL_SCRIPTS=$((TOTAL_SCRIPTS + 1))
 
-    # Run script directly, output goes to console
-    "$script" "${SCRIPT_ARGS[@]}"
-    exit_code=$?
+    if [[ "$_BMK_QUIET" == true ]]; then
+        local output_file="$TEMP_DIR/${script_name}.out"
+        "$script" "${SCRIPT_ARGS[@]}" > "$output_file" 2>&1
+        exit_code=$?
 
-    if [[ "$exit_code" -eq 0 ]]; then
-        printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
-        return 0
+        if [[ "$exit_code" -eq 0 ]]; then
+            return 0
+        else
+            FAILED_SCRIPTS+=("${script_name}:${exit_code}")
+            printf '\n'
+            printf "${COLOR_RED}[%s] (exit code: %s)${COLOR_RESET}\n" "$script_name" "$exit_code"
+            if [[ -f "$output_file" ]]; then
+                cat "$output_file"
+            fi
+            printf '\n'
+            return "$exit_code"
+        fi
     else
-        FAILED_SCRIPTS+=("${script_name}:${exit_code}")
-        return "$exit_code"
+        # Verbose mode: output directly to console
+        "$script" "${SCRIPT_ARGS[@]}"
+        exit_code=$?
+
+        if [[ "$exit_code" -eq 0 ]]; then
+            printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
+            return 0
+        else
+            FAILED_SCRIPTS+=("${script_name}:${exit_code}")
+            return "$exit_code"
+        fi
     fi
 }
 
@@ -253,7 +278,9 @@ run_stage_parallel() {
         friendly_names+=("$friendly")
     done
     joined=$(IFS=', '; printf '%s' "${friendly_names[*]}")
-    printf '  ▶ running %d tasks in parallel: %s\n' "${#scripts[@]}" "$joined"
+    if [[ "$_BMK_QUIET" != true ]]; then
+        printf '  ▶ running %d tasks in parallel: %s\n' "${#scripts[@]}" "$joined"
+    fi
 
     # Start all scripts in parallel
     for script in "${scripts[@]}"; do
@@ -291,18 +318,20 @@ run_stage_parallel() {
         fi
     done
 
-    # Print all results together
-    for script_name in "${script_names[@]}"; do
-        exit_code="${exit_codes[$script_name]}"
-        if [[ "$exit_code" -eq 0 ]]; then
-            printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
-        else
-            printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$script_name" "$exit_code"
-        fi
-    done
+    # Print results summary (suppressed in quiet mode)
+    if [[ "$_BMK_QUIET" != true ]]; then
+        for script_name in "${script_names[@]}"; do
+            exit_code="${exit_codes[$script_name]}"
+            if [[ "$exit_code" -eq 0 ]]; then
+                printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$script_name"
+            else
+                printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$script_name" "$exit_code"
+            fi
+        done
 
-    # Show warnings from passed scripts
-    print_warnings_from_passed "${passed[@]}"
+        # Show warnings from passed scripts
+        print_warnings_from_passed "${passed[@]}"
+    fi
 
     # Print output of failed scripts
     if [[ ${#failed[@]} -gt 0 ]]; then
@@ -348,11 +377,13 @@ run() {
     for stage in "${stages[@]}"; do
         if ! run_stage_parallel "$stage"; then
             local first_code="${FAILED_SCRIPTS[0]#*:}"
-            for entry in "${FAILED_SCRIPTS[@]}"; do
-                local sname="${entry%%:*}"
-                local scode="${entry#*:}"
-                printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$sname" "$scode"
-            done
+            if [[ "$_BMK_QUIET" != true ]]; then
+                for entry in "${FAILED_SCRIPTS[@]}"; do
+                    local sname="${entry%%:*}"
+                    local scode="${entry#*:}"
+                    printf "${COLOR_RED}  ✗ %s (exit code: %s)${COLOR_RESET}\n" "$sname" "$scode"
+                done
+            fi
             exit "${first_code:-1}"
         fi
     done

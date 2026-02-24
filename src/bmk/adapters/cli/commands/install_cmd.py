@@ -44,6 +44,9 @@ def check_makefile_update() -> bool:
     Returns True if the Makefile was updated (caller should exit),
     False if no update needed or user declined.
 
+    When ``BMK_OUTPUT_FORMAT`` is not ``text`` (i.e. JSON mode), the update
+    is applied automatically without prompting.
+
     Silently returns False on any I/O error or non-interactive Abort.
     """
     target = Path.cwd() / "Makefile"
@@ -60,14 +63,19 @@ def check_makefile_update() -> bool:
     if bundled_ver is None or local_ver == bundled_ver:
         return False
 
-    if not click.confirm(
+    import os
+
+    auto_accept = os.environ.get("BMK_OUTPUT_FORMAT", "json") != "text"
+
+    if not auto_accept and not click.confirm(
         f"Makefile is outdated ({local_ver} \u2192 {bundled_ver}). Update?",
         default=False,
     ):
         return False
 
     shutil.copy2(_BUNDLED_MAKEFILE, target)
-    click.echo(f"Makefile updated to {bundled_ver}")
+    if not auto_accept:
+        click.echo(f"Makefile updated to {bundled_ver}")
     return True
 
 
