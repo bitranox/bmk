@@ -206,10 +206,10 @@ bmk handles these automatically during dependency checks (`make test`, `make dep
 3. Per-library GitHub tokens are read from `.env` using the convention:
    ```bash
    # .env — token for my_private_lib
-   MY_PRIVATE_LIB_GHTOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+   GH_PRIVATE_REPOS__MY_PRIVATE_LIB=ghp_xxxxxxxxxxxxxxxxxxxx
    ```
-   The token key is derived from the normalized package name: uppercase, hyphens replaced
-   with underscores, suffixed with `_GHTOKEN`. Tokens are never printed to the console.
+   The token key is `GH_PRIVATE_REPOS__` followed by the normalized package name (uppercase,
+   hyphens replaced with underscores). Tokens are never printed to the console.
 
 ### Dependency Auditing
 

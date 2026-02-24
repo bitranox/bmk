@@ -78,7 +78,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 - **Per-project overrides** — drop scripts into `makescripts/` or configure `bmk.override_dir` to override or extend built-in behaviour.
 - **Layered configuration** with lib_layered_config (defaults → app → host → user → .env → env).
 - **Rich CLI output** styled with rich-click and structured logging via lib_log_rich.
-- **Private repository dependencies** — packages in `[tool.uv.sources]` with git URLs are auto-installed before dependency checks. Per-library GitHub tokens are read from `.env` (`<UPPER_NAME>_GHTOKEN=ghp_xxx`). Git-sourced packages are excluded from PyPI version checking.
+- **Private repository dependencies** — packages in `[tool.uv.sources]` with git URLs are auto-installed before dependency checks. Per-library GitHub tokens are read from `.env` (`GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx`). Git-sourced packages are excluded from PyPI version checking.
 - **Email notifications** — send plain-text or HTML emails with attachments via btx-lib-mail.
 - **Exit-code helpers** powered by lib_cli_exit_tools for clean POSIX exit semantics.
 
@@ -391,7 +391,7 @@ Check and manage project dependencies. Without a subcommand, lists dependencies.
 **Git-sourced dependencies** (private repos): packages listed in `[tool.uv.sources]` with
 git URLs are automatically installed before PyPI dependency checking runs. They are excluded
 from version comparison since they are not on PyPI. Per-library GitHub tokens are read from
-`.env` using the convention `<UPPER_NAME>_GHTOKEN=ghp_xxx` (e.g., `MY_LIB_GHTOKEN`).
+`.env` using the convention `GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx` (e.g., `GH_PRIVATE_REPOS__MY_LIB`).
 
 In JSON mode (`BMK_OUTPUT_FORMAT=json`, the default), dependency checking and updating
 runs silently -- no per-dependency output, no report, no summary. Dependencies are still

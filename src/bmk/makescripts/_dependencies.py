@@ -116,10 +116,10 @@ def install_git_dependencies(
 
     Reads per-library GitHub tokens from ``.env`` using the convention::
 
-        <UPPER_REPO_NAME>_GHTOKEN=ghp_xxx
+        GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx
 
     For example, a source named ``thumbmaker_lib`` looks for
-    ``THUMBMAKER_LIB_GHTOKEN`` in the ``.env`` file or environment.
+    ``GH_PRIVATE_REPOS__THUMBMAKER_LIB`` in the ``.env`` file or environment.
 
     Args:
         pyproject: Path to pyproject.toml file.
@@ -155,8 +155,8 @@ def install_git_dependencies(
                 print(f"[git-deps] {source.name} already installed ({installed})")
             continue
 
-        # Look up per-library token: THUMBMAKER_LIB_GHTOKEN
-        token_key = _normalize_name(source.name).upper().replace("-", "_") + "_GHTOKEN"
+        # Look up per-library token: GH_PRIVATE_REPOS__THUMBMAKER_LIB
+        token_key = "GH_PRIVATE_REPOS__" + _normalize_name(source.name).upper().replace("-", "_")
         token = env_values.get(token_key) or os.getenv(token_key) or ""
 
         # Build authenticated git URL

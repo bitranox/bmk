@@ -6,10 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.7.1] 2026-02-24
+
+### Changed
+- **Token convention renamed**: `.env` keys for private repo tokens changed from `<NAME>_GHTOKEN` to `GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>` for consistency with dotenv section conventions
+
 ## [2.7.0] 2026-02-24
 
 ### Added
-- **Private repository dependencies**: `install_git_dependencies()` auto-installs packages from `[tool.uv.sources]` git URLs before PyPI dependency checking; per-library GitHub tokens read from `.env` (`<UPPER_NAME>_GHTOKEN=ghp_xxx`); git-sourced packages excluded from PyPI version comparison
+- **Private repository dependencies**: `install_git_dependencies()` auto-installs packages from `[tool.uv.sources]` git URLs before PyPI dependency checking; per-library GitHub tokens read from `.env` (`GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx`); git-sourced packages excluded from PyPI version comparison
 - **`UvSourceEntry` model**: new dataclass in `_toml_config.py` for parsing `[tool.uv.sources]` entries
 
 ### Changed
