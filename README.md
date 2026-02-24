@@ -24,7 +24,9 @@ Add project-specific targets or override existing ones — the Makefile is the s
 | Command                           | Options / Subcommands                                                        | Description                                          |
 |-----------------------------------|------------------------------------------------------------------------------|------------------------------------------------------|
 | `make test\|t`                    | `[--human]`                                                                  | Run test suite (lint, format, type-check, pytest)    |
+| `make test-human\|th`             |                                                                              | Run test suite with human-readable output            |
 | `make testintegration\|testi\|ti` | `[--human]`                                                                  | Run integration tests only (`pytest -m integration`) |
+| `make testintegration-human\|tih` |                                                                              | Run integration tests with human-readable output     |
 | `make codecov\|coverage\|cov`     |                                                                              | Upload coverage report to Codecov                    |
 | `make build\|bld`                 |                                                                              | Build wheel and sdist artifacts                      |
 | `make clean\|cln\|cl`             |                                                                              | Remove build artifacts and caches                    |
@@ -61,23 +63,22 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 
   Example: `bmk test` executes the bundled test pipeline:
 
-  | Stage | Execution    | Scripts                                                                                                                                                                          |
-  |-------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-  | 010   | sequential   | `test_010_update_deps.sh`                                                                                                                                                        |
-  | 020   | sequential   | `test_020_ruff_format_apply.sh`                                                                                                                                                  |
-  | 030   | sequential   | `test_030_ruff_fix_apply.sh`                                                                                                                                                     |
-  | 040   | **parallel** | `test_040_ruff_format_check.sh`, `test_040_ruff_lint.sh`, `test_040_pyright.sh`, `test_040_bandit.sh`, `test_040_pip_audit.sh`, `test_040_lint_imports.sh`, `test_040_pytest.sh` |
-  | 050   | sequential   | `test_050_psscriptanalyzer.sh`                                                                                                                                                   |
-  | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                         |
-  | 900   | sequential   | `test_900_clean.sh`                                                                                                                                                              |
+  | Stage | Execution    | Scripts                                                                                                                                                                                                        |
+  |-------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+  | 010   | sequential   | `test_010_update_deps.sh`                                                                                                                                                                                      |
+  | 020   | sequential   | `test_020_ruff_format_apply.sh`                                                                                                                                                                                |
+  | 030   | sequential   | `test_030_ruff_fix_apply.sh`                                                                                                                                                                                   |
+  | 040   | **parallel** | `test_040_ruff_format_check.sh`, `test_040_ruff_lint.sh`, `test_040_pyright.sh`, `test_040_bandit.sh`, `test_040_pip_audit.sh`, `test_040_lint_imports.sh`, `test_040_psscriptanalyzer.sh`, `test_040_pytest.sh` |
+  | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                                                       |
 
-- **JSON-by-default output** — in JSON mode (the default), the stagerunner captures all tool output and only displays it when a stage fails. When everything passes, there is zero tool output. Additionally, dependency checking runs silently, Makefile version updates are auto-accepted without prompting, and pytest runs with `--tb=short -q --no-header` for concise failure output. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`.
-- **Virtual environment isolation** — when bmk runs via `uvx`, it automatically points tools like pyright and pip-audit at the target project's `.venv/` (if present) instead of bmk's own isolated venv. This ensures type stubs and dependencies are resolved correctly.
+- **JSON-by-default output** — in JSON mode (the default), the stagerunner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags — use `make test-human` or `make th` instead.
+- **Virtual environment isolation** — when bmk runs via `uvx`, it automatically points tools like pyright and pip-audit at the target project's `.venv/` (if present) instead of bmk's own isolated venv. The venv is validated via `pyvenv.cfg` to detect broken environments (stale NFS mounts, corrupt symlinks).
 - **Built-in commands** — `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
 - **Custom commands** — `bmk custom <name>` runs user-defined scripts from the override directory (no bundled scripts required).
 - **Per-project overrides** — drop scripts into `makescripts/` or configure `bmk.override_dir` to override or extend built-in behaviour.
 - **Layered configuration** with lib_layered_config (defaults → app → host → user → .env → env).
 - **Rich CLI output** styled with rich-click and structured logging via lib_log_rich.
+- **Private repository dependencies** — packages in `[tool.uv.sources]` with git URLs are auto-installed before dependency checks. Per-library GitHub tokens are read from `.env` (`<UPPER_NAME>_GHTOKEN=ghp_xxx`). Git-sourced packages are excluded from PyPI version checking.
 - **Email notifications** — send plain-text or HTML emails with attachments via btx-lib-mail.
 - **Exit-code helpers** powered by lib_cli_exit_tools for clean POSIX exit semantics.
 
@@ -201,13 +202,16 @@ Run the project test suite via the stagerunner. All extra arguments are forwarde
 | **Exit codes**   | `0` success, `2` script not found, or the script's own exit code                                                                             |
 
 Tool output defaults to **JSON** (machine-readable). JSON mode is designed for LLM-driven
-workflows where minimizing output tokens and context window consumption matters — a fully
-passing run produces zero tool output, and failures surface only the relevant diagnostics.
-The stagerunner captures all tool output and only shows it when a stage fails. Dependency
-checking runs silently, Makefile version updates are auto-accepted, and pytest uses
-`--tb=short -q --no-header` for concise failure output. Use `--human` for full verbose
-output. The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`) can also control
-output format; `--human` takes precedence over the env var.
+workflows where minimizing output tokens and context window consumption matters. The
+stagerunner captures all tool output and only shows it when a stage fails. On success,
+a single JSON summary line is emitted: `{"result":"pass","stages":N,"scripts":N}`.
+Dependency checking runs silently, Makefile version updates are auto-accepted, and
+pytest uses `--tb=short -q --no-header` for concise failure output. Use `--human` for
+full verbose output. The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`)
+can also control output format; `--human` takes precedence over the env var.
+
+**Note:** `make test --human` does not work because Make intercepts `--` flags.
+Use `make test-human` (alias `make th`) instead.
 
 Script lookup order:
 1. `<cwd>/bmk_makescripts/_btx_stagerunner.sh` (local override)
@@ -383,6 +387,11 @@ bmk r
 ### dependencies
 
 Check and manage project dependencies. Without a subcommand, lists dependencies. The `-u` flag triggers an update.
+
+**Git-sourced dependencies** (private repos): packages listed in `[tool.uv.sources]` with
+git URLs are automatically installed before PyPI dependency checking runs. They are excluded
+from version comparison since they are not on PyPI. Per-library GitHub tokens are read from
+`.env` using the convention `<UPPER_NAME>_GHTOKEN=ghp_xxx` (e.g., `MY_LIB_GHTOKEN`).
 
 In JSON mode (`BMK_OUTPUT_FORMAT=json`, the default), dependency checking and updating
 runs silently -- no per-dependency output, no report, no summary. Dependencies are still

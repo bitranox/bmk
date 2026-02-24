@@ -22,6 +22,7 @@ __all__ = [
     "BashateConfig",
     "ScriptsTestConfig",
     "ToolConfig",
+    "UvSourceEntry",
     "ProjectSection",
     "BuildSystemSection",
     "PyprojectConfig",
@@ -288,16 +289,53 @@ class PdmConfig:
 
 
 @dataclass(frozen=True)
+class UvSourceEntry:
+    """A single entry from [tool.uv.sources].
+
+    Captures package-to-source mappings, currently supporting git URLs.
+    Example TOML::
+
+        [tool.uv.sources]
+        thumbmaker_lib = { git = "https://github.com/Org/thumbmaker_lib.git" }
+    """
+
+    name: str
+    git: str = ""
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any] | str) -> UvSourceEntry:
+        """Create from a single source entry parsed from TOML.
+
+        Args:
+            name: Package name (the TOML key).
+            data: Source specification dict (e.g. ``{"git": "https://..."}``).
+        """
+        if isinstance(data, dict):
+            return cls(name=name, git=_get_str(data, "git"))
+        return cls(name=name)
+
+
+def _empty_uv_sources() -> tuple[UvSourceEntry, ...]:
+    """Return an empty tuple for UvSourceEntry defaults."""
+    return ()
+
+
+@dataclass(frozen=True)
 class UvConfig:
     """Configuration for [tool.uv] section."""
 
     dev_dependencies: tuple[str, ...] = ()
+    sources: tuple[UvSourceEntry, ...] = field(default_factory=_empty_uv_sources)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UvConfig:
         """Create from dict parsed from TOML."""
         dev_deps = _get_str_list(data, "dev-dependencies")
-        return cls(dev_dependencies=tuple(dev_deps))
+        sources_raw = _get_dict(data, "sources")
+        sources = tuple(
+            UvSourceEntry.from_dict(str(name), spec) for name, spec in sources_raw.items() if isinstance(spec, dict)
+        )
+        return cls(dev_dependencies=tuple(dev_deps), sources=sources)
 
 
 @dataclass(frozen=True)

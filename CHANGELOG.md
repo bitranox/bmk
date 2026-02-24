@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.7.0] 2026-02-24
+
+### Added
+- **Private repository dependencies**: `install_git_dependencies()` auto-installs packages from `[tool.uv.sources]` git URLs before PyPI dependency checking; per-library GitHub tokens read from `.env` (`<UPPER_NAME>_GHTOKEN=ghp_xxx`); git-sourced packages excluded from PyPI version comparison
+- **`UvSourceEntry` model**: new dataclass in `_toml_config.py` for parsing `[tool.uv.sources]` entries
+
+### Changed
+- **Documentation**: README, DEVELOPMENT, and CONTRIBUTING updated for v2.6.0 features (private repos, `make test-human`, JSON success summary, NFS venv resilience)
+- **Stage table corrected**: removed stale `test_900_clean` entry, moved `psscriptanalyzer` to stage 040
+
 ## [2.6.0] 2026-02-24
 
 ### Added

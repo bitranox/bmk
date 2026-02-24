@@ -8,6 +8,8 @@
 | `install`         | Install package editable                                                                   |
 | `dev`             | Install package with dev extras                                                            |
 | `test`            | Lint, type-check, run tests with coverage, upload to Codecov                               |
+| `test-human`      | Run test suite with human-readable output (alias: `th`)                                    |
+| `testintegration-human` | Run integration tests with human-readable output (alias: `tih`)                      |
 | `run`             | Run module CLI (requires dev install or src on PYTHONPATH)                                 |
 | `version-current` | Print current version from pyproject.toml                                                  |
 | `bump`            | Bump version (updates pyproject.toml and CHANGELOG.md)                                     |
@@ -150,11 +152,15 @@ These tests will be skipped in CI but run with `make test-slow`.
 ## Development Workflow
 
 ```bash
-make test                 # ruff + pyright + pytest + coverage (default ON)
+make test                 # ruff + pyright + pytest + coverage (JSON mode, default)
+make test-human           # same but with full verbose output (alias: make th)
 SKIP_BOOTSTRAP=1 make test  # skip auto-install of dev deps
 COVERAGE=off make test       # disable coverage locally
 COVERAGE=on make test        # force coverage and generate coverage.xml/codecov.xml
 ```
+
+**Note:** `make test --human` does not work because Make intercepts `--` flags.
+Use `make test-human` or `make th` instead.
 
 **Automation notes**
 
@@ -175,13 +181,35 @@ This causes tools like pyright and pip-audit to fail if they resolve packages ag
 instead of the project's.
 
 bmk handles this automatically:
-- If the target project has a `.venv/` directory, bmk sets `VIRTUAL_ENV` to point at it
-- If no `.venv/` exists, bmk unsets `VIRTUAL_ENV` so tools fall back to their own discovery
+- If the target project has a valid `.venv/` directory (with `pyvenv.cfg`), bmk sets `VIRTUAL_ENV` to point at it
+- Broken venvs (stale NFS mounts, missing `pyvenv.cfg`) are detected and ignored
+- If no valid `.venv/` exists, bmk unsets `VIRTUAL_ENV` so tools fall back to their own discovery
   (e.g., pyright reads `[tool.pyright]` from the project's `pyproject.toml`)
 
 **Requirement:** The target project must have its dependencies installed in `.venv/`
 (the standard convention for uv-managed projects). Run `uv sync` or `pip install -e .`
 in the target project before running `bmk test`.
+
+### Private Repository Dependencies
+
+Projects can depend on packages from private Git repositories via `[tool.uv.sources]`:
+
+```toml
+[tool.uv.sources]
+my_private_lib = { git = "https://github.com/MyOrg/my_private_lib.git" }
+```
+
+bmk handles these automatically during dependency checks (`make test`, `make dependencies`):
+
+1. Packages with git sources are installed before PyPI dependency checking runs
+2. They are excluded from PyPI version comparison (they have no PyPI entry)
+3. Per-library GitHub tokens are read from `.env` using the convention:
+   ```bash
+   # .env — token for my_private_lib
+   MY_PRIVATE_LIB_GHTOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+   ```
+   The token key is derived from the normalized package name: uppercase, hyphens replaced
+   with underscores, suffixed with `_GHTOKEN`. Tokens are never printed to the console.
 
 ### Dependency Auditing
 
