@@ -6,6 +6,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.5.1] 2026-02-24
+
+### Fixed
+- **Dependency updater corrupted specs with upper bounds**: `_build_updated_spec` injected display annotations (e.g. `(max <1.3, absolute: 1.3.0)`) into dependency strings and overwrote upper-bound constraints (`<1.3`) with the latest version — specs like `>=1.1.0,<1.3; python_version<'3.10'` were mangled into invalid version strings
+- **Upper-bound constraints now preserved during dependency updates**: only lower-bound operators (`>=`, `==`, `~=`, `>`) are updated; `<`, `<=`, and `!=` constraints are left untouched
+
 ## [2.5.0] 2026-02-24
 
 ### Added

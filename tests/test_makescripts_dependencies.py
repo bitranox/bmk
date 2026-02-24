@@ -798,6 +798,35 @@ def test_build_updated_spec_re_adds_extras_when_stripped() -> None:
     assert "3.0.0" in result
 
 
+@pytest.mark.os_agnostic
+def test_build_updated_spec_strips_display_annotations_from_latest() -> None:
+    """Display annotations like '(max <1.3, absolute: 1.3.0)' must not leak into the spec."""
+    dep = _make_dep(
+        original_spec="pytest-asyncio>=1.1.0",
+        latest="1.2.0 (max <1.3, absolute: 1.3.0)",
+    )
+
+    result = _build_updated_spec(dep)
+
+    assert result == "pytest-asyncio>=1.2.0"
+    assert "(max" not in result
+    assert "absolute" not in result
+
+
+@pytest.mark.os_agnostic
+def test_build_updated_spec_preserves_upper_bound() -> None:
+    """Upper-bound constraints (<X.Y) must be preserved, only lower bound is updated."""
+    dep = _make_dep(
+        original_spec="pytest-asyncio>=1.1.0,<1.3; python_version<'3.10'",
+        latest="1.2.0 (max <1.3, absolute: 1.3.0)",
+        upper_bound="1.3",
+    )
+
+    result = _build_updated_spec(dep)
+
+    assert result == "pytest-asyncio>=1.2.0,<1.3; python_version<'3.10'"
+
+
 # ---------------------------------------------------------------------------
 # _get_installed_version — found and not found
 # ---------------------------------------------------------------------------

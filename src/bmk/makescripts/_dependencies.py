@@ -467,6 +467,9 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
     if not original or not latest or latest == "not found":
         return original
 
+    # Extract just the version number (strip display annotations like "(max <1.3, ...)")
+    latest_version = latest.split(" ", 1)[0] if " " in latest else latest
+
     # Check for environment markers
     marker = ""
     marker_idx = original.find(";")
@@ -482,24 +485,26 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
         if close_bracket != -1:
             extras = original[bracket_idx : close_bracket + 1]
 
-    # Find the version constraint pattern and replace the version
-    # Common patterns: >=X.Y.Z, ==X.Y.Z, ~=X.Y.Z, >X.Y.Z
+    # Replace only lower-bound version constraints, preserve upper bounds
     def replace_version(match: re.Match[str]) -> str:
         operator = match.group(1)
-        return f"{operator}{latest}"
+        # Preserve upper-bound and exclusion constraints as-is
+        if operator in ("<", "<=", "!="):
+            return match.group(0)
+        return f"{operator}{latest_version}"
 
     # Replace all version constraints with latest
     updated = _RE_VERSION_CONSTRAINT.sub(replace_version, original)
 
-    # If no version constraint was found, add >=latest
+    # If no version constraint was found, add >=latest_version
     if updated == original and not _RE_HAS_CONSTRAINT.search(original):
         # Extract just the package name
         name_match = _RE_PACKAGE_NAME.match(original)
         if name_match:
             pkg_name = name_match.group(1)
-            updated = f"{pkg_name}{extras}>={latest}"
+            updated = f"{pkg_name}{extras}>={latest_version}"
         else:
-            updated = f"{original}>={latest}"
+            updated = f"{original}>={latest_version}"
     elif extras and extras not in updated:
         # Re-add extras if they were stripped
         name_match = _RE_PACKAGE_NAME.match(updated)
