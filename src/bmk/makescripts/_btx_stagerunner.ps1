@@ -370,4 +370,11 @@ function Invoke-Run {
 }
 
 Invoke-Run
+
+# Emit a summary line so JSON consumers see at least one output on success
+if ($bmkQuiet) {
+    $stageCount = @(Get-UniqueStage).Count
+    Write-Host "{`"result`":`"pass`",`"stages`":$stageCount,`"scripts`":$($script:TotalScripts)}"
+}
+
 exit 0

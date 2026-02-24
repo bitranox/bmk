@@ -110,8 +110,9 @@ def execute_script(
 
     # Point tools at the target project's venv, not bmk's own (uvx) venv.
     # Tools like pyright and pip-audit use VIRTUAL_ENV for environment resolution.
+    # Check pyvenv.cfg to detect broken venvs (stale NFS mounts, corrupt symlinks).
     project_venv = cwd / ".venv"
-    if project_venv.is_dir():
+    if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
         env["VIRTUAL_ENV"] = str(project_venv)
     else:
         env.pop("VIRTUAL_ENV", None)

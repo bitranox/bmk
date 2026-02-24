@@ -89,7 +89,7 @@ def cli_testintegration(human: bool, args: tuple[str, ...]) -> None:
         True
     """
     with lib_log_rich.runtime.bind(job_id="cli-test-integration", extra={"command": "testintegration"}):
-        logger.info("Executing integration test command")
+        logger.info("Executing integration test command - this will take some minutes")
         _run_test_integration(args, human=human)
 
 
@@ -109,7 +109,7 @@ def cli_testi(human: bool, args: tuple[str, ...]) -> None:
         True
     """
     with lib_log_rich.runtime.bind(job_id="cli-test-integration", extra={"command": "testi"}):
-        logger.info("Executing integration test command (via alias 'testi')")
+        logger.info("Executing integration test command - this will take some minutes")
         _run_test_integration(args, human=human)
 
 
@@ -129,7 +129,7 @@ def cli_ti(human: bool, args: tuple[str, ...]) -> None:
         True
     """
     with lib_log_rich.runtime.bind(job_id="cli-test-integration", extra={"command": "ti"}):
-        logger.info("Executing integration test command (via alias 'ti')")
+        logger.info("Executing integration test command - this will take some minutes")
         _run_test_integration(args, human=human)
 
 

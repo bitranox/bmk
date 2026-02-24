@@ -387,6 +387,11 @@ run() {
             exit "${first_code:-1}"
         fi
     done
+
+    # Emit a summary line so JSON consumers see at least one output on success
+    if [[ "$_BMK_QUIET" == true ]]; then
+        printf '{"result":"pass","stages":%d,"scripts":%d}\n' "${#stages[@]}" "$TOTAL_SCRIPTS"
+    fi
 }
 
 SCRIPT_ARGS=("$@")

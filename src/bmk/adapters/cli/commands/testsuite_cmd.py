@@ -99,7 +99,7 @@ def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """
     cli_ctx = get_cli_context(ctx)
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "test"}):
-        logger.info("Executing test command")
+        logger.info("Executing test command - this will take some minutes")
         _run_test(args, cli_ctx.config, human=human)
 
 
@@ -121,7 +121,7 @@ def cli_t(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """
     cli_ctx = get_cli_context(ctx)
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "t"}):
-        logger.info("Executing test command (via alias 't')")
+        logger.info("Executing test command - this will take some minutes")
         _run_test(args, cli_ctx.config, human=human)
 
 

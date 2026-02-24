@@ -474,8 +474,10 @@ def test_execute_script_sets_virtual_env_to_project_venv(
     script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
-    # Create a .venv directory in the target project
-    (tmp_path / ".venv").mkdir()
+    # Create a valid .venv directory with pyvenv.cfg marker
+    venv_dir = tmp_path / ".venv"
+    venv_dir.mkdir()
+    (venv_dir / "pyvenv.cfg").write_text("home = /usr/bin\n")
     monkeypatch.setenv("VIRTUAL_ENV", "/some/bmk/venv")
 
     execute_script(script_path, tmp_path, ())
