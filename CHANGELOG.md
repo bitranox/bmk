@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.6.0] 2026-02-24
+
+### Added
+- **`make test-human` / `make th`**: dedicated Makefile target for human-readable test output — avoids the `make test --human` issue where Make intercepts `--` flags
+- **`make testintegration-human` / `make tih`**: same for integration tests
+- **JSON mode success summary**: stagerunner emits `{"result":"pass","stages":N,"scripts":N}` on success so JSON consumers always receive at least one output line
+- **LLM-friendly log messages**: test and push commands now log "this will take some minutes" to prevent LLM agents from assuming the process has hung
+
+### Fixed
+- **Broken `.venv` detection on NFS**: `execute_script()` now validates `.venv/pyvenv.cfg` exists before setting `VIRTUAL_ENV` — stale NFS mounts or corrupt venvs are ignored instead of causing tool failures
+
 ## [2.5.1] 2026-02-24
 
 ### Fixed

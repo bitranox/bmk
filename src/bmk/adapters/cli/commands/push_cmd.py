@@ -84,7 +84,7 @@ def cli_push(message: tuple[str, ...]) -> None:
         bmk p                       # Short alias
     """
     with lib_log_rich.runtime.bind(job_id="cli-push"):
-        logger.info("Running push pipeline")
+        logger.info("Running push pipeline - this will take some minutes")
         _run_push(message)
 
 
@@ -101,7 +101,7 @@ def cli_psh(message: tuple[str, ...]) -> None:
     See ``bmk push --help`` for full documentation.
     """
     with lib_log_rich.runtime.bind(job_id="cli-push"):
-        logger.info("Running push pipeline (via 'psh')")
+        logger.info("Running push pipeline - this will take some minutes")
         _run_push(message)
 
 
@@ -118,7 +118,7 @@ def cli_push_p(message: tuple[str, ...]) -> None:
     See ``bmk push --help`` for full documentation.
     """
     with lib_log_rich.runtime.bind(job_id="cli-push"):
-        logger.info("Running push pipeline (via 'p')")
+        logger.info("Running push pipeline - this will take some minutes")
         _run_push(message)
 
 
