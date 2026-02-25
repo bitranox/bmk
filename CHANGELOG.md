@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.8.1] 2026-02-25 14:42:58
+
+### Fixed
+- **Codecov upload failed for repos using git credential URL rewriting**: `_get_repo_metadata_from_git()` returned `token@github.com` as the host when the git remote URL contained embedded authentication (`https://token@github.com/owner/repo.git`); now strips everything before `@` in the host component
+
 ## [2.8.0] 2026-02-25
 
 ### Changed

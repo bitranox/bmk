@@ -442,11 +442,13 @@ def _get_repo_metadata_from_git() -> tuple[str | None, str | None, str | None]:
             if len(path_parts) >= 2:
                 return host, path_parts[0], path_parts[1]
     # Handle HTTPS URLs: https://github.com/owner/repo.git
+    # Also handles embedded auth: https://token@github.com/owner/repo.git
     elif url.startswith("https://") or url.startswith("http://"):
         url_without_proto = url.split("://", 1)[1]
         parts = url_without_proto.removesuffix(".git").split("/")
         if len(parts) >= 3:
-            return parts[0], parts[1], parts[2]
+            host = parts[0].rsplit("@", 1)[-1]
+            return host, parts[1], parts[2]
     return None, None, None
 
 
