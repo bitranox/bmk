@@ -78,7 +78,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 - **Per-project overrides** — drop scripts into `makescripts/` or configure `bmk.override_dir` to override or extend built-in behaviour.
 - **Layered configuration** with lib_layered_config (defaults → app → host → user → .env → env).
 - **Rich CLI output** styled with rich-click and structured logging via lib_log_rich.
-- **Private repository dependencies** — packages in `[tool.uv.sources]` with git URLs are auto-installed before dependency checks. Per-library GitHub tokens are read from `.env` (`GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx`). Git-sourced packages are excluded from PyPI version checking.
+- **Private repository dependencies** — PEP 440 direct references (`pkg @ git+https://...`) in `[project.dependencies]` are automatically skipped during PyPI version checking. Authentication is handled by global git config URL rewriting.
 - **Email notifications** — send plain-text or HTML emails with attachments via btx-lib-mail.
 - **Exit-code helpers** powered by lib_cli_exit_tools for clean POSIX exit semantics.
 
@@ -388,10 +388,19 @@ bmk r
 
 Check and manage project dependencies. Without a subcommand, lists dependencies. The `-u` flag triggers an update.
 
-**Git-sourced dependencies** (private repos): packages listed in `[tool.uv.sources]` with
-git URLs are automatically installed before PyPI dependency checking runs. They are excluded
-from version comparison since they are not on PyPI. Per-library GitHub tokens are read from
-`.env` using the convention `GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx` (e.g., `GH_PRIVATE_REPOS__MY_LIB`).
+**Git-sourced dependencies** (private repos): use PEP 440 direct references in
+`[project.dependencies]`:
+
+```toml
+"my_private_lib @ git+https://github.com/MyOrg/my_private_lib.git",
+```
+
+These are automatically skipped during PyPI version comparison. Authentication is handled
+by global git config URL rewriting:
+
+```bash
+git config --global url."https://<token>@github.com/MyOrg/".insteadOf "https://github.com/MyOrg/"
+```
 
 In JSON mode (`BMK_OUTPUT_FORMAT=json`, the default), dependency checking and updating
 runs silently -- no per-dependency output, no report, no summary. Dependencies are still

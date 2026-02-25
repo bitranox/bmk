@@ -192,24 +192,27 @@ in the target project before running `bmk test`.
 
 ### Private Repository Dependencies
 
-Projects can depend on packages from private Git repositories via `[tool.uv.sources]`:
+Projects can depend on packages from private Git repositories using PEP 440 direct references
+in `[project.dependencies]`:
 
 ```toml
-[tool.uv.sources]
-my_private_lib = { git = "https://github.com/MyOrg/my_private_lib.git" }
+[project]
+dependencies = [
+    "my_private_lib @ git+https://github.com/MyOrg/my_private_lib.git",
+]
 ```
 
-bmk handles these automatically during dependency checks (`make test`, `make dependencies`):
+bmk automatically skips these during PyPI dependency checking — direct URL references
+are not on PyPI and need no version comparison.
 
-1. Packages with git sources are installed before PyPI dependency checking runs
-2. They are excluded from PyPI version comparison (they have no PyPI entry)
-3. Per-library GitHub tokens are read from `.env` using the convention:
-   ```bash
-   # .env — token for my_private_lib
-   GH_PRIVATE_REPOS__MY_PRIVATE_LIB=ghp_xxxxxxxxxxxxxxxxxxxx
-   ```
-   The token key is `GH_PRIVATE_REPOS__` followed by the normalized package name (uppercase,
-   hyphens replaced with underscores). Tokens are never printed to the console.
+Authentication is handled by global git config URL rewriting, not by bmk.
+To scope access to a single organisation:
+
+```bash
+git config --global url."https://<token>@github.com/MyOrg/".insteadOf "https://github.com/MyOrg/"
+```
+
+This keeps credentials out of project files and `.env` — git handles auth transparently.
 
 ### Dependency Auditing
 

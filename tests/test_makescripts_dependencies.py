@@ -372,6 +372,26 @@ def test_extract_dependencies_skips_empty_strings(mock_latest: MagicMock) -> Non
 
 
 @pytest.mark.os_agnostic
+@patch("bmk.makescripts._dependencies.fetch_latest_version")
+def test_extract_dependencies_skips_direct_url_references(mock_latest: MagicMock) -> None:
+    """PEP 440 direct URL references (pkg @ git+https://...) are skipped — not on PyPI."""
+    mock_latest.return_value = "1.0.0"
+
+    results = _extract_dependencies_from_list(
+        [
+            "thumbmaker_lib @ git+https://github.com/MyOrg/thumbmaker_lib.git",
+            "normal_pkg>=1.0.0",
+            "another @ git+https://github.com/MyOrg/another.git",
+        ],
+        "test-source",
+    )
+
+    assert len(results) == 1
+    assert results[0].name == "normal_pkg"
+    mock_latest.assert_called_once()
+
+
+@pytest.mark.os_agnostic
 @patch("bmk.makescripts._dependencies._fetch_latest_version_below")
 @patch("bmk.makescripts._dependencies.fetch_latest_version")
 def test_extract_dependencies_detects_pinned_within_range(mock_latest: MagicMock, mock_below: MagicMock) -> None:

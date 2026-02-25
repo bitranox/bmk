@@ -22,7 +22,6 @@ additional dependencies.
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 from dataclasses import dataclass
@@ -46,7 +45,6 @@ __all__ = [
     "check_dependencies",
     "compare_versions",
     "fetch_latest_version",
-    "install_git_dependencies",
     "print_report",
     "sync_installed_packages",
     "update_dependencies",
@@ -84,111 +82,6 @@ class DependencyInfo:
 def _normalize_name(name: str) -> str:
     """Normalize package name for comparison (PEP 503)."""
     return _RE_NAME_SEPARATOR.sub("-", name).lower()
-
-
-# ---------------------------------------------------------------------------
-# Git Dependency Installation
-# ---------------------------------------------------------------------------
-
-
-def _find_dotenv_upward(start_dir: Path) -> Path | None:
-    """Search for .env file in start_dir and its parents up to filesystem root."""
-    current = start_dir.resolve()
-    for directory in [current, *current.parents]:
-        candidate = directory / ".env"
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _get_git_source_names(config: Any) -> set[str]:
-    """Return normalized names of packages with git sources in [tool.uv.sources]."""
-    sources = getattr(getattr(getattr(config, "tool", None), "uv", None), "sources", ())
-    return {_normalize_name(s.name) for s in sources if s.git}
-
-
-def install_git_dependencies(
-    pyproject: Path = Path("pyproject.toml"),
-    *,
-    quiet: bool = False,
-) -> int:
-    """Install dependencies from [tool.uv.sources] that use git URLs.
-
-    Reads per-library GitHub tokens from ``.env`` using the convention::
-
-        GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx
-
-    For example, a source named ``thumbmaker_lib`` looks for
-    ``GH_PRIVATE_REPOS__THUMBMAKER_LIB`` in the ``.env`` file or environment.
-
-    Args:
-        pyproject: Path to pyproject.toml file.
-        quiet: Suppress informational output.
-
-    Returns:
-        0 on success, non-zero on failure.
-    """
-    import subprocess
-
-    config = load_pyproject_config(pyproject)
-    git_sources = [s for s in config.tool.uv.sources if s.git]
-    if not git_sources:
-        return 0
-
-    # Load .env for per-library tokens
-    project_dir = pyproject.parent
-    env_path = _find_dotenv_upward(project_dir)
-    env_values: dict[str, str | None] = {}
-    if env_path is not None:
-        try:
-            from dotenv import dotenv_values
-
-            env_values = dotenv_values(env_path)
-        except ImportError:
-            pass
-
-    for source in git_sources:
-        # Check if already installed
-        installed = _get_installed_version(source.name)
-        if installed is not None:
-            if not quiet:
-                print(f"[git-deps] {source.name} already installed ({installed})")
-            continue
-
-        # Look up per-library token: GH_PRIVATE_REPOS__THUMBMAKER_LIB
-        token_key = "GH_PRIVATE_REPOS__" + _normalize_name(source.name).upper().replace("-", "_")
-        token = env_values.get(token_key) or os.getenv(token_key) or ""
-
-        # Build authenticated git URL
-        git_url = source.git
-        if token and "github.com" in git_url:
-            git_url = git_url.replace("https://github.com", f"https://{token}@github.com")
-
-        pip_url = f"git+{git_url}"
-        if not quiet:
-            # Never print the token
-            print(f"[git-deps] Installing {source.name} from git+{source.git}")
-
-        pip_cmd = [sys.executable, "-m", "pip", "install", pip_url]
-
-        if sys.platform.startswith("linux"):
-            marker = Path(sys.prefix) / "EXTERNALLY-MANAGED"
-            if not marker.exists():
-                marker = (
-                    Path(sys.prefix)
-                    / "lib"
-                    / f"python{sys.version_info.major}.{sys.version_info.minor}"
-                    / "EXTERNALLY-MANAGED"
-                )
-            if marker.exists():
-                pip_cmd.insert(4, "--break-system-packages")
-
-        result = subprocess.run(pip_cmd, check=False)
-        if result.returncode != 0:
-            print(f"[git-deps] Failed to install {source.name}", file=sys.stderr)
-            return result.returncode
-
-    return 0
 
 
 def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
@@ -366,6 +259,9 @@ def _extract_dependencies_from_list(
     for dep in deps:
         if not dep:
             continue
+        # Skip direct URL references (PEP 440) — not on PyPI
+        if " @ " in dep:
+            continue
 
         original_spec = dep.strip()
         name, constraint, min_version, upper_bound = _parse_version_constraint(dep)
@@ -462,11 +358,6 @@ def _extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
 
     if config.tool.uv.dev_dependencies:
         all_deps.extend(_extract_dependencies_from_list(config.tool.uv.dev_dependencies, "[tool.uv.dev-dependencies]"))
-
-    # Exclude packages with git sources in [tool.uv.sources] — they are not on PyPI
-    git_source_names = _get_git_source_names(config)
-    if git_source_names:
-        all_deps = [d for d in all_deps if _normalize_name(d.name) not in git_source_names]
 
     return all_deps
 
@@ -849,11 +740,6 @@ def main(
     Returns:
         Exit code (0 if all up-to-date or update successful, 1 if any outdated)
     """
-    # Install git-sourced dependencies first (not available on PyPI)
-    git_rc = install_git_dependencies(pyproject, quiet=quiet)
-    if git_rc != 0:
-        return git_rc
-
     if not quiet:
         print(f"Checking dependencies in {pyproject}...")
     deps = check_dependencies(pyproject)
@@ -879,6 +765,7 @@ def main(
 
 if __name__ == "__main__":  # pragma: no cover
     import argparse
+    import os
 
     parser = argparse.ArgumentParser(description="Check/update project dependencies against PyPI")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all dependencies, not just outdated")

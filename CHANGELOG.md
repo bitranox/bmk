@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.8.0] 2026-02-25
+
+### Changed
+- **Private repo dependencies simplified**: Removed token injection (`GH_PRIVATE_REPOS__` convention); dependencies now use PEP 440 direct references (`pkg @ git+https://...`) with authentication handled by global git config URL rewriting
+- **Dependency floors updated**: `bandit >=1.9.3 → >=1.9.4`, `lib_layered_config >=5.4.1 → >=5.5.0`
+
+### Removed
+- **`install_git_dependencies()`**: Removed from `_dependencies.py` along with `_find_dotenv_upward()` and `_get_git_source_names()` — no longer needed with git config URL rewriting
+- **`UvSourceEntry` dataclass**: Removed from `_toml_config.py` — was only used by the removed git dependency installer
+
 ## [2.7.1] 2026-02-24
 
 ### Changed
