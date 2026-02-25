@@ -1,4 +1,4 @@
-# BMK MAKEFILE 2.8.1
+# BMK MAKEFILE 2.8.2
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper calling bmk via uvx
@@ -22,6 +22,10 @@ SHELL := /bin/bash
 
 BMK := uvx bmk@latest
 ARGS ?=
+
+# Export the active venv's site-packages so bmk's isolated Python can find
+# project dependencies (e.g. from a private git repo).
+export PYTHONPATH := $(shell python3 -c "import site; print(site.getsitepackages()[0])"):$(PYTHONPATH)
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS

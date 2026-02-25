@@ -24,6 +24,10 @@ BMK := uv cache prune --quiet && uvx --refresh --from ./ bmk
 
 ARGS ?=
 
+# Export the active venv's site-packages so bmk's isolated Python can find
+# project dependencies (e.g. from a private git repo).
+export PYTHONPATH := $(shell python3 -c "import site; print(site.getsitepackages()[0])"):$(PYTHONPATH)
+
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS
 # ──────────────────────────────────────────────────────────────

@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.8.2] 2026-02-25 14:57:07
+
+### Added
+- **Makefile exports project venv site-packages via `PYTHONPATH`**: ensures bmk's isolated `uvx` Python can find project dependencies (e.g., private git repo packages) by exporting the active venv's `site.getsitepackages()[0]`
+
+### Fixed
+- **pip-audit CVE exclusion**: added `CVE-2026-25990` (pillow 12.0.0) to `[tool.pip-audit].ignore-vulns` — environment-level package, not a project dependency
+
 ## [2.8.1] 2026-02-25 14:42:58
 
 ### Fixed
