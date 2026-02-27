@@ -26,7 +26,7 @@ name = "bmk"
 #: Human-readable summary shown in CLI help output.
 title = "Bitranox Make CLI application - flexible make commands"
 #: Current release version pulled from ``pyproject.toml`` by automation.
-version = "2.8.2"
+version = "2.9.0"
 #: Repository homepage presented to users.
 homepage = "https://github.com/bitranox/bmk"
 #: Author attribution surfaced in CLI output.

@@ -13,10 +13,6 @@ isolated environments and system package managers. Pick the option that matches 
 > lightning-fast replacement for `pip`, `venv`, `pip-tools`, and `poetry`
 written in Rust, compatible with PEP 621 (`pyproject.toml`)
 
-### `uvx` = On-demand tool runner
-
-> runs tools temporarily in isolated environments without installing them globally
-
 
 ## Install uv (if not already installed)
 
@@ -27,28 +23,57 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-## One-shot run via uvx (no install needed)
+## Recommended: persistent tool install with project deps
+
+bmk is installed as a persistent `uv tool` together with the current
+project's dependencies. This ensures tools like pyright, pytest and
+pip-audit can resolve the full dependency tree.
 
 ```bash
-uvx bmk@latest --help
-```
+# Install bmk + current project deps into a persistent venv
+uv tool install bmk --with .
 
-## Persistent install as CLI tool
-
-```bash
-# install the CLI tool (isolated environment, added to PATH)
-uv tool install bmk
-
-# upgrade to latest
+# Upgrade bmk (re-resolves all deps including project deps)
 uv tool upgrade bmk
+
+# Reinstall to pick up changed project deps (e.g. after editing pyproject.toml)
+uv tool install --reinstall bmk --with .
 ```
 
-## Install as project dependency
+The persistent venv lives at `~/.local/share/uv/tools/bmk/` on the local
+filesystem. No `.venv` in the project directory is needed — works on network
+shares that do not support symlinks.
+
+### Via the Makefile (automatic)
+
+The bundled Makefile handles installation automatically on every target.
+No manual `uv tool install` is needed after the initial setup:
 
 ```bash
-uv venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
-uv pip install bmk
+# One-time: bootstrap bmk and install the Makefile
+uv tool install bmk --with . && bmk install
+
+# From now on, just use make — bmk + deps are kept in sync
+make test
 ```
+
+Behind the scenes, the Makefile runs before every target:
+```bash
+uv tool install --reinstall bmk --with .
+```
+
+### Private repository dependencies
+
+For projects with private GitHub dependencies, configure git URL rewriting
+before installing:
+
+```bash
+git config --global url."https://<TOKEN>@github.com/<ORG>/".insteadOf "https://github.com/<ORG>/"
+uv tool install bmk --with .
+```
+
+PEP 440 direct references in `[project.dependencies]` are resolved through
+the rewritten URLs.
 
 ## Verify installation
 
@@ -138,5 +163,4 @@ pip install "git+https://github.com/bitranox/bmk"
 
 - Use [fpm](https://fpm.readthedocs.io/) to repackage the Python wheel into `.deb` or `.rpm` for distribution via `apt` or `yum`/`dnf`.
 
-All methods register both the `bmk` and
-`bmk` commands on your PATH.
+All methods register the `bmk` command on your PATH.

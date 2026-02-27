@@ -72,7 +72,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
   | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                                                       |
 
 - **JSON-by-default output** — in JSON mode (the default), the stagerunner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags — use `make test-human` or `make th` instead.
-- **Virtual environment isolation** — when bmk runs via `uvx`, it automatically points tools like pyright and pip-audit at the target project's `.venv/` (if present) instead of bmk's own isolated venv. The venv is validated via `pyvenv.cfg` to detect broken environments (stale NFS mounts, corrupt symlinks).
+- **Dependency isolation** — bmk is installed as a persistent `uv tool` together with the current project's dependencies (`uv tool install bmk --with .`). This ensures pyright, pytest, pip-audit and other tools can resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv`. Works on network shares that do not support symlinks.
 - **Built-in commands** — `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
 - **Custom commands** — `bmk custom <name>` runs user-defined scripts from the override directory (no bundled scripts required).
 - **Per-project overrides** — drop scripts into `makescripts/` or configure `bmk.override_dir` to override or extend built-in behaviour.
@@ -99,7 +99,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 
 [uv](https://docs.astral.sh/uv/) is an ultrafast Python package manager written in Rust (10-20x faster than pip/poetry).
 
-### Install uv (if not already installed) 
+### Install uv (if not already installed)
 ```bash
 # macOS/Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -107,33 +107,58 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### Install the makefile - no further installation needed
+### Recommended: persistent tool install with project deps
+
+bmk is installed as a persistent `uv tool` together with the current
+project's dependencies. The bundled Makefile handles this automatically
+on every invocation — no manual setup required.
 
 ```bash
-# in your project directory
-uvx bmk@latest install
+# One-time: install the Makefile into your project
+uv tool install bmk && bmk install
+
+# From now on, just use make — bmk + project deps are kept in sync:
+make test
+make build
 ```
 
-### Persistent install as CLI tool
+Behind the scenes, the Makefile runs on every target:
+```bash
+uv tool install --reinstall bmk --with .
+```
+This reads `./pyproject.toml`, installs bmk and all project dependencies into
+a persistent venv at `~/.local/share/uv/tools/bmk/`. Tools like pyright,
+pytest and pip-audit resolve the full dependency tree without needing a
+local `.venv` — works on network shares that do not support symlinks.
+
+### Manual install (without Makefile)
 
 ```bash
-# install the CLI tool (isolated environment, added to PATH)
-uv tool install bmk
+# install bmk + current project deps
+uv tool install bmk --with .
 
-# upgrade to latest
+# upgrade bmk (re-resolves all deps)
 uv tool upgrade bmk
+
+# or reinstall to pick up changed project deps
+uv tool install --reinstall bmk --with .
 ```
 
-### Install as project dependency
+### Private repository dependencies
+
+For projects with private GitHub dependencies, configure git URL rewriting
+before installing:
 
 ```bash
-uv venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
-uv pip install bmk
+git config --global url."https://<TOKEN>@github.com/<ORG>/".insteadOf "https://github.com/<ORG>/"
+uv tool install bmk --with .
 ```
+
+The PEP 440 direct references in `[project.dependencies]` are resolved
+through the rewritten URLs.
 
 For alternative install paths (pip, pipx, source builds, etc.), see
-[INSTALL.md](INSTALL.md). All supported methods register both the
-`bmk` and `bmk` commands on your PATH.
+[INSTALL.md](INSTALL.md).
 
 ---
 
@@ -146,16 +171,19 @@ See [CONFIG.md](CONFIG.md) for detailed documentation on the layered configurati
 ## Quick Start
 
 ```bash
-# Install
-uv tool install bmk
+# Install bmk + project deps (in your project directory)
+uv tool install bmk --with .
 
 # Verify
 bmk --version
 
+# Install the Makefile
+bmk install
+
 # Try it out
-bmk hello
-bmk info
-bmk config
+make test
+make info
+make config
 ```
 
 ---
@@ -164,7 +192,7 @@ bmk config
 
 The CLI leverages [rich-click](https://github.com/ewels/rich-click) so help output, validation errors, and prompts render with Rich styling while keeping the familiar Click ergonomics. All commands accept `-h` / `--help`.
 
-Entry points: `bmk`, `mk`, `python -m bmk`, `uvx bmk`.
+Entry points: `bmk`, `mk`, `python -m bmk`.
 
 ### Global Options
 

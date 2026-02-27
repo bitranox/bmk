@@ -6,6 +6,20 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.0] 2026-02-27
+
+### Changed
+- **Makefile switched from `uvx` to persistent `uv tool install`**: the deployed Makefile template now runs `uv tool install --reinstall bmk --with .` before every target, installing bmk and the current project's dependencies into a persistent venv at `~/.local/share/uv/tools/bmk/`; tools like pyright, pytest and pip-audit resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv` — works on network shares without symlink support
+- **Makefile uses absolute path** (`$(HOME)/.local/bin/bmk`) to prevent active virtualenvs from shadowing the uv tool binary
+- **Root dev Makefile** uses `--from ./` to install bmk from local source for development
+
+### Removed
+- **`PYTHONPATH` export hack** from Makefile — no longer needed with persistent tool venv
+- **`uvx bmk@latest`** invocation pattern — replaced by `uv tool install` approach
+
+### Fixed
+- **ruff minimum version**: bumped `>=0.15.2` to `>=0.15.4`
+
 ## [2.8.2] 2026-02-25 14:57:07
 
 ### Added
