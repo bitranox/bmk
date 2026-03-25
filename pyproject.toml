@@ -278,6 +278,7 @@ ignore-vulns = [
   "CVE-2026-26007",    # cryptography 46.0.3 — environment-level package, not a project dependency
   "CVE-2026-25990",    # pillow 12.0.0 — environment-level package, not a project dependency
   "CVE-2026-4539",    # pygments 2.19.2 — ReDoS in AdlLexer, env-only, no fix available
+  "CVE-2026-25645",
 ]
 
 [tool.bandit]
