@@ -6,6 +6,21 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.1] 2026-04-24
+
+### Changed
+- **CI/CD workflow updates**: refreshed GitHub Actions matrix, bumped `codecov/codecov-action` to v6, and updated `actions/download-artifact` to a newer version
+- **pip-audit CI step**: demoted to a warning instead of failing the build to reduce noise from environment-level CVEs that do not affect bmk
+
+### Fixed
+- **pip-audit CVE exclusions**: added six new transitive/environment-level CVEs to `[tool.pip-audit].ignore-vulns`:
+  - `GHSA-jj8c-mmj3-mmgv` — authlib 1.6.9 OAuth CSRF in cached state
+  - `CVE-2026-39892` — cryptography 46.0.6 buffer overflow on non-contiguous buffers
+  - `CVE-2026-41066` — lxml 6.0.2 XXE local file access in default config
+  - `CVE-2026-40192` — pillow 12.0.0 FITS decompression bomb DoS
+  - `CVE-2026-40347` — python-multipart 0.0.22 DoS on crafted multipart
+  - `GHSA-pjjw-68hj-v9mw` — uv 0.9.11 wheel RECORD path traversal on uninstall
+
 ## [2.9.0] 2026-02-27
 
 ### Changed
