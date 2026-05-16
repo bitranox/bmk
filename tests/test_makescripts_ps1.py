@@ -17,7 +17,28 @@ import pytest
 PWSH = shutil.which("pwsh")
 MAKESCRIPTS_DIR = Path(__file__).resolve().parent.parent / "src" / "bmk" / "makescripts"
 
-skip_no_pwsh = pytest.mark.skipif(not PWSH, reason="pwsh not installed")
+
+def _pwsh_works() -> bool:
+    """Return True only if pwsh is installed AND can actually execute.
+
+    On some Linux systems pwsh is installed via snap but fails to launch
+    (e.g. snap-confine apparmor errors). ``shutil.which`` alone is not enough.
+    """
+    if not PWSH:
+        return False
+    try:
+        result = subprocess.run(
+            [PWSH, "-NoProfile", "-NonInteractive", "-Command", "exit 0"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+skip_no_pwsh = pytest.mark.skipif(not _pwsh_works(), reason="pwsh not installed or not functional")
 
 
 def _run_ps1(

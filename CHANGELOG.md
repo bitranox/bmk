@@ -6,6 +6,19 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.2] 2026-05-16 23:40:54
+
+### Changed
+- **pip-audit CVE exclusion list refreshed**: removed 17 stale entries that pip-audit no longer flags (pip, setuptools, wheel, cryptography, pillow, pygments, authlib, lxml, python-multipart, uv, rpyc); list is now down to four current entries
+
+### Fixed
+- **`check_pwsh` hardened against broken pwsh installs**: the PSScriptAnalyzer adapter now verifies `pwsh` can actually launch (running `pwsh -NoProfile -NonInteractive -Command "exit 0"`) instead of trusting `shutil.which`; this avoids spurious failures on Linux hosts where snap-installed `pwsh` aborts with `snap-confine has elevated permissions` errors — affected hosts now skip PowerShell linting cleanly
+- **PowerShell makescripts pytest suite skips correctly when `pwsh` is non-functional**: same launch probe applied to `tests/test_makescripts_ps1.py` so a broken local `pwsh` no longer turns the test suite red
+- **pip-audit CVE exclusions added** for three newly flagged environment-level vulnerabilities:
+  - `CVE-2026-44405` — paramiko 4.0.0 SHA-1 acceptance in `rsakey.py` (no upstream fix yet)
+  - `CVE-2026-44431` — urllib3 cross-origin sensitive-header leak via low-level `ProxyManager` redirects (fix 2.7.0; project already pins urllib3>=2.7.0)
+  - `CVE-2026-44432` — urllib3 Brotli/`drain_conn` over-decompression DoS (fix 2.7.0; project already pins urllib3>=2.7.0)
+
 ## [2.9.1] 2026-04-24
 
 ### Changed

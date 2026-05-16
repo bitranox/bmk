@@ -91,12 +91,31 @@ def get_excluded_rules(pyproject: Path = Path("pyproject.toml")) -> tuple[str, .
 
 
 def check_pwsh() -> str | None:
-    """Detect the ``pwsh`` interpreter.
+    """Detect a usable ``pwsh`` interpreter.
+
+    Returns the path only when ``pwsh`` is present *and* can actually launch
+    (some Linux setups have a snap-installed ``pwsh`` that fails with
+    ``snap-confine`` errors and would never execute scripts).
 
     Returns:
-        Path to ``pwsh`` executable, or None if not found.
+        Path to a working ``pwsh`` executable, or None if missing/non-functional.
     """
-    return shutil.which("pwsh")
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        return None
+    try:
+        probe = subprocess.run(
+            [pwsh, "-NoProfile", "-NonInteractive", "-Command", "exit 0"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if probe.returncode != 0:
+        return None
+    return pwsh
 
 
 def ensure_psscriptanalyzer(pwsh: str) -> None:

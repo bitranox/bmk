@@ -70,8 +70,12 @@ def test_get_excluded_rules_reads_from_pyproject(tmp_path: Path) -> None:
 
 @pytest.mark.os_agnostic
 def test_check_pwsh_returns_path_when_available() -> None:
-    """Returns a path string when pwsh is on PATH."""
-    with patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"):
+    """Returns a path string when pwsh is on PATH and launches successfully."""
+    probe_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with (
+        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=probe_result),
+    ):
         result = check_pwsh()
 
     assert result == "/usr/bin/pwsh"
@@ -81,6 +85,19 @@ def test_check_pwsh_returns_path_when_available() -> None:
 def test_check_pwsh_returns_none_when_missing() -> None:
     """Returns None when pwsh is not on PATH."""
     with patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value=None):
+        result = check_pwsh()
+
+    assert result is None
+
+
+@pytest.mark.os_agnostic
+def test_check_pwsh_returns_none_when_probe_fails() -> None:
+    """Returns None when pwsh is installed but cannot actually launch (e.g. snap-confine)."""
+    probe_result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="snap-confine error")
+    with (
+        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/snap/bin/pwsh"),
+        patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=probe_result),
+    ):
         result = check_pwsh()
 
     assert result is None
@@ -293,6 +310,7 @@ def test_main_returns_zero_when_lint_passes(tmp_path: Path) -> None:
         patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run,
     ):
         mock_run.side_effect = [
+            _make_completed(0),  # check_pwsh launch probe
             _make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
             _make_completed(0),
         ]
@@ -314,6 +332,7 @@ def test_main_returns_nonzero_when_lint_fails(tmp_path: Path, capsys: pytest.Cap
         patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run,
     ):
         mock_run.side_effect = [
+            _make_completed(0),  # check_pwsh launch probe
             _make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
             _make_completed(2),
         ]
