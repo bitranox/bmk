@@ -277,6 +277,8 @@ layers = [
 # Known vulnerabilities to ignore (environment-level packages, not project dependencies)
 ignore-vulns = [
   "PYSEC-2022-42969",   # py — legacy test dependency, not a runtime dependency, no fix planned upstream
+  "CVE-2026-3219",      # pip — env-only build tool, not a project dependency, no fix released yet
+  "CVE-2026-6357",      # pip — env-only build tool (fix 26.1), not a project dependency
   "CVE-2026-44405",     # paramiko — SHA-1 acceptance in rsakey.py, env-only transitive dep, no fix released yet
   "CVE-2026-44431",     # urllib3 — cross-origin sensitive-header leak via low-level ProxyManager redirects (fix 2.7.0); project pins urllib3>=2.7.0, env-only
   "CVE-2026-44432",     # urllib3 — Brotli/drain_conn over-decompression DoS (fix 2.7.0); project pins urllib3>=2.7.0, env-only
