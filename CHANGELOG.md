@@ -6,6 +6,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.4] 2026-06-01 16:54:25
+
+### Removed
+- **pip-audit suppression `GHSA-4gg8-gxpx-9rph` dropped**: the `uv` entry-point path-traversal advisory is now resolved at the source — the build environment's `uv` is upgraded to 0.11.15 (the fixed release), so the suppression is no longer needed and the vulnerability is fixed rather than ignored
+
 ## [2.9.3] 2026-06-01 16:33:48
 
 ### Changed
