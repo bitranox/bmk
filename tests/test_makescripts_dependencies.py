@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import httpx
+import httpx2
 import orjson
 import pytest
 
@@ -73,15 +73,15 @@ def _make_dep(
 
 
 def _mock_httpx_response(*, status_code: int = 200, content: bytes = b"{}") -> MagicMock:
-    """Build a mock httpx.Response with controllable status and content."""
-    resp = MagicMock(spec=httpx.Response)
+    """Build a mock httpx2.Response with controllable status and content."""
+    resp = MagicMock(spec=httpx2.Response)
     resp.status_code = status_code
     resp.content = content
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
-        http_error = httpx.HTTPStatusError(
+        http_error = httpx2.HTTPStatusError(
             "error",
-            request=MagicMock(spec=httpx.Request),
+            request=MagicMock(spec=httpx2.Request),
             response=resp,
         )
         resp.raise_for_status.side_effect = http_error
@@ -155,7 +155,7 @@ def test_parse_version_constraint_with_marker_and_extras() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.makescripts._dependencies.httpx.get")
+@patch("bmk.makescripts._dependencies.httpx2.get")
 def test_fetch_pypi_data_returns_none_on_404(mock_get: MagicMock) -> None:
     """Returns None when PyPI responds with 404."""
     mock_get.return_value = _mock_httpx_response(status_code=404)
@@ -166,10 +166,10 @@ def test_fetch_pypi_data_returns_none_on_404(mock_get: MagicMock) -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.makescripts._dependencies.httpx.get")
+@patch("bmk.makescripts._dependencies.httpx2.get")
 def test_fetch_pypi_data_returns_none_on_connection_error(mock_get: MagicMock) -> None:
-    """Returns None when httpx raises a ConnectError."""
-    mock_get.side_effect = httpx.ConnectError("connection refused")
+    """Returns None when httpx2 raises a ConnectError."""
+    mock_get.side_effect = httpx2.ConnectError("connection refused")
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -177,10 +177,10 @@ def test_fetch_pypi_data_returns_none_on_connection_error(mock_get: MagicMock) -
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.makescripts._dependencies.httpx.get")
+@patch("bmk.makescripts._dependencies.httpx2.get")
 def test_fetch_pypi_data_returns_none_on_timeout(mock_get: MagicMock) -> None:
-    """Returns None when httpx raises a TimeoutException."""
-    mock_get.side_effect = httpx.TimeoutException("read timeout")
+    """Returns None when httpx2 raises a TimeoutException."""
+    mock_get.side_effect = httpx2.TimeoutException("read timeout")
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -188,7 +188,7 @@ def test_fetch_pypi_data_returns_none_on_timeout(mock_get: MagicMock) -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.makescripts._dependencies.httpx.get")
+@patch("bmk.makescripts._dependencies.httpx2.get")
 def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_get: MagicMock) -> None:
     """Returns None when response body is not valid JSON."""
     resp = _mock_httpx_response(status_code=200, content=b"not json{{{")
@@ -200,7 +200,7 @@ def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_get: MagicMock) 
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.makescripts._dependencies.httpx.get")
+@patch("bmk.makescripts._dependencies.httpx2.get")
 def test_fetch_pypi_data_returns_parsed_json_on_success(mock_get: MagicMock) -> None:
     """Returns parsed dict on successful response."""
     payload = {"info": {"version": "3.0.0"}}
@@ -1353,7 +1353,7 @@ def test_parse_version_constraint_only_upper_bound() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.makescripts._dependencies.httpx.get")
+@patch("bmk.makescripts._dependencies.httpx2.get")
 def test_fetch_pypi_data_returns_none_on_non_404_http_error(mock_get: MagicMock) -> None:
     """Returns None on non-404 HTTP errors (e.g. 500 server error)."""
     mock_get.return_value = _mock_httpx_response(status_code=500)

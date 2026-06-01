@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.3] 2026-06-01 16:33:48
+
+### Changed
+- **Replaced `httpx` with `httpx2`**: the dependency-checker makescript (`makescripts/_dependencies.py`) now imports `httpx2`, the Pydantic-maintained successor to httpx (drop-in API, `import httpx2`). `pyproject.toml` now requires `httpx2>=2.3.0` instead of `httpx>=0.28.1`
+- **pip-audit CVE exclusion list refreshed**:
+  - added `GHSA-4gg8-gxpx-9rph` — uv 0.11.7 malicious-wheel entry-point path traversal (fix 0.11.15); environment-only tool runner, not a project dependency
+  - restored `CVE-2026-3219` and `CVE-2026-6357` — pip, environment-only build tool (env-volatile across shared installs)
+  - removed `CVE-2026-44431` and `CVE-2026-44432` — urllib3 entries no longer flagged now that the pinned urllib3 (`>=2.7.0`) is the fixed version
+  - retained `PYSEC-2022-42969` (py) and `CVE-2026-44405` (paramiko) — still flagged upstream with no fix released
+
 ## [2.9.2] 2026-05-16 23:40:54
 
 ### Changed
