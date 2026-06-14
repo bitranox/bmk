@@ -23,6 +23,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from ..typed_click import argument
 from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def _run_commit(args: tuple[str, ...]) -> None:
 
 
 @click.command("commit", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("message", nargs=-1, type=click.UNPROCESSED)
+@argument("message", nargs=-1, type=click.UNPROCESSED)
 def cli_commit(message: tuple[str, ...]) -> None:
     """Create a git commit with timestamped message.
 
@@ -83,7 +84,7 @@ def cli_commit(message: tuple[str, ...]) -> None:
 
 
 @click.command("c", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("message", nargs=-1, type=click.UNPROCESSED)
+@argument("message", nargs=-1, type=click.UNPROCESSED)
 def cli_c(message: tuple[str, ...]) -> None:
     """Create a git commit with timestamped message (alias for 'commit').
 

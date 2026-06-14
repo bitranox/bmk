@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.5] 2026-06-14
+
+### Added
+- `bmk ship` command (alias `sh`, `make ship`/`make sh`): the full CI-gated release — runs `push`, waits for the push-triggered CI workflow to pass, runs `release`, then waits for the release workflow to pass; aborts if any CI run fails. Matches the run to the just-pushed HEAD commit and gates via the GitHub CLI (`gh`); falls back to push-only with a clear message if `gh` is unavailable. `--ci-workflow` / `--release-workflow` override the workflow names.
+
+### Changed
+- Added a `typed_click.py` facade wrapping rich-click's `option` / `version_option` / `argument` decorators behind explicit, fully-known signatures, keeping the CLI strict-clean under pyright 1.1.410 (`reportUnknownMemberType`) without disabling the rule (ignore isolated to the facade).
+- Bumped internal dependency floors: `lib_cli_exit_tools>=2.3.2`, `lib_log_rich>=6.3.5`, `lib_layered_config>=5.5.2`, `btx_lib_mail>=1.3.2`.
+
 ## [2.9.4] 2026-06-01 16:54:25
 
 ### Removed

@@ -27,6 +27,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
+from ..typed_click import option
 from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def _run_dependencies(action: str) -> None:
 
 
 @click.group("dependencies", invoke_without_command=True, context_settings=CLICK_CONTEXT_SETTINGS)
-@click.option("-u", "--update", is_flag=True, help="Update outdated dependencies")
+@option("-u", "--update", is_flag=True, help="Update outdated dependencies")
 @click.pass_context
 def cli_dependencies(ctx: click.Context, update: bool) -> None:
     """Check and manage project dependencies.
@@ -127,7 +128,7 @@ def dependencies_cmd_u() -> None:
 
 
 @click.group("deps", invoke_without_command=True, context_settings=CLICK_CONTEXT_SETTINGS)
-@click.option("-u", "--update", is_flag=True, help="Update outdated dependencies")
+@option("-u", "--update", is_flag=True, help="Update outdated dependencies")
 @click.pass_context
 def cli_deps(ctx: click.Context, update: bool) -> None:
     """Check and manage project dependencies (alias for 'dependencies').
@@ -166,7 +167,7 @@ def deps_cmd_u() -> None:
 
 
 @click.group("d", invoke_without_command=True, context_settings=CLICK_CONTEXT_SETTINGS)
-@click.option("-u", "--update", is_flag=True, help="Update outdated dependencies")
+@option("-u", "--update", is_flag=True, help="Update outdated dependencies")
 @click.pass_context
 def cli_d(ctx: click.Context, update: bool) -> None:
     """Check and manage project dependencies (short alias for 'dependencies').

@@ -29,6 +29,7 @@ import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
+from ..typed_click import argument, option
 from ._shared import execute_script, get_script_name
 
 if TYPE_CHECKING:
@@ -73,8 +74,8 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
 
 
 @click.command("test", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """Run the project test script.
@@ -104,8 +105,8 @@ def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
 
 
 @click.command("t", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def cli_t(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """Run the project test script (alias for 'test').

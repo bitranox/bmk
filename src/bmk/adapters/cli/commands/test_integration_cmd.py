@@ -29,6 +29,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from ..typed_click import argument, option
 from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
@@ -65,8 +66,8 @@ def _run_test_integration(args: tuple[str, ...], *, human: bool = False) -> None
 
 
 @click.command("testintegration", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_testintegration(human: bool, args: tuple[str, ...]) -> None:
     """Run integration tests only (pytest -m integration).
 
@@ -94,8 +95,8 @@ def cli_testintegration(human: bool, args: tuple[str, ...]) -> None:
 
 
 @click.command("testi", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_testi(human: bool, args: tuple[str, ...]) -> None:
     """Run integration tests only (alias for 'testintegration').
 
@@ -114,8 +115,8 @@ def cli_testi(human: bool, args: tuple[str, ...]) -> None:
 
 
 @click.command("ti", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@option("--human", is_flag=True, default=False, help="Use human-readable text output instead of JSON.")
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_ti(human: bool, args: tuple[str, ...]) -> None:
     """Run integration tests only (alias for 'testintegration').
 

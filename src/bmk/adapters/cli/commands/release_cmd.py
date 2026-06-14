@@ -26,12 +26,13 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from ..typed_click import argument
 from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
 
 
-def _run_release(args: tuple[str, ...]) -> None:
+def run_release(args: tuple[str, ...]) -> None:
     """Execute release via stagerunner.
 
     Args:
@@ -61,7 +62,7 @@ def _run_release(args: tuple[str, ...]) -> None:
 
 
 @click.command("release", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_release(args: tuple[str, ...]) -> None:
     """Create a versioned release with git tag and GitHub release.
 
@@ -75,7 +76,7 @@ def cli_release(args: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-release"):
         logger.info("Creating release")
-        _run_release(args)
+        run_release(args)
 
 
 # =============================================================================
@@ -84,7 +85,7 @@ def cli_release(args: tuple[str, ...]) -> None:
 
 
 @click.command("rel", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_rel(args: tuple[str, ...]) -> None:
     """Create a release (alias for 'release').
 
@@ -92,7 +93,7 @@ def cli_rel(args: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-release"):
         logger.info("Creating release (via 'rel')")
-        _run_release(args)
+        run_release(args)
 
 
 # =============================================================================
@@ -101,7 +102,7 @@ def cli_rel(args: tuple[str, ...]) -> None:
 
 
 @click.command("r", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_r(args: tuple[str, ...]) -> None:
     """Create a release (short alias for 'release').
 
@@ -109,7 +110,7 @@ def cli_r(args: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-release"):
         logger.info("Creating release (via 'r')")
-        _run_release(args)
+        run_release(args)
 
 
 __all__ = ["cli_r", "cli_rel", "cli_release"]

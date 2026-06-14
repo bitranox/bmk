@@ -30,6 +30,7 @@ import rich_click as click
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
 from ..exit_codes import ExitCode
+from ..typed_click import argument
 from ._shared import execute_script, get_script_name
 
 if TYPE_CHECKING:
@@ -158,8 +159,8 @@ def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> Non
 
 
 @click.command("custom", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("command_name")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@argument("command_name")
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def cli_custom(ctx: click.Context, command_name: str, args: tuple[str, ...]) -> None:
     """Run a custom command from the override directory.

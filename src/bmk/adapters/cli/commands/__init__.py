@@ -39,6 +39,7 @@ from .logging import cli_logdemo
 from .push_cmd import cli_psh, cli_push, cli_push_p
 from .release_cmd import cli_r, cli_rel, cli_release
 from .run_cmd import cli_run
+from .ship_cmd import cli_sh, cli_ship
 from .test_integration_cmd import cli_testi, cli_testintegration, cli_ti
 from .testsuite_cmd import cli_t, cli_test
 
@@ -74,6 +75,8 @@ __all__ = [
     "cli_rel",
     "cli_release",
     "cli_run",
+    "cli_sh",
+    "cli_ship",
     "cli_send_email",
     "cli_send_notification",
     "cli_t",

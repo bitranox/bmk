@@ -25,6 +25,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
+from ..typed_click import argument
 from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ def _run_run(args: tuple[str, ...]) -> None:
 
 
 @click.command("run", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@argument("args", nargs=-1, type=click.UNPROCESSED)
 def cli_run(args: tuple[str, ...]) -> None:
     """Run the project CLI via uvx with local dependency discovery.
 

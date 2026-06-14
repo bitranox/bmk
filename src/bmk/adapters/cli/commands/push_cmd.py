@@ -29,12 +29,13 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
+from ..typed_click import argument
 from ._shared import execute_script, get_script_name
 
 logger = logging.getLogger(__name__)
 
 
-def _run_push(message: tuple[str, ...]) -> None:
+def run_push(message: tuple[str, ...]) -> None:
     """Execute push via stagerunner.
 
     Args:
@@ -64,7 +65,7 @@ def _run_push(message: tuple[str, ...]) -> None:
 
 
 @click.command("push", context_settings=CLICK_CONTEXT_SETTINGS)
-@click.argument("message", nargs=-1)
+@argument("message", nargs=-1)
 def cli_push(message: tuple[str, ...]) -> None:
     """Run tests, commit changes, and push to remote.
 
@@ -85,7 +86,7 @@ def cli_push(message: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-push"):
         logger.info("Running push pipeline - this will take some minutes")
-        _run_push(message)
+        run_push(message)
 
 
 # =============================================================================
@@ -94,7 +95,7 @@ def cli_push(message: tuple[str, ...]) -> None:
 
 
 @click.command("psh", context_settings=CLICK_CONTEXT_SETTINGS)
-@click.argument("message", nargs=-1)
+@argument("message", nargs=-1)
 def cli_psh(message: tuple[str, ...]) -> None:
     """Run tests and push (alias for 'push').
 
@@ -102,7 +103,7 @@ def cli_psh(message: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-push"):
         logger.info("Running push pipeline - this will take some minutes")
-        _run_push(message)
+        run_push(message)
 
 
 # =============================================================================
@@ -111,7 +112,7 @@ def cli_psh(message: tuple[str, ...]) -> None:
 
 
 @click.command("p", context_settings=CLICK_CONTEXT_SETTINGS)
-@click.argument("message", nargs=-1)
+@argument("message", nargs=-1)
 def cli_push_p(message: tuple[str, ...]) -> None:
     """Run tests and push (short alias for 'push').
 
@@ -119,7 +120,7 @@ def cli_push_p(message: tuple[str, ...]) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-push"):
         logger.info("Running push pipeline - this will take some minutes")
-        _run_push(message)
+        run_push(message)
 
 
 __all__ = ["cli_psh", "cli_push", "cli_push_p"]
