@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [2.9.6] 2026-06-30 22:15:59
+
+### Fixed
+- pip-audit now audits the target project's `.venv`, not whatever venv happens to be active in the
+  caller's shell. `execute_script` already set `VIRTUAL_ENV` to the project venv, but pip-audit resolves
+  the pip it audits via `sys.executable`/PATH (it ignores `VIRTUAL_ENV`), so a developer with an editor
+  venv active (e.g. PyCharm) got a vulnerability report for the wrong environment - and a blocking
+  `make push` failure unrelated to the project. We now also set `PIPAPI_PYTHON_LOCATION` to the project
+  venv's interpreter (the override pip-audit documents), Windows-aware, and clear it when there is no
+  project venv. (+2 test assertions.)
+
 ## [2.9.5] 2026-06-14
 
 ### Added
