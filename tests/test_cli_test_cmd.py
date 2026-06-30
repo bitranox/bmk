@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -478,11 +479,16 @@ def test_execute_script_sets_virtual_env_to_project_venv(
     venv_dir = tmp_path / ".venv"
     venv_dir.mkdir()
     (venv_dir / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    venv_python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("")  # marker so the interpreter path exists
     monkeypatch.setenv("VIRTUAL_ENV", "/some/bmk/venv")
 
     execute_script(script_path, tmp_path, ())
 
     assert captured_env[0]["VIRTUAL_ENV"] == str(tmp_path / ".venv")
+    # pip-audit ignores VIRTUAL_ENV; PIPAPI_PYTHON_LOCATION must pin it to the project venv interpreter
+    assert captured_env[0]["PIPAPI_PYTHON_LOCATION"] == str(venv_python)
 
 
 @pytest.mark.os_agnostic
@@ -503,12 +509,14 @@ def test_execute_script_unsets_virtual_env_when_no_project_venv(
     script_path = tmp_path / "_btx_stagerunner.sh"
     script_path.write_text("#!/bin/bash\necho test")
 
-    # No .venv in the target project, but bmk's own VIRTUAL_ENV is set
+    # No .venv in the target project, but bmk's own VIRTUAL_ENV / PIPAPI_PYTHON_LOCATION are set
     monkeypatch.setenv("VIRTUAL_ENV", "/some/bmk/venv")
+    monkeypatch.setenv("PIPAPI_PYTHON_LOCATION", "/some/bmk/venv/bin/python")
 
     execute_script(script_path, tmp_path, ())
 
     assert "VIRTUAL_ENV" not in captured_env[0]
+    assert "PIPAPI_PYTHON_LOCATION" not in captured_env[0]
 
 
 @pytest.mark.os_agnostic

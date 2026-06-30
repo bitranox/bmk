@@ -114,8 +114,18 @@ def execute_script(
     project_venv = cwd / ".venv"
     if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
         env["VIRTUAL_ENV"] = str(project_venv)
+        # pip-audit resolves the pip it audits via sys.executable / PATH, NOT VIRTUAL_ENV, so when a
+        # different venv is active in the caller's shell (e.g. an editor's venv) it audits the wrong
+        # environment. Pin it to the project venv's interpreter via PIPAPI_PYTHON_LOCATION - the override
+        # pip-audit's pip-api documents for exactly this case.
+        venv_python = project_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if venv_python.exists():
+            env["PIPAPI_PYTHON_LOCATION"] = str(venv_python)
+        else:
+            env.pop("PIPAPI_PYTHON_LOCATION", None)
     else:
         env.pop("VIRTUAL_ENV", None)
+        env.pop("PIPAPI_PYTHON_LOCATION", None)
 
     if override_dir:
         env["BMK_OVERRIDE_DIR"] = str(override_dir)
