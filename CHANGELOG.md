@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Added
+- `bmk ensure` (and `make ensure`): installs the external tools bmk needs on the host, best-effort
+  and per-OS. It reuses the existing prerequisite detector and, for each missing tool, runs a
+  platform-appropriate installer: the linters (shellcheck/shfmt/bashate) via pip, git via the
+  system package manager (apt-get/dnf/pacman/zypper on Linux, brew on macOS, winget on Windows),
+  pwsh via brew/winget, and PSScriptAnalyzer via `Install-Module`. Tools with no installer on the
+  current platform (pwsh on Linux, winget itself) are reported with a hint instead of failing.
+  `--dry-run` previews the install commands; `--strict` exits non-zero if any tool is still missing.
+
 ## [3.0.1] 2026-07-02 16:08:51
 
 ### Fixed

@@ -40,7 +40,7 @@ _ensure_bmk:
 # All targets that accept trailing arguments
 _BMK_TARGETS := test t test-human th testintegration testi ti testintegration-human tih \
 	codecov coverage cov \
-	build bld clean cln cl run \
+	build bld clean cln cl run ensure \
 	bump-major bump-minor bump-patch bump \
 	commit c push psh p release rel r \
 	dependencies deps d dependencies-update \
@@ -112,6 +112,10 @@ cln cl: _ensure_bmk
 .PHONY: run
 run: _ensure_bmk  ## Run the project CLI
 	$(BMK) run $(ARGS)
+
+.PHONY: ensure
+ensure: _ensure_bmk  ## Install missing external tools for this OS
+	$(BMK) ensure $(ARGS)
 
 # ──────────────────────────────────────────────────────────────
 # Version Bumping

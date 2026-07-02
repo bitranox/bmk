@@ -46,6 +46,7 @@ Add project-specific targets or override existing ones  -  the Makefile is the s
 | `make send-notification`          | `[--subject]` `[--message]` `[--to]` `[--from]`                              | Send a plain-text notification email                 |
 | `make custom`                     | `<name> [args...]`                                                           | Run a user-defined pipeline                          |
 | `bmk install`                     |                                                                              | Install or update the bmk Makefile in cwd            |
+| `make ensure`                     | `[--dry-run]` `[--strict]`                                                   | Install missing external tools for this OS           |
 | `make info`                       |                                                                              | Print resolved package metadata                      |
 | `make version-current`            |                                                                              | Print current version                                |
 | `make dev`                        |                                                                              | Install package with dev extras (editable)           |
@@ -62,13 +63,13 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 
   Example: `bmk test` executes the bundled test pipeline:
 
-  | Stage | Execution    | Scripts                                                                                                                                                                                                        |
-  |-------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-  | 010   | sequential   | `update_deps`                                                                                                                                                                                      |
-  | 020   | sequential   | `ruff_format_apply`                                                                                                                                                                                |
-  | 030   | sequential   | `ruff_fix_apply`                                                                                                                                                                                   |
-  | 040   | **parallel** | `ruff_format_check`, `ruff_lint`, `pyright`, `bandit`, `pip_audit`, `lint_imports`, `psscriptanalyzer`, `pytest` |
-  | 060   | sequential   | `shellcheck`                                                                                                                                                                                       |
+| Stage | Execution    | Scripts                                                                                                          |
+|-------|--------------|------------------------------------------------------------------------------------------------------------------|
+| 010   | sequential   | `update_deps`                                                                                                    |
+| 020   | sequential   | `ruff_format_apply`                                                                                              |
+| 030   | sequential   | `ruff_fix_apply`                                                                                                 |
+| 040   | **parallel** | `ruff_format_check`, `ruff_lint`, `pyright`, `bandit`, `pip_audit`, `lint_imports`, `psscriptanalyzer`, `pytest` |
+| 060   | sequential   | `shellcheck`                                                                                                     |
 
 - **JSON-by-default output**  -  in JSON mode (the default), the stage runner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags  -  use `make test-human` or `make th` instead.
 - **Dependency isolation**  -  bmk is installed as a persistent `uv tool` together with the current project's dependencies (`uv tool install bmk --with .`). This ensures pyright, pytest, pip-audit and other tools can resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv`. Works on network shares that do not support symlinks.
@@ -199,11 +200,11 @@ These options go **before** the subcommand name:
 
 | Option                           | Type                | Default | Description                                                         |
 |----------------------------------|---------------------|---------|---------------------------------------------------------------------|
-| `--version`                      | flag                |  -        | Print version and exit                                              |
+| `--version`                      | flag                | -       | Print version and exit                                              |
 | `--traceback` / `--no-traceback` | flag                | `False` | Show full Python traceback on errors                                |
 | `--profile NAME`                 | string              | `None`  | Load configuration from a named profile (e.g. `production`, `test`) |
-| `--set SECTION.KEY=VALUE`        | string (repeatable) |  -        | Override a configuration setting; can be given multiple times       |
-| `-h`, `--help`                   | flag                |  -        | Show help and exit                                                  |
+| `--set SECTION.KEY=VALUE`        | string (repeatable) | -       | Override a configuration setting; can be given multiple times       |
+| `-h`, `--help`                   | flag                | -       | Show help and exit                                                  |
 
 ```bash
 bmk --version
@@ -220,13 +221,13 @@ Profile names: alphanumeric, hyphens, underscores; max 64 characters; must start
 
 Run the project test suite via the stage runner. All extra arguments are forwarded to the pipeline's stages.
 
-|                  |                                                                                                                                              |
-|------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| **Aliases**      | `t`                                                                                                                                          |
-| **Options**      | `--human`  -  use human-readable text output instead of JSON                                                                                   |
-| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages (unlimited, unprocessed)                                                                                  |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_PACKAGE_NAME` (if configured)    |
-| **Exit codes**   | `0` success, or the first failing stage's exit code                                                                                          |
+|                  |                                                                                                       |
+|------------------|-------------------------------------------------------------------------------------------------------|
+| **Aliases**      | `t`                                                                                                   |
+| **Options**      | `--human`  -  use human-readable text output instead of JSON                                          |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages (unlimited, unprocessed)                           |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_PACKAGE_NAME` (if configured) |
+| **Exit codes**   | `0` success, or the first failing stage's exit code                                                   |
 
 Tool output defaults to **JSON** (machine-readable). JSON mode is designed for LLM-driven
 workflows where minimizing output tokens and context window consumption matters. The
@@ -256,13 +257,13 @@ BMK_OUTPUT_FORMAT=text bmk test
 
 Run integration tests only (tests marked `@pytest.mark.integration`).
 
-|                  |                                                                          |
-|------------------|--------------------------------------------------------------------------|
-| **Aliases**      | `testi`, `ti`                                                            |
-| **Options**      | `--human`  -  use human-readable text output instead of JSON               |
-| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages                                       |
+|                  |                                                                               |
+|------------------|-------------------------------------------------------------------------------|
+| **Aliases**      | `testi`, `ti`                                                                 |
+| **Options**      | `--human`  -  use human-readable text output instead of JSON                  |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages                            |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test_integration`, `BMK_OUTPUT_FORMAT` |
-| **Exit codes**   | `0` success, or the first failing stage's exit code                      |
+| **Exit codes**   | `0` success, or the first failing stage's exit code                           |
 
 Tool output defaults to **JSON**. In JSON mode, output is captured and only shown on failure. Use `--human` for full verbose output. See [test](#test) for details on output format control.
 
@@ -315,7 +316,7 @@ Run the project CLI via uvx with automatic local dependency discovery. All argum
 
 |                  |                                                        |
 |------------------|--------------------------------------------------------|
-| **Arguments**    | `[ARGS]...`  -  forwarded to the project CLI             |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the project CLI           |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=run`            |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code |
 
@@ -331,12 +332,12 @@ bmk run --version
 
 Create a git commit with a timestamped message. The message format is `YYYY-MM-DD HH:MM:SS - <message>`. All positional words are joined into the message.
 
-|                  |                                                            |
-|------------------|------------------------------------------------------------|
-| **Aliases**      | `c`                                                        |
+|                  |                                                              |
+|------------------|--------------------------------------------------------------|
+| **Aliases**      | `c`                                                          |
 | **Arguments**    | `[MESSAGE]...`  -  commit message parts (joined with spaces) |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=commit`             |
-| **Exit codes**   | `0` success, `2` script not found, or script exit code     |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=commit`               |
+| **Exit codes**   | `0` success, `2` script not found, or script exit code       |
 
 ```bash
 bmk commit fix login redirect bug
@@ -352,7 +353,7 @@ Run the test suite, commit any staged changes, and push to the remote.
 |                  |                                                                                                                                |
 |------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | **Aliases**      | `psh`, `p`                                                                                                                     |
-| **Arguments**    | `[MESSAGE]...`  -  commit message (default: `chores`)                                                                            |
+| **Arguments**    | `[MESSAGE]...`  -  commit message (default: `chores`)                                                                          |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=push`, `BMK_GIT_REMOTE` (default: `origin`), `BMK_GIT_BRANCH` (default: current branch) |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code                                                                         |
 
@@ -397,7 +398,7 @@ Create a versioned release with git tag and GitHub release.
 |                  |                                                        |
 |------------------|--------------------------------------------------------|
 | **Aliases**      | `rel`, `r`                                             |
-| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages                     |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages     |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=rel`            |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code |
 
@@ -485,11 +486,11 @@ bmk cov
 
 Run a user-defined pipeline by name. Custom pipelines are defined declaratively under `[tool.bmk.pipelines.<name>]` in `pyproject.toml` or in `bmk_makescripts/stages.toml`. If no pipeline is defined for the name, a clear error is printed.
 
-|                  |                                                                                                                         |
-|------------------|-------------------------------------------------------------------------------------------------------------------------|
-| **Arguments**    | `COMMAND_NAME` (required)  -  the command prefix to match, `[ARGS]...`  -  forwarded to the pipeline's stages                             |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=<COMMAND_NAME>`, `BMK_PACKAGE_NAME` (if configured) |
-| **Exit codes**   | `0` success, `2` no pipeline defined for the name, or the first failing stage's exit code                               |
+|                  |                                                                                                               |
+|------------------|---------------------------------------------------------------------------------------------------------------|
+| **Arguments**    | `COMMAND_NAME` (required)  -  the command prefix to match, `[ARGS]...`  -  forwarded to the pipeline's stages |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=<COMMAND_NAME>`, `BMK_PACKAGE_NAME` (if configured)                    |
+| **Exit codes**   | `0` success, `2` no pipeline defined for the name, or the first failing stage's exit code                     |
 
 Define the pipeline under `[tool.bmk.pipelines.<name>]` in `pyproject.toml` or `bmk_makescripts/stages.toml`. Each stage has a `name`, an `order`, and an `argv` list; stages run in order (equal orders run in parallel).
 
@@ -532,7 +533,7 @@ Deploy default configuration templates to system or user directories.
 
 | Option                               | Type                                                 | Default | Description                                             |
 |--------------------------------------|------------------------------------------------------|---------|---------------------------------------------------------|
-| `--target`                           | choice: `app`, `host`, `user` (repeatable, required) |  -        | Target layer(s) to deploy to                            |
+| `--target`                           | choice: `app`, `host`, `user` (repeatable, required) | -       | Target layer(s) to deploy to                            |
 | `--force`                            | flag                                                 | `False` | Overwrite existing configuration files                  |
 | `--profile NAME`                     | string                                               | `None`  | Override profile from the root command                  |
 | `--permissions` / `--no-permissions` | flag                                                 | enabled | Set Unix permissions (app/host: 755/644, user: 700/600) |
@@ -565,7 +566,7 @@ Generate example configuration files in a target directory.
 
 | Option          | Type                      | Default | Description                      |
 |-----------------|---------------------------|---------|----------------------------------|
-| `--destination` | directory path (required) |  -        | Directory to write example files |
+| `--destination` | directory path (required) | -       | Directory to write example files |
 | `--force`       | flag                      | `False` | Overwrite existing files         |
 
 ```bash
@@ -598,11 +599,11 @@ Send an email using configured SMTP settings. Supports plain text, HTML, multipl
 | Option                                                                 | Type                | Default     | Description                                         |
 |------------------------------------------------------------------------|---------------------|-------------|-----------------------------------------------------|
 | `--to`                                                                 | string (repeatable) | from config | Recipient email address                             |
-| `--subject`                                                            | string (required)   |  -            | Email subject line                                  |
+| `--subject`                                                            | string (required)   | -           | Email subject line                                  |
 | `--body`                                                               | string              | `""`        | Plain-text email body                               |
 | `--body-html`                                                          | string              | `""`        | HTML email body (sent as multipart with plain text) |
 | `--from`                                                               | string              | from config | Override sender address                             |
-| `--attachment`                                                         | path (repeatable)   |  -            | File to attach                                      |
+| `--attachment`                                                         | path (repeatable)   | -           | File to attach                                      |
 | `--smtp-host`                                                          | string (repeatable) | from config | Override SMTP host(s), format `host:port`           |
 | `--smtp-username`                                                      | string              | from config | Override SMTP username                              |
 | `--smtp-password`                                                      | string              | from config | Override SMTP password                              |
@@ -637,8 +638,8 @@ Send a simple plain-text notification email.
 | Option                                                                 | Type                | Default     | Description                          |
 |------------------------------------------------------------------------|---------------------|-------------|--------------------------------------|
 | `--to`                                                                 | string (repeatable) | from config | Recipient email address              |
-| `--subject`                                                            | string (required)   |  -            | Notification subject line            |
-| `--message`                                                            | string (required)   |  -            | Notification message (plain text)    |
+| `--subject`                                                            | string (required)   | -           | Notification subject line            |
+| `--message`                                                            | string (required)   | -           | Notification message (plain text)    |
 | `--from`                                                               | string              | from config | Override sender address              |
 | `--smtp-host`                                                          | string (repeatable) | from config | Override SMTP host(s)                |
 | `--smtp-username`                                                      | string              | from config | Override SMTP username               |
@@ -693,16 +694,16 @@ All commands use POSIX-conventional exit codes:
 | Code  | Name              | Meaning                                         |
 |-------|-------------------|-------------------------------------------------|
 | `0`   | SUCCESS           | Command completed successfully                  |
-| `1`   | GENERAL_ERROR     | Unspecified failure                              |
-| `2`   | FILE_NOT_FOUND    | Script or file not found (errno ENOENT)          |
-| `13`  | PERMISSION_DENIED | Insufficient permissions (errno EACCES)          |
-| `22`  | INVALID_ARGUMENT  | Bad input value (errno EINVAL)                   |
-| `69`  | SMTP_FAILURE      | Email delivery failed (sysexits EX_UNAVAILABLE)  |
-| `78`  | CONFIG_ERROR      | Configuration error (sysexits EX_CONFIG)         |
-| `110` | TIMEOUT           | Operation timed out (ETIMEDOUT)                  |
-| `130` | SIGNAL_INT        | Interrupted by SIGINT (Ctrl+C)                   |
-| `141` | BROKEN_PIPE       | Broken pipe (SIGPIPE)                            |
-| `143` | SIGNAL_TERM       | Terminated by SIGTERM                            |
+| `1`   | GENERAL_ERROR     | Unspecified failure                             |
+| `2`   | FILE_NOT_FOUND    | Script or file not found (errno ENOENT)         |
+| `13`  | PERMISSION_DENIED | Insufficient permissions (errno EACCES)         |
+| `22`  | INVALID_ARGUMENT  | Bad input value (errno EINVAL)                  |
+| `69`  | SMTP_FAILURE      | Email delivery failed (sysexits EX_UNAVAILABLE) |
+| `78`  | CONFIG_ERROR      | Configuration error (sysexits EX_CONFIG)        |
+| `110` | TIMEOUT           | Operation timed out (ETIMEDOUT)                 |
+| `130` | SIGNAL_INT        | Interrupted by SIGINT (Ctrl+C)                  |
+| `141` | BROKEN_PIPE       | Broken pipe (SIGPIPE)                           |
+| `143` | SIGNAL_TERM       | Terminated by SIGTERM                           |
 
 #### Exit Code Behaviour
 
