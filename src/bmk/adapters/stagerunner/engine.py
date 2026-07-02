@@ -85,7 +85,7 @@ def run_pipeline(stages: Sequence[Stage], ctx: StageContext, *, out: SupportsWri
                 return failures[0].returncode
 
     report_success_summary(
-        PipelineSummary("pass", len(batches), len(stages), None),
+        PipelineSummary("pass", len(batches), len(stages)),
         quiet=quiet,
         out=stream,
     )

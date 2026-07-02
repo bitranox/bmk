@@ -82,7 +82,9 @@ def commit(ctx: StageContext) -> int:
     # Local time, matching the shell stage's `date` (not UTC).
     subject = f"{timestamp_prefix(datetime.now())} - {message}"
 
-    print("Staging changes...")
+    # flush so these messages order correctly against the git subprocess output,
+    # which writes straight to the fd (relevant when stdout is a pipe, not a tty).
+    print("Staging changes...", flush=True)
     _git(["add", "-A"], project)
 
     staged = _git(["diff", "--cached", "--name-only"], project, capture=True).stdout.splitlines()
@@ -95,7 +97,7 @@ def commit(ctx: StageContext) -> int:
     nothing_staged = _git(["diff", "--cached", "--quiet"], project).returncode == 0
     commit_flags = ["--allow-empty"] if nothing_staged else []
 
-    print(f"Committing: {subject}")
+    print(f"Committing: {subject}", flush=True)
     return normalize_returncode(_git(["commit", *commit_flags, "-m", subject], project).returncode)
 
 

@@ -52,9 +52,8 @@ class StageResult:
 
 @dataclass(frozen=True, slots=True)
 class PipelineSummary:
-    """Aggregate outcome of running a whole pipeline."""
+    """Aggregate outcome of running a whole pipeline (emitted as the JSON summary)."""
 
     result: str
     stages: int
     scripts: int
-    first_failure: str | None
