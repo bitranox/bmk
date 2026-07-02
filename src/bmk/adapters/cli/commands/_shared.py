@@ -101,6 +101,25 @@ def execute_script(
     Returns:
         Exit code from the script execution.
     """
+    # Migration selector: run the in-process Python engine only when opted in
+    # (BMK_RUNNER=python) and the prefix is ported. Otherwise fall through to the
+    # legacy shell stagerunner below, which stays the default.
+    if os.environ.get("BMK_RUNNER", "shell").strip().lower() == "python":
+        from bmk.adapters.stagerunner.context import build_context
+        from bmk.adapters.stagerunner.engine import run_pipeline
+        from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
+
+        if command_prefix in PORTED_PREFIXES:
+            ctx = build_context(
+                cwd,
+                extra_args,
+                command_prefix=command_prefix,
+                output_format=output_format,
+                show_warnings=show_warnings,
+                package_name=package_name,
+            )
+            return run_pipeline(list(PIPELINES[command_prefix]), ctx)
+
     env = os.environ.copy()
     env["BMK_PROJECT_DIR"] = str(cwd)
     env["BMK_COMMAND_PREFIX"] = command_prefix

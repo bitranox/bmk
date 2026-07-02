@@ -143,6 +143,7 @@ convention = "google"
 "src/bmk/adapters/config/*.py" = ["PLR0913"]
 "src/bmk/adapters/email/*.py" = ["PLR0913"]
 "src/bmk/adapters/memory/*.py" = ["PLR0913"]
+"src/bmk/adapters/stagerunner/*.py" = ["PLR0913"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

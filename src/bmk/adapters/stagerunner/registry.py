@@ -26,3 +26,8 @@ def clean_action(ctx: StageContext) -> int:
 PIPELINES: dict[str, tuple[Stage, ...]] = {
     "clean": (Stage("clean", 10, HelperAction(clean_action)),),
 }
+
+# Prefixes whose Python pipeline is ready. During migration the CLI runs these
+# in-process only when opted in (BMK_RUNNER=python); every other prefix still
+# uses the legacy shell stagerunner, and all shell scripts stay intact.
+PORTED_PREFIXES: frozenset[str] = frozenset(PIPELINES)
