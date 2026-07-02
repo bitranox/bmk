@@ -133,14 +133,14 @@ POSIX-conventional exit codes defined in `adapters/cli/exit_codes.py`:
 | `--set SECTION.KEY=VALUE` | Override configuration setting (repeatable) |
 | `-h, --help` | Show help and exit |
 
-### Stagerunner Commands (test, testintegration, build, clean, push, etc.)
+### Stage Runner Commands (test, testintegration, build, clean, push, etc.)
 
-Commands that delegate to the stagerunner (`test`, `testintegration`, `build`, `clean`,
+Commands that delegate to the stage runner (`test`, `testintegration`, `build`, `clean`,
 `push`, `release`, `dependencies`, etc.) respect `BMK_OUTPUT_FORMAT`:
 
 | Behaviour | JSON mode (default) | Text mode (`--human` / `BMK_OUTPUT_FORMAT=text`) |
 |-----------|---------------------|--------------------------------------------------|
-| Stagerunner output | Captured; shown only on stage failure | Shown immediately (verbose) |
+| Stage runner output | Captured; shown only on stage failure | Shown immediately (verbose) |
 | Makefile version check | Auto-accepts updates | Prompts interactively |
 | Dependency checking | Silent (no report or summary) | Full report displayed |
 | Pytest | `--tb=short -q --no-header`; coverage report suppressed | Default verbose output |

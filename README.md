@@ -12,13 +12,13 @@
 [![Maintainability](https://qlty.sh/badges/041ba2c1-37d6-40bb-85a0-ec5a8a0aca0c/maintainability.svg)](https://qlty.sh/gh/bitranox/projects/bmk)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 
-`bmk` is a CLI task runner that orchestrates build, test, clean, and custom staged scripts with layered configuration. 
-It uses a stagerunner that groups numbered shell scripts into stages — stages run sequentially (fail-fast), 
-scripts sharing the same stage number run in parallel. Scripts run on Linux/macOS (Bash) and Windows (PowerShell). Supports per-project overrides and user-defined commands via `bmk custom <name>`.
+`bmk` is a CLI task runner that orchestrates build, test, clean, and custom staged commands with layered configuration. 
+It runs a cross-OS Python stage runner that groups a command's stages by order number  -  stages run sequentially (fail-fast), 
+stages sharing the same order run in parallel. It runs natively on Linux, macOS, and Windows (pure Python, no shell scripts). Pipelines are customizable per project, and `bmk custom <name>` runs a user-defined pipeline.
 
 Every project gets a thin `Makefile` that delegates to `uvx bmk@latest`, giving you a standard, expandable set of everyday development targets 
 (`make test`, `make push`, `make bump-patch`, ...) without installing anything locally. 
-Add project-specific targets or override existing ones — the Makefile is the single entry point for both interactive use and CI pipelines.
+Add project-specific targets or override existing ones  -  the Makefile is the single entry point for both interactive use and CI pipelines.
 
 | Command                           | Options / Subcommands                                                        | Description                                          |
 |-----------------------------------|------------------------------------------------------------------------------|------------------------------------------------------|
@@ -44,7 +44,7 @@ Add project-specific targets or override existing ones — the Makefile is the s
 | `make config-generate-examples`   | `[--destination PATH]` `[--force]`                                           | Generate example configuration files                 |
 | `make send-email`                 | `[--subject]` `[--body\|--body-html]` `[--to]` `[--attachment]`              | Send an email via configured SMTP                    |
 | `make send-notification`          | `[--subject]` `[--message]` `[--to]` `[--from]`                              | Send a plain-text notification email                 |
-| `make custom`                     | `<name> [args...]`                                                           | Run user-defined scripts from override dir           |
+| `make custom`                     | `<name> [args...]`                                                           | Run a user-defined pipeline                          |
 | `bmk install`                     |                                                                              | Install or update the bmk Makefile in cwd            |
 | `make info`                       |                                                                              | Print resolved package metadata                      |
 | `make version-current`            |                                                                              | Print current version                                |
@@ -55,30 +55,30 @@ Add project-specific targets or override existing ones — the Makefile is the s
 Arguments after the target name are forwarded automatically (e.g. `make push fix login bug`).
 Global options: `--traceback`, `--profile NAME`, `--set SECTION.KEY=VALUE`.
 
-On Windows, all makescripts have PowerShell (`.ps1`) counterparts, so the stagerunner and every built-in command work natively under `pwsh`. 
+Every built-in command runs in cross-OS Python, so bmk works natively on Windows with no shell or PowerShell dependency. 
 You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://gnuwin32.sourceforge.net/packages/make.htm) or `choco install make`) to use the Makefile entry point.
 
-- **Staged script execution** — scripts are grouped by stage number. Stages run sequentially (fail-fast); scripts sharing a stage number run in parallel.
+- **Staged execution** - stages are grouped by order number. Stages run sequentially (fail-fast); stages sharing an order run in parallel.
 
   Example: `bmk test` executes the bundled test pipeline:
 
   | Stage | Execution    | Scripts                                                                                                                                                                                                        |
   |-------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-  | 010   | sequential   | `test_010_update_deps.sh`                                                                                                                                                                                      |
-  | 020   | sequential   | `test_020_ruff_format_apply.sh`                                                                                                                                                                                |
-  | 030   | sequential   | `test_030_ruff_fix_apply.sh`                                                                                                                                                                                   |
-  | 040   | **parallel** | `test_040_ruff_format_check.sh`, `test_040_ruff_lint.sh`, `test_040_pyright.sh`, `test_040_bandit.sh`, `test_040_pip_audit.sh`, `test_040_lint_imports.sh`, `test_040_psscriptanalyzer.sh`, `test_040_pytest.sh` |
-  | 060   | sequential   | `test_060_shellcheck.sh`                                                                                                                                                                                       |
+  | 010   | sequential   | `update_deps`                                                                                                                                                                                      |
+  | 020   | sequential   | `ruff_format_apply`                                                                                                                                                                                |
+  | 030   | sequential   | `ruff_fix_apply`                                                                                                                                                                                   |
+  | 040   | **parallel** | `ruff_format_check`, `ruff_lint`, `pyright`, `bandit`, `pip_audit`, `lint_imports`, `psscriptanalyzer`, `pytest` |
+  | 060   | sequential   | `shellcheck`                                                                                                                                                                                       |
 
-- **JSON-by-default output** — in JSON mode (the default), the stagerunner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags — use `make test-human` or `make th` instead.
-- **Dependency isolation** — bmk is installed as a persistent `uv tool` together with the current project's dependencies (`uv tool install bmk --with .`). This ensures pyright, pytest, pip-audit and other tools can resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv`. Works on network shares that do not support symlinks.
-- **Built-in commands** — `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
-- **Custom commands** — `bmk custom <name>` runs user-defined scripts from the override directory (no bundled scripts required).
-- **Per-project overrides** — drop scripts into `makescripts/` or configure `bmk.override_dir` to override or extend built-in behaviour.
-- **Layered configuration** with lib_layered_config (defaults → app → host → user → .env → env).
+- **JSON-by-default output**  -  in JSON mode (the default), the stage runner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags  -  use `make test-human` or `make th` instead.
+- **Dependency isolation**  -  bmk is installed as a persistent `uv tool` together with the current project's dependencies (`uv tool install bmk --with .`). This ensures pyright, pytest, pip-audit and other tools can resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv`. Works on network shares that do not support symlinks.
+- **Built-in commands**  -  `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.
+- **Custom commands**  -  `bmk custom <name>` runs a user-defined pipeline defined via a TOML overlay.
+- **Per-project overrides** - define pipelines under `[tool.bmk.pipelines]` in `pyproject.toml` (or `bmk_makescripts/stages.toml`) to add, remove, or replace stages.
+- **Layered configuration** with lib_layered_config (defaults -> app -> host -> user -> .env -> env).
 - **Rich CLI output** styled with rich-click and structured logging via lib_log_rich.
-- **Private repository dependencies** — PEP 440 direct references (`pkg @ git+https://...`) in `[project.dependencies]` are automatically skipped during PyPI version checking. Authentication is handled by global git config URL rewriting.
-- **Email notifications** — send plain-text or HTML emails with attachments via btx-lib-mail.
+- **Private repository dependencies**  -  PEP 440 direct references (`pkg @ git+https://...`) in `[project.dependencies]` are automatically skipped during PyPI version checking. Authentication is handled by global git config URL rewriting.
+- **Email notifications**  -  send plain-text or HTML emails with attachments via btx-lib-mail.
 - **Exit-code helpers** powered by lib_cli_exit_tools for clean POSIX exit semantics.
 
 
@@ -110,13 +110,13 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 bmk is installed as a persistent `uv tool` together with the current
 project's dependencies. The bundled Makefile handles this automatically
-on every invocation — no manual setup required.
+on every invocation  -  no manual setup required.
 
 ```bash
 # One-time: install the Makefile into your project
 uv tool install bmk && bmk install
 
-# From now on, just use make — bmk + project deps are kept in sync:
+# From now on, just use make  -  bmk + project deps are kept in sync:
 make test
 make build
 ```
@@ -128,7 +128,7 @@ uv tool install --reinstall bmk --with .
 This reads `./pyproject.toml`, installs bmk and all project dependencies into
 a persistent venv at `~/.local/share/uv/tools/bmk/`. Tools like pyright,
 pytest and pip-audit resolve the full dependency tree without needing a
-local `.venv` — works on network shares that do not support symlinks.
+local `.venv`  -  works on network shares that do not support symlinks.
 
 ### Manual install (without Makefile)
 
@@ -199,11 +199,11 @@ These options go **before** the subcommand name:
 
 | Option                           | Type                | Default | Description                                                         |
 |----------------------------------|---------------------|---------|---------------------------------------------------------------------|
-| `--version`                      | flag                | —       | Print version and exit                                              |
+| `--version`                      | flag                |  -        | Print version and exit                                              |
 | `--traceback` / `--no-traceback` | flag                | `False` | Show full Python traceback on errors                                |
 | `--profile NAME`                 | string              | `None`  | Load configuration from a named profile (e.g. `production`, `test`) |
-| `--set SECTION.KEY=VALUE`        | string (repeatable) | —       | Override a configuration setting; can be given multiple times       |
-| `-h`, `--help`                   | flag                | —       | Show help and exit                                                  |
+| `--set SECTION.KEY=VALUE`        | string (repeatable) |  -        | Override a configuration setting; can be given multiple times       |
+| `-h`, `--help`                   | flag                |  -        | Show help and exit                                                  |
 
 ```bash
 bmk --version
@@ -218,19 +218,19 @@ Profile names: alphanumeric, hyphens, underscores; max 64 characters; must start
 
 ### test
 
-Run the project test suite via the stagerunner. All extra arguments are forwarded to the underlying scripts.
+Run the project test suite via the stage runner. All extra arguments are forwarded to the pipeline's stages.
 
 |                  |                                                                                                                                              |
 |------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
 | **Aliases**      | `t`                                                                                                                                          |
-| **Options**      | `--human` — use human-readable text output instead of JSON                                                                                   |
-| **Arguments**    | `[ARGS]...` — forwarded to scripts (unlimited, unprocessed)                                                                                  |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_OVERRIDE_DIR` (if configured), `BMK_PACKAGE_NAME` (if configured)    |
-| **Exit codes**   | `0` success, `2` script not found, or the script's own exit code                                                                             |
+| **Options**      | `--human`  -  use human-readable text output instead of JSON                                                                                   |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages (unlimited, unprocessed)                                                                                  |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_PACKAGE_NAME` (if configured)    |
+| **Exit codes**   | `0` success, or the first failing stage's exit code                                                                                          |
 
 Tool output defaults to **JSON** (machine-readable). JSON mode is designed for LLM-driven
 workflows where minimizing output tokens and context window consumption matters. The
-stagerunner captures all tool output and only shows it when a stage fails. On success,
+stage runner captures all tool output and only shows it when a stage fails. On success,
 a single JSON summary line is emitted: `{"result":"pass","stages":N,"scripts":N}`.
 Dependency checking runs silently, Makefile version updates are auto-accepted, and
 pytest uses `--tb=short -q --no-header` for concise failure output. Use `--human` for
@@ -240,9 +240,7 @@ can also control output format; `--human` takes precedence over the env var.
 **Note:** `make test --human` does not work because Make intercepts `--` flags.
 Use `make test-human` (alias `make th`) instead.
 
-Script lookup order:
-1. `<cwd>/bmk_makescripts/_btx_stagerunner.sh` (local override)
-2. `<package>/makescripts/_btx_stagerunner.sh` (bundled)
+Pipeline resolution: the built-in `test` pipeline, with a `[tool.bmk.pipelines.test]` overlay applied if the project defines one.
 
 ```bash
 bmk test
@@ -261,10 +259,10 @@ Run integration tests only (tests marked `@pytest.mark.integration`).
 |                  |                                                                          |
 |------------------|--------------------------------------------------------------------------|
 | **Aliases**      | `testi`, `ti`                                                            |
-| **Options**      | `--human` — use human-readable text output instead of JSON               |
-| **Arguments**    | `[ARGS]...` — forwarded to scripts                                       |
+| **Options**      | `--human`  -  use human-readable text output instead of JSON               |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages                                       |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test_integration`, `BMK_OUTPUT_FORMAT` |
-| **Exit codes**   | `0` success, `2` script not found, or script exit code                   |
+| **Exit codes**   | `0` success, or the first failing stage's exit code                      |
 
 Tool output defaults to **JSON**. In JSON mode, output is captured and only shown on failure. Use `--human` for full verbose output. See [test](#test) for details on output format control.
 
@@ -317,7 +315,7 @@ Run the project CLI via uvx with automatic local dependency discovery. All argum
 
 |                  |                                                        |
 |------------------|--------------------------------------------------------|
-| **Arguments**    | `[ARGS]...` — forwarded to the project CLI             |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the project CLI             |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=run`            |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code |
 
@@ -336,7 +334,7 @@ Create a git commit with a timestamped message. The message format is `YYYY-MM-D
 |                  |                                                            |
 |------------------|------------------------------------------------------------|
 | **Aliases**      | `c`                                                        |
-| **Arguments**    | `[MESSAGE]...` — commit message parts (joined with spaces) |
+| **Arguments**    | `[MESSAGE]...`  -  commit message parts (joined with spaces) |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=commit`             |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code     |
 
@@ -354,7 +352,7 @@ Run the test suite, commit any staged changes, and push to the remote.
 |                  |                                                                                                                                |
 |------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | **Aliases**      | `psh`, `p`                                                                                                                     |
-| **Arguments**    | `[MESSAGE]...` — commit message (default: `chores`)                                                                            |
+| **Arguments**    | `[MESSAGE]...`  -  commit message (default: `chores`)                                                                            |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=push`, `BMK_GIT_REMOTE` (default: `origin`), `BMK_GIT_BRANCH` (default: current branch) |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code                                                                         |
 
@@ -399,7 +397,7 @@ Create a versioned release with git tag and GitHub release.
 |                  |                                                        |
 |------------------|--------------------------------------------------------|
 | **Aliases**      | `rel`, `r`                                             |
-| **Arguments**    | `[ARGS]...` — forwarded to scripts                     |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages                     |
 | **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=rel`            |
 | **Exit codes**   | `0` success, `2` script not found, or script exit code |
 
@@ -465,7 +463,7 @@ The token is discovered by checking `CODECOV_TOKEN` in the environment first, th
 searching for a `.env` file starting from the project directory and walking up to the
 filesystem root.
 
-If no token is found, the upload is **skipped gracefully** — a bright red warning is
+If no token is found, the upload is **skipped gracefully**  -  a bright red warning is
 printed to stderr and the command exits with code 0 (success). This means `make test`
 will not fail in environments where no Codecov token is available.
 
@@ -485,25 +483,21 @@ bmk cov
 
 ### custom
 
-Run user-defined staged scripts from the override directory. Unlike built-in commands, `custom` has no bundled scripts — it only looks in the override directory. If no matching scripts are found, a clear error is printed.
+Run a user-defined pipeline by name. Custom pipelines are defined declaratively under `[tool.bmk.pipelines.<name>]` in `pyproject.toml` or in `bmk_makescripts/stages.toml`. If no pipeline is defined for the name, a clear error is printed.
 
 |                  |                                                                                                                         |
 |------------------|-------------------------------------------------------------------------------------------------------------------------|
-| **Arguments**    | `COMMAND_NAME` (required) — the command prefix to match, `[ARGS]...` — forwarded to scripts                             |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=<COMMAND_NAME>`, `BMK_OVERRIDE_DIR` (forced), `BMK_PACKAGE_NAME` (if configured) |
-| **Exit codes**   | `0` success, `2` override dir missing or no matching scripts, or script exit code                                       |
+| **Arguments**    | `COMMAND_NAME` (required)  -  the command prefix to match, `[ARGS]...`  -  forwarded to the pipeline's stages                             |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=<COMMAND_NAME>`, `BMK_PACKAGE_NAME` (if configured) |
+| **Exit codes**   | `0` success, `2` no pipeline defined for the name, or the first failing stage's exit code                               |
 
-Override directory resolution:
-1. `bmk.override_dir` from config (if set)
-2. `<cwd>/makescripts` (default)
-
-Scripts must follow the naming convention `<name>_<NNN>_<description>.sh` (e.g., `deploy_01_prepare.sh`, `deploy_02_upload.sh`). They are executed in sorted order via the stagerunner.
+Define the pipeline under `[tool.bmk.pipelines.<name>]` in `pyproject.toml` or `bmk_makescripts/stages.toml`. Each stage has a `name`, an `order`, and an `argv` list; stages run in order (equal orders run in parallel).
 
 ```bash
-bmk custom deploy                  # runs deploy_*.sh from makescripts/
-bmk custom deploy --verbose        # forward --verbose to all scripts
-bmk custom migrate --dry-run       # any name works if scripts exist
-bmk custom nonexistent             # → error: not found
+bmk custom deploy                  # runs the 'deploy' pipeline
+bmk custom deploy --verbose        # forward --verbose to the stages
+bmk custom migrate --dry-run       # any overlay-defined pipeline works
+bmk custom nonexistent             # -> error: not found
 ```
 
 ---
@@ -538,7 +532,7 @@ Deploy default configuration templates to system or user directories.
 
 | Option                               | Type                                                 | Default | Description                                             |
 |--------------------------------------|------------------------------------------------------|---------|---------------------------------------------------------|
-| `--target`                           | choice: `app`, `host`, `user` (repeatable, required) | —       | Target layer(s) to deploy to                            |
+| `--target`                           | choice: `app`, `host`, `user` (repeatable, required) |  -        | Target layer(s) to deploy to                            |
 | `--force`                            | flag                                                 | `False` | Overwrite existing configuration files                  |
 | `--profile NAME`                     | string                                               | `None`  | Override profile from the root command                  |
 | `--permissions` / `--no-permissions` | flag                                                 | enabled | Set Unix permissions (app/host: 755/644, user: 700/600) |
@@ -571,7 +565,7 @@ Generate example configuration files in a target directory.
 
 | Option          | Type                      | Default | Description                      |
 |-----------------|---------------------------|---------|----------------------------------|
-| `--destination` | directory path (required) | —       | Directory to write example files |
+| `--destination` | directory path (required) |  -        | Directory to write example files |
 | `--force`       | flag                      | `False` | Overwrite existing files         |
 
 ```bash
@@ -604,11 +598,11 @@ Send an email using configured SMTP settings. Supports plain text, HTML, multipl
 | Option                                                                 | Type                | Default     | Description                                         |
 |------------------------------------------------------------------------|---------------------|-------------|-----------------------------------------------------|
 | `--to`                                                                 | string (repeatable) | from config | Recipient email address                             |
-| `--subject`                                                            | string (required)   | —           | Email subject line                                  |
+| `--subject`                                                            | string (required)   |  -            | Email subject line                                  |
 | `--body`                                                               | string              | `""`        | Plain-text email body                               |
 | `--body-html`                                                          | string              | `""`        | HTML email body (sent as multipart with plain text) |
 | `--from`                                                               | string              | from config | Override sender address                             |
-| `--attachment`                                                         | path (repeatable)   | —           | File to attach                                      |
+| `--attachment`                                                         | path (repeatable)   |  -            | File to attach                                      |
 | `--smtp-host`                                                          | string (repeatable) | from config | Override SMTP host(s), format `host:port`           |
 | `--smtp-username`                                                      | string              | from config | Override SMTP username                              |
 | `--smtp-password`                                                      | string              | from config | Override SMTP password                              |
@@ -643,8 +637,8 @@ Send a simple plain-text notification email.
 | Option                                                                 | Type                | Default     | Description                          |
 |------------------------------------------------------------------------|---------------------|-------------|--------------------------------------|
 | `--to`                                                                 | string (repeatable) | from config | Recipient email address              |
-| `--subject`                                                            | string (required)   | —           | Notification subject line            |
-| `--message`                                                            | string (required)   | —           | Notification message (plain text)    |
+| `--subject`                                                            | string (required)   |  -            | Notification subject line            |
+| `--message`                                                            | string (required)   |  -            | Notification message (plain text)    |
 | `--from`                                                               | string              | from config | Override sender address              |
 | `--smtp-host`                                                          | string (repeatable) | from config | Override SMTP host(s)                |
 | `--smtp-username`                                                      | string              | from config | Override SMTP username               |
@@ -721,10 +715,10 @@ reports its return code as a negative value (e.g., `-2` for SIGINT). bmk normali
 these to the POSIX `128+N` convention before propagating, so `bmk test` exits 130
 (not -2) when the test script is interrupted.
 
-**Stagerunner exit codes:** The bash stagerunner propagates the actual exit code from
-the first failed script. If a script exits 42, `bmk test` exits 42 (not a generic 1).
-Signal traps in the stagerunner ensure Ctrl+C during parallel execution kills background
-jobs and exits with the correct signal code (130 for SIGINT, 143 for SIGTERM).
+**Stage exit codes:** The stage runner propagates the actual exit code from the first
+failing stage. If a stage exits 42, `bmk test` exits 42 (not a generic 1). SIGINT/SIGTERM
+handlers terminate running child processes during parallel execution and exit with the
+correct signal code (130 for SIGINT, 143 for SIGTERM).
 
 ---
 
