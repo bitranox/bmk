@@ -36,8 +36,12 @@ Complete (v1.1.2+)
   - `commands/_shared.py` — Script resolution, execution with BMK env vars, VIRTUAL_ENV isolation
   - `commands/testsuite_cmd.py` — test, t commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
   - `commands/test_integration_cmd.py` — testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
-  - `commands/email.py` — send-email, send-notification commands
+  - `commands/email/` — send-email, send-notification commands (subpackage)
   - `commands/logging.py` — logdemo command
+  - `commands/install_cmd.py` — install command (deploy the bundled Makefile) + prerequisite check
+  - `commands/_prerequisites.py` — per-OS external-tool detection and install hints
+  - `commands/ensure_cmd.py` / `commands/_ensure.py` — ensure command (install missing external tools per-OS)
+  - `commands/ship_cmd.py` — ship command (CI-gated push + release; gh run lookup parsed with orjson)
 
 ### Adapters Layer (In-Memory / Testing)
 - `src/bmk/adapters/memory/__init__.py` — Public facade + Protocol conformance assertions

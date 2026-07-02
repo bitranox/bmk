@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.1] 2026-07-02 17:27:40
+
+### Changed
+- The `ship` command now parses `gh` workflow-run JSON with `orjson` instead of the stdlib
+  `json`, matching the modern-library convention used across the rest of the codebase. Added
+  tests covering the run-lookup helper (`_find_run_id`), which previously had none.
+
 ## [3.1.0] 2026-07-02 17:15:59
 
 ### Added

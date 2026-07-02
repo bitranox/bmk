@@ -20,13 +20,13 @@ Contents:
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 import subprocess
 import time
 
 import lib_log_rich.runtime
+import orjson
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
@@ -58,8 +58,8 @@ def _find_run_id(workflow: str, *, event: str | None, head_sha: str) -> str | No
     if result.returncode != 0:
         return None
     try:
-        runs = json.loads(result.stdout)
-    except json.JSONDecodeError:
+        runs = orjson.loads(result.stdout)
+    except orjson.JSONDecodeError:
         return None
     for run in runs:
         if run.get("workflowName") != workflow:
