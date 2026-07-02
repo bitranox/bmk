@@ -66,15 +66,15 @@ def test_coverage_config_returns_defaults_when_no_pyproject(tmp_path: Path) -> N
 
 @pytest.mark.os_agnostic
 def test_coverage_config_reads_scripts_section(tmp_path: Path) -> None:
-    """Reads pytest_verbosity, coverage_report_file, src_path from [tool.scripts]."""
+    """Reads the runner settings from [tool.scripts.test] with hyphenated keys."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         '[project]\nname = "test"\n\n'
-        "[tool.scripts]\n"
-        'pytest_verbosity = "-vv"\n'
-        'coverage_report_file = "cov.xml"\n'
-        'src_path = "lib"\n'
-        'exclude_markers = "slow"\n'
+        "[tool.scripts.test]\n"
+        'pytest-verbosity = "-vv"\n'
+        'coverage-report-file = "cov.xml"\n'
+        'src-path = "lib"\n'
+        'exclude-markers = "slow"\n'
     )
 
     config = CoverageConfig.from_pyproject(tmp_path)
@@ -104,16 +104,16 @@ def test_coverage_config_reads_coverage_sections(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
-def test_coverage_config_uses_tomllib_fallback(tmp_path: Path) -> None:
-    """Exercises the tomli fallback import path for Python <3.11 compatibility."""
+def test_coverage_config_defaults_when_sections_absent(tmp_path: Path) -> None:
+    """A pyproject that exists but omits the config sections yields defaults."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    # Patch tomllib to raise ImportError, forcing the tomli fallback
-    with patch.dict("sys.modules", {"tomllib": None}):
-        config = CoverageConfig.from_pyproject(tmp_path)
+    config = CoverageConfig.from_pyproject(tmp_path)
 
     assert config.pytest_verbosity == "-v"
+    assert config.coverage_source == ["src"]
+    assert config.exclude_markers == "integration"
 
 
 # ---------------------------------------------------------------------------
@@ -284,9 +284,9 @@ def test_run_coverage_tests_returns_zero_on_success(tmp_path: Path, monkeypatch:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         '[project]\nname = "test"\n\n'
-        "[tool.scripts]\n"
-        'pytest_verbosity = "-v"\n'
-        'src_path = "src"\n\n'
+        "[tool.scripts.test]\n"
+        'pytest-verbosity = "-v"\n'
+        'src-path = "src"\n\n'
         "[tool.coverage.run]\n"
         'source = ["src/pkg"]\n\n'
         "[tool.coverage.report]\n"

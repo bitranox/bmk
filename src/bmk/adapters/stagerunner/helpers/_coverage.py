@@ -89,17 +89,19 @@ class CoverageConfig:
         data: dict[str, Any] = rtoml.loads(pyproject_path.read_text(encoding="utf-8"))
 
         tool = data.get("tool", {})
-        scripts = tool.get("scripts", {})
+        # The runner settings live under [tool.scripts.test] with hyphenated keys
+        # (the convention the rest of the pipeline uses); read them there.
+        scripts_test = tool.get("scripts", {}).get("test", {})
         coverage_run = tool.get("coverage", {}).get("run", {})
         coverage_report = tool.get("coverage", {}).get("report", {})
 
         return cls(
-            pytest_verbosity=scripts.get("pytest_verbosity", "-v"),
-            coverage_report_file=scripts.get("coverage_report_file", "coverage.xml"),
-            src_path=scripts.get("src_path", "src"),
+            pytest_verbosity=scripts_test.get("pytest-verbosity", "-v"),
+            coverage_report_file=scripts_test.get("coverage-report-file", "coverage.xml"),
+            src_path=scripts_test.get("src-path", "src"),
             fail_under=coverage_report.get("fail_under", 80),
             coverage_source=coverage_run.get("source", ["src"]),
-            exclude_markers=scripts.get("exclude_markers", "integration"),
+            exclude_markers=scripts_test.get("exclude-markers", "integration"),
         )
 
 

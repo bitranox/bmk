@@ -50,11 +50,11 @@ class TestCoverageConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             """
-[tool.scripts]
-pytest_verbosity = "-vv"
-coverage_report_file = "custom.xml"
-src_path = "lib"
-exclude_markers = "slow"
+[tool.scripts.test]
+pytest-verbosity = "-vv"
+coverage-report-file = "custom.xml"
+src-path = "lib"
+exclude-markers = "slow"
 
 [tool.coverage.run]
 source = ["lib/mypackage"]
