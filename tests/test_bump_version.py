@@ -291,9 +291,7 @@ class TestUpdateChangelog:
 
 
 @pytest.mark.os_agnostic
-def test_update_changelog_inserts_before_first_version_when_no_unreleased(
-    bump_module: Any, tmp_path: Path
-) -> None:
+def test_update_changelog_inserts_before_first_version_when_no_unreleased(bump_module: Any, tmp_path: Path) -> None:
     changelog = tmp_path / "CHANGELOG.md"
     changelog.write_text("# Changelog\n\n## [1.0.0] - 2020-01-01\n\n- initial\n", encoding="utf-8")
     bump_module.update_changelog(tmp_path, "1.1.0")
@@ -327,9 +325,7 @@ def test_main_returns_one_when_pyproject_missing(
 
 
 @pytest.mark.os_agnostic
-def test_main_returns_one_on_invalid_version(
-    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_returns_one_on_invalid_version(bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "not.a.version"\n', encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
     assert bump_module.main() == 1

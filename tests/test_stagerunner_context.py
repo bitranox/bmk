@@ -36,10 +36,14 @@ def test_build_context_no_pythonpath_when_no_src(tmp_path: Path) -> None:
     assert str(tmp_path / "src") not in ctx.env.get("PYTHONPATH", "")
 
 
-def test_build_context_omits_virtualenv_when_no_venv(tmp_path: Path) -> None:
+def test_build_context_pins_pip_audit_to_bmk_interpreter_when_no_venv(tmp_path: Path) -> None:
+    # No project .venv: pin pip-audit at bmk's own interpreter. Its env (a
+    # `uv tool install --with .` tool venv) holds bmk plus the project's full
+    # dependency tree, so pip-audit audits *that*, not whatever pip-audit sits
+    # first on PATH (e.g. an editor's venv full of unrelated packages).
     ctx = build_context(tmp_path, (), command_prefix="clean", output_format=ToolOutputFormat.JSON, show_warnings=False)
     assert "VIRTUAL_ENV" not in ctx.env
-    assert "PIPAPI_PYTHON_LOCATION" not in ctx.env
+    assert ctx.env["PIPAPI_PYTHON_LOCATION"] == sys.executable
     assert ctx.env["BMK_SHOW_WARNINGS"] == "0"
 
 

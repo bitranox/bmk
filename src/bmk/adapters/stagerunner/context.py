@@ -23,7 +23,17 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
     ``VIRTUAL_ENV``. pip-audit additionally resolves the pip it audits via
     ``sys.executable`` / PATH, not ``VIRTUAL_ENV``, so when a different venv is
     active in the caller's shell it audits the wrong environment; pin it to the
-    project venv's interpreter via ``PIPAPI_PYTHON_LOCATION``.
+    target interpreter via ``PIPAPI_PYTHON_LOCATION``.
+
+    Two layouts:
+
+    * The project has a ``.venv`` (its dependencies live there): pin at
+      ``.venv``'s interpreter.
+    * No ``.venv`` (the ``uv tool install --with .`` layout, including bmk
+      auditing itself): pin at bmk's own interpreter (``sys.executable``). Its
+      tool venv holds bmk plus the project's full dependency tree, so pip-audit
+      audits *that*, not whatever ``pip-audit`` sits first on PATH (e.g. an
+      editor's venv full of unrelated packages).
     """
     project_venv = cwd / ".venv"
     if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
@@ -35,7 +45,7 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
             env.pop("PIPAPI_PYTHON_LOCATION", None)
     else:
         env.pop("VIRTUAL_ENV", None)
-        env.pop("PIPAPI_PYTHON_LOCATION", None)
+        env["PIPAPI_PYTHON_LOCATION"] = sys.executable
 
 
 def _prepend_src_to_pythonpath(env: dict[str, str], cwd: Path) -> None:

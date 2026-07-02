@@ -6,6 +6,35 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.0.0] 2026-07-02 15:17:39
+
+### Changed
+- **Stage runner rewritten in Python (cross-OS).** The make pipelines (clean, deps, deps-update,
+  test, cov, testintegration, bump, commit, build, push, release, run) are now executed by a single
+  in-process Python stage runner instead of paired `.sh`/`.ps1` scripts. Batches run in stage order,
+  stages within a batch run in parallel via a thread pool, and the pipeline is fail-fast. The same
+  code path runs on Linux, macOS, and Windows, so behaviour no longer diverges between the bash and
+  PowerShell variants.
+- **Downstream pipeline overrides are now TOML overlays.** A project customises a pipeline through
+  `[tool.bmk.pipelines.<prefix>]` in its `pyproject.toml` (or a `bmk_makescripts/stages.toml`),
+  validated by Pydantic. This replaces the old per-script shell override mechanism.
+- Output-format handling is now a typed `ToolOutputFormat` enum end to end; the JSON-by-default
+  capture-on-failure behaviour is unchanged.
+
+### Removed
+- **All `.sh`/`.ps1` stage scripts and the shell-based override mechanism.** Projects that dropped
+  custom `*.sh` stage overrides into `bmk_makescripts/` must migrate them to the TOML overlay form
+  above. This is the breaking change behind the major version bump.
+
+### Fixed
+- The project's `src/` is placed on `PYTHONPATH` for pipeline children, so `lint-imports` and
+  integration pytest can import the package when bmk runs from its own tool venv.
+- pip-audit is pinned to the correct interpreter when the project has no `.venv` (the
+  `uv tool install --with .` layout, including bmk auditing itself): `PIPAPI_PYTHON_LOCATION`
+  now points at bmk's own interpreter, whose tool venv holds bmk plus the project's dependency
+  tree. Previously the bare `pip-audit` call could resolve to an unrelated `pip-audit` earlier on
+  PATH (e.g. an editor's venv) and report vulnerabilities for the wrong environment.
+
 ## [2.9.6] 2026-06-30 22:15:59
 
 ### Fixed
@@ -20,7 +49,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ## [2.9.5] 2026-06-14
 
 ### Added
-- `bmk ship` command (alias `sh`, `make ship`/`make sh`): the full CI-gated release — runs `push`, waits for the push-triggered CI workflow to pass, runs `release`, then waits for the release workflow to pass; aborts if any CI run fails. Matches the run to the just-pushed HEAD commit and gates via the GitHub CLI (`gh`); falls back to push-only with a clear message if `gh` is unavailable. `--ci-workflow` / `--release-workflow` override the workflow names.
+- `bmk ship` command (alias `sh`, `make ship`/`make sh`): the full CI-gated release - runs `push`, waits for the push-triggered CI workflow to pass, runs `release`, then waits for the release workflow to pass; aborts if any CI run fails. Matches the run to the just-pushed HEAD commit and gates via the GitHub CLI (`gh`); falls back to push-only with a clear message if `gh` is unavailable. `--ci-workflow` / `--release-workflow` override the workflow names.
 
 ### Changed
 - Added a `typed_click.py` facade wrapping rich-click's `option` / `version_option` / `argument` decorators behind explicit, fully-known signatures, keeping the CLI strict-clean under pyright 1.1.410 (`reportUnknownMemberType`) without disabling the rule (ignore isolated to the facade).
@@ -29,17 +58,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ## [2.9.4] 2026-06-01 16:54:25
 
 ### Removed
-- **pip-audit suppression `GHSA-4gg8-gxpx-9rph` dropped**: the `uv` entry-point path-traversal advisory is now resolved at the source — the build environment's `uv` is upgraded to 0.11.15 (the fixed release), so the suppression is no longer needed and the vulnerability is fixed rather than ignored
+- **pip-audit suppression `GHSA-4gg8-gxpx-9rph` dropped**: the `uv` entry-point path-traversal advisory is now resolved at the source - the build environment's `uv` is upgraded to 0.11.15 (the fixed release), so the suppression is no longer needed and the vulnerability is fixed rather than ignored
 
 ## [2.9.3] 2026-06-01 16:33:48
 
 ### Changed
 - **Replaced `httpx` with `httpx2`**: the dependency-checker makescript (`makescripts/_dependencies.py`) now imports `httpx2`, the Pydantic-maintained successor to httpx (drop-in API, `import httpx2`). `pyproject.toml` now requires `httpx2>=2.3.0` instead of `httpx>=0.28.1`
 - **pip-audit CVE exclusion list refreshed**:
-  - added `GHSA-4gg8-gxpx-9rph` — uv 0.11.7 malicious-wheel entry-point path traversal (fix 0.11.15); environment-only tool runner, not a project dependency
-  - restored `CVE-2026-3219` and `CVE-2026-6357` — pip, environment-only build tool (env-volatile across shared installs)
-  - removed `CVE-2026-44431` and `CVE-2026-44432` — urllib3 entries no longer flagged now that the pinned urllib3 (`>=2.7.0`) is the fixed version
-  - retained `PYSEC-2022-42969` (py) and `CVE-2026-44405` (paramiko) — still flagged upstream with no fix released
+  - added `GHSA-4gg8-gxpx-9rph` - uv 0.11.7 malicious-wheel entry-point path traversal (fix 0.11.15); environment-only tool runner, not a project dependency
+  - restored `CVE-2026-3219` and `CVE-2026-6357` - pip, environment-only build tool (env-volatile across shared installs)
+  - removed `CVE-2026-44431` and `CVE-2026-44432` - urllib3 entries no longer flagged now that the pinned urllib3 (`>=2.7.0`) is the fixed version
+  - retained `PYSEC-2022-42969` (py) and `CVE-2026-44405` (paramiko) - still flagged upstream with no fix released
 
 ## [2.9.2] 2026-05-16 23:40:54
 
@@ -47,12 +76,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **pip-audit CVE exclusion list refreshed**: removed 17 stale entries that pip-audit no longer flags (pip, setuptools, wheel, cryptography, pillow, pygments, authlib, lxml, python-multipart, uv, rpyc); list is now down to four current entries
 
 ### Fixed
-- **`check_pwsh` hardened against broken pwsh installs**: the PSScriptAnalyzer adapter now verifies `pwsh` can actually launch (running `pwsh -NoProfile -NonInteractive -Command "exit 0"`) instead of trusting `shutil.which`; this avoids spurious failures on Linux hosts where snap-installed `pwsh` aborts with `snap-confine has elevated permissions` errors — affected hosts now skip PowerShell linting cleanly
+- **`check_pwsh` hardened against broken pwsh installs**: the PSScriptAnalyzer adapter now verifies `pwsh` can actually launch (running `pwsh -NoProfile -NonInteractive -Command "exit 0"`) instead of trusting `shutil.which`; this avoids spurious failures on Linux hosts where snap-installed `pwsh` aborts with `snap-confine has elevated permissions` errors - affected hosts now skip PowerShell linting cleanly
 - **PowerShell makescripts pytest suite skips correctly when `pwsh` is non-functional**: same launch probe applied to `tests/test_makescripts_ps1.py` so a broken local `pwsh` no longer turns the test suite red
 - **pip-audit CVE exclusions added** for three newly flagged environment-level vulnerabilities:
-  - `CVE-2026-44405` — paramiko 4.0.0 SHA-1 acceptance in `rsakey.py` (no upstream fix yet)
-  - `CVE-2026-44431` — urllib3 cross-origin sensitive-header leak via low-level `ProxyManager` redirects (fix 2.7.0; project already pins urllib3>=2.7.0)
-  - `CVE-2026-44432` — urllib3 Brotli/`drain_conn` over-decompression DoS (fix 2.7.0; project already pins urllib3>=2.7.0)
+  - `CVE-2026-44405` - paramiko 4.0.0 SHA-1 acceptance in `rsakey.py` (no upstream fix yet)
+  - `CVE-2026-44431` - urllib3 cross-origin sensitive-header leak via low-level `ProxyManager` redirects (fix 2.7.0; project already pins urllib3>=2.7.0)
+  - `CVE-2026-44432` - urllib3 Brotli/`drain_conn` over-decompression DoS (fix 2.7.0; project already pins urllib3>=2.7.0)
 
 ## [2.9.1] 2026-04-24
 
@@ -62,23 +91,23 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Fixed
 - **pip-audit CVE exclusions**: added six new transitive/environment-level CVEs to `[tool.pip-audit].ignore-vulns`:
-  - `GHSA-jj8c-mmj3-mmgv` — authlib 1.6.9 OAuth CSRF in cached state
-  - `CVE-2026-39892` — cryptography 46.0.6 buffer overflow on non-contiguous buffers
-  - `CVE-2026-41066` — lxml 6.0.2 XXE local file access in default config
-  - `CVE-2026-40192` — pillow 12.0.0 FITS decompression bomb DoS
-  - `CVE-2026-40347` — python-multipart 0.0.22 DoS on crafted multipart
-  - `GHSA-pjjw-68hj-v9mw` — uv 0.9.11 wheel RECORD path traversal on uninstall
+  - `GHSA-jj8c-mmj3-mmgv` - authlib 1.6.9 OAuth CSRF in cached state
+  - `CVE-2026-39892` - cryptography 46.0.6 buffer overflow on non-contiguous buffers
+  - `CVE-2026-41066` - lxml 6.0.2 XXE local file access in default config
+  - `CVE-2026-40192` - pillow 12.0.0 FITS decompression bomb DoS
+  - `CVE-2026-40347` - python-multipart 0.0.22 DoS on crafted multipart
+  - `GHSA-pjjw-68hj-v9mw` - uv 0.9.11 wheel RECORD path traversal on uninstall
 
 ## [2.9.0] 2026-02-27
 
 ### Changed
-- **Makefile switched from `uvx` to persistent `uv tool install`**: the deployed Makefile template now runs `uv tool install --reinstall bmk --with .` before every target, installing bmk and the current project's dependencies into a persistent venv at `~/.local/share/uv/tools/bmk/`; tools like pyright, pytest and pip-audit resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv` — works on network shares without symlink support
+- **Makefile switched from `uvx` to persistent `uv tool install`**: the deployed Makefile template now runs `uv tool install --reinstall bmk --with .` before every target, installing bmk and the current project's dependencies into a persistent venv at `~/.local/share/uv/tools/bmk/`; tools like pyright, pytest and pip-audit resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv` - works on network shares without symlink support
 - **Makefile uses absolute path** (`$(HOME)/.local/bin/bmk`) to prevent active virtualenvs from shadowing the uv tool binary
 - **Root dev Makefile** uses `--from ./` to install bmk from local source for development
 
 ### Removed
-- **`PYTHONPATH` export hack** from Makefile — no longer needed with persistent tool venv
-- **`uvx bmk@latest`** invocation pattern — replaced by `uv tool install` approach
+- **`PYTHONPATH` export hack** from Makefile - no longer needed with persistent tool venv
+- **`uvx bmk@latest`** invocation pattern - replaced by `uv tool install` approach
 
 ### Fixed
 - **ruff minimum version**: bumped `>=0.15.2` to `>=0.15.4`
@@ -89,7 +118,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Makefile exports project venv site-packages via `PYTHONPATH`**: ensures bmk's isolated `uvx` Python can find project dependencies (e.g., private git repo packages) by exporting the active venv's `site.getsitepackages()[0]`
 
 ### Fixed
-- **pip-audit CVE exclusion**: added `CVE-2026-25990` (pillow 12.0.0) to `[tool.pip-audit].ignore-vulns` — environment-level package, not a project dependency
+- **pip-audit CVE exclusion**: added `CVE-2026-25990` (pillow 12.0.0) to `[tool.pip-audit].ignore-vulns` - environment-level package, not a project dependency
 
 ## [2.8.1] 2026-02-25 14:42:58
 
@@ -103,8 +132,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Dependency floors updated**: `bandit >=1.9.3 → >=1.9.4`, `lib_layered_config >=5.4.1 → >=5.5.0`
 
 ### Removed
-- **`install_git_dependencies()`**: Removed from `_dependencies.py` along with `_find_dotenv_upward()` and `_get_git_source_names()` — no longer needed with git config URL rewriting
-- **`UvSourceEntry` dataclass**: Removed from `_toml_config.py` — was only used by the removed git dependency installer
+- **`install_git_dependencies()`**: Removed from `_dependencies.py` along with `_find_dotenv_upward()` and `_get_git_source_names()` - no longer needed with git config URL rewriting
+- **`UvSourceEntry` dataclass**: Removed from `_toml_config.py` - was only used by the removed git dependency installer
 
 ## [2.7.1] 2026-02-24
 
@@ -124,26 +153,26 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ## [2.6.0] 2026-02-24
 
 ### Added
-- **`make test-human` / `make th`**: dedicated Makefile target for human-readable test output — avoids the `make test --human` issue where Make intercepts `--` flags
+- **`make test-human` / `make th`**: dedicated Makefile target for human-readable test output - avoids the `make test --human` issue where Make intercepts `--` flags
 - **`make testintegration-human` / `make tih`**: same for integration tests
 - **JSON mode success summary**: stagerunner emits `{"result":"pass","stages":N,"scripts":N}` on success so JSON consumers always receive at least one output line
 - **LLM-friendly log messages**: test and push commands now log "this will take some minutes" to prevent LLM agents from assuming the process has hung
 
 ### Fixed
-- **Broken `.venv` detection on NFS**: `execute_script()` now validates `.venv/pyvenv.cfg` exists before setting `VIRTUAL_ENV` — stale NFS mounts or corrupt venvs are ignored instead of causing tool failures
+- **Broken `.venv` detection on NFS**: `execute_script()` now validates `.venv/pyvenv.cfg` exists before setting `VIRTUAL_ENV` - stale NFS mounts or corrupt venvs are ignored instead of causing tool failures
 
 ## [2.5.1] 2026-02-24
 
 ### Fixed
-- **Dependency updater corrupted specs with upper bounds**: `_build_updated_spec` injected display annotations (e.g. `(max <1.3, absolute: 1.3.0)`) into dependency strings and overwrote upper-bound constraints (`<1.3`) with the latest version — specs like `>=1.1.0,<1.3; python_version<'3.10'` were mangled into invalid version strings
+- **Dependency updater corrupted specs with upper bounds**: `_build_updated_spec` injected display annotations (e.g. `(max <1.3, absolute: 1.3.0)`) into dependency strings and overwrote upper-bound constraints (`<1.3`) with the latest version - specs like `>=1.1.0,<1.3; python_version<'3.10'` were mangled into invalid version strings
 - **Upper-bound constraints now preserved during dependency updates**: only lower-bound operators (`>=`, `==`, `~=`, `>`) are updated; `<`, `<=`, and `!=` constraints are left untouched
 
 ## [2.5.0] 2026-02-24
 
 ### Added
-- **JSON mode output suppression**: stagerunner captures all tool output in JSON mode and only displays it when a stage fails — a fully passing run produces zero tool output, designed for LLM-driven workflows to minimize context window consumption
+- **JSON mode output suppression**: stagerunner captures all tool output in JSON mode and only displays it when a stage fails - a fully passing run produces zero tool output, designed for LLM-driven workflows to minimize context window consumption
 - **Makefile auto-update in JSON mode**: `check_makefile_update()` auto-accepts Makefile version updates without prompting when `BMK_OUTPUT_FORMAT` is not `text`
-- **JSON mode auto-accept for dependency updates**: `_dependencies.py` runs silently in JSON mode — no report, no per-dependency output, no summary
+- **JSON mode auto-accept for dependency updates**: `_dependencies.py` runs silently in JSON mode - no report, no per-dependency output, no summary
 - **Pytest concise mode**: in JSON mode, pytest runs with `--tb=short -q --no-header` and coverage report display is suppressed
 
 ## [2.4.0] 2026-02-24 11:20:14
@@ -175,7 +204,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ## [2.3.2] 2026-02-13 18:14:14
 
 ### Fixed
-- **Makefile alias targets firing as prerequisites during argument forwarding**: `make push coverage test` no longer executes the real `codecov` target — alias targets (`coverage cov:`, `t:`, `bld:`, `cln cl:`, `c:`, `psh p:`, `rel r:`, `deps d:`, `testi ti:`) now use standalone recipes instead of prerequisite chains, allowing the trailing-argument no-op override block to properly suppress them; GNU Make accumulates prerequisites across rules (never overridden), but recipes follow "last rule wins"
+- **Makefile alias targets firing as prerequisites during argument forwarding**: `make push coverage test` no longer executes the real `codecov` target - alias targets (`coverage cov:`, `t:`, `bld:`, `cln cl:`, `c:`, `psh p:`, `rel r:`, `deps d:`, `testi ti:`) now use standalone recipes instead of prerequisite chains, allowing the trailing-argument no-op override block to properly suppress them; GNU Make accumulates prerequisites across rules (never overridden), but recipes follow "last rule wins"
 
 ## [2.3.1] 2026-02-13 17:59:34
 
@@ -183,7 +212,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Comprehensive makescript test coverage**: added 146 new tests across four makescript modules, raising overall project coverage from 83% to 95%
   - `test_makescripts_dependencies.py` (79 tests): version parsing, PyPI queries, dependency extraction (optional deps, build system, poetry, pdm, uv, dependency-groups), reporting, pyproject.toml updating, pip sync
   - `test_makescripts_coverage.py` (93 tests): CoverageConfig loading, file pruning, report artifacts, env building, test execution, dotenv search, codecov token discovery, git resolution, upload workflow
-  - `test_makescripts_run.py` (+9 tests): `run_cli()` invocation — command construction, exit code propagation, empty project name error, default `--help`, local dependency `--with` flags
+  - `test_makescripts_run.py` (+9 tests): `run_cli()` invocation - command construction, exit code propagation, empty project name error, default `--help`, local dependency `--with` flags
   - `test_makescripts_psscriptanalyzer.py` and `test_makescripts_shellcheck.py`: full behavioural coverage for config reading, tool detection, file discovery, and orchestration
 
 ### Changed
@@ -217,7 +246,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Clean warning built dynamically**: `_clean.py` replaces static `_MISSING_SECTION_WARNING` string with `_build_missing_section_warning()` generated from `_FALLBACK_PATTERNS`
 
 ### Removed
-- **`hello` command and `behaviors.py` domain module**: removed `cli_hello`, `build_greeting()`, and `CANONICAL_GREETING` — template scaffolding no longer needed
+- **`hello` command and `behaviors.py` domain module**: removed `cli_hello`, `build_greeting()`, and `CANONICAL_GREETING` - template scaffolding no longer needed
 
 ## [2.2.2] 2026-02-13 11:02:42
 
@@ -336,7 +365,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - Stage script `commit_005_sync_initconf.{sh,ps1}` runs sync as a safety net before every commit
 
 ### Fixed
-- **Makefile recipe override warning**: `make push test parameters` no longer warns about overriding the `test` target recipe — extra arguments that collide with existing target names are now skipped in the no-op eval
+- **Makefile recipe override warning**: `make push test parameters` no longer warns about overriding the `test` target recipe - extra arguments that collide with existing target names are now skipped in the no-op eval
 
 ## [2.0.2] 2026-02-10 22:35:34
 
@@ -383,17 +412,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - Profile name requirements documentation in CONFIG.md and README.md
 
 ### Removed
-- Custom `_PROFILE_PATTERN` regex — replaced by lib_layered_config's built-in validation
+- Custom `_PROFILE_PATTERN` regex - replaced by lib_layered_config's built-in validation
 
 ## [1.2.0] - 2026-01-30
 
 ### Added
 - **Attachment security settings** for email configuration (`[email.attachments]` section in `50-mail.toml`)
-  - `allowed_extensions` / `blocked_extensions` — whitelist/blacklist file extensions
-  - `allowed_directories` / `blocked_directories` — whitelist/blacklist attachment source directories
-  - `max_size_bytes` — maximum attachment file size (default 25 MiB, 0 to disable)
-  - `allow_symlinks` — whether symbolic links are permitted (default false)
-  - `raise_on_security_violation` — raise or skip on violations (default true)
+  - `allowed_extensions` / `blocked_extensions` - whitelist/blacklist file extensions
+  - `allowed_directories` / `blocked_directories` - whitelist/blacklist attachment source directories
+  - `max_size_bytes` - maximum attachment file size (default 25 MiB, 0 to disable)
+  - `allow_symlinks` - whether symbolic links are permitted (default false)
+  - `raise_on_security_violation` - raise or skip on violations (default true)
 - New `EmailConfig` fields for attachment security with Pydantic validators
 - `load_email_config_from_dict()` now flattens nested `[email.attachments]` section
 
@@ -406,17 +435,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - Coverage SQLite "database is locked" errors on Python 3.14 free-threaded builds and network mounts (SMB/NFS)
 - Removed bogus `COVERAGE_NO_SQL=1` environment variable from `scripts/test.py` (not a real coverage.py setting)
 - CI workflow now sets `COVERAGE_FILE` to `runner.temp` so coverage always writes to local disk
-- **Import-linter was a silent no-op** in `make test` / `make push` — `python -m importlinter.cli lint` silently exits 0 without checking; replaced with `lint-imports` (the working console entry point)
+- **Import-linter was a silent no-op** in `make test` / `make push` - `python -m importlinter.cli lint` silently exits 0 without checking; replaced with `lint-imports` (the working console entry point)
 - CI/local parameter mismatches: ruff now targets `.` (not hardcoded `src tests notebooks`), pytest uses `python -m pytest` with `--cov=src/$PACKAGE_MODULE`, `--cov-fail-under=90`, and `-vv` matching local runs
 - `scripts/test.py` bandit source path now reads `src-path` from `[tool.scripts.test]` instead of hardcoding `Path("src")`
 - `scripts/test.py` module-level `_default_env` now rebuilt with configured `src_path` before running checks
 - `run_slow_tests()` now reads pytest verbosity from `[tool.scripts.test].pytest-verbosity` instead of hardcoding `"-vv"`
 
 ### Changed
-- **pyproject.toml as single source of truth**: CI workflow extracts all tool configuration (src-path, pytest-verbosity, coverage-report-file, fail_under, bandit skips) from `pyproject.toml` via metadata step — workflow is portable across projects without editing
+- **pyproject.toml as single source of truth**: CI workflow extracts all tool configuration (src-path, pytest-verbosity, coverage-report-file, fail_under, bandit skips) from `pyproject.toml` via metadata step - workflow is portable across projects without editing
 - `scripts/test.py` removed module-level `PACKAGE_SRC` constant; bandit source path computed from `config.src_path` inside the functions that need it
 - `make push` now accepts an unquoted message as trailing words (e.g. `make push fix typo in readme`); commit message format is `<version> - <message>`, defaulting to `<version> - chores` when no message is given
-- Removed interactive commit-message prompt from `push.py` — message is either provided via CLI args / `COMMIT_MESSAGE` env var, or defaults to `"chores"`
+- Removed interactive commit-message prompt from `push.py` - message is either provided via CLI args / `COMMIT_MESSAGE` env var, or defaults to `"chores"`
 
 ### Added
 - `pytest_configure` hook in `tests/conftest.py` that redirects coverage data to `tempfile.gettempdir()` and purges stale SQLite journal files before each run
@@ -426,8 +455,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - CLAUDE.md: replaced stale package name `bitranox_template_cli_app_config_log_mail` with `bmk` throughout
 - Brittle SMTP mock assertions in `test_cli.py` now use structured `call_args` attributes instead of `str()` coercion
-- Stale docstring in `__init__conf__.py` claiming "adapters/platform layer" — corrected to "Package-level metadata module"
-- Weak OR assertion in `test_cli.py` for SMTP host display — replaced with two independent assertions
+- Stale docstring in `__init__conf__.py` claiming "adapters/platform layer" - corrected to "Package-level metadata module"
+- Weak OR assertion in `test_cli.py` for SMTP host display - replaced with two independent assertions
 - Removed stale `# type: ignore[reportUnknownVariableType]` from `sender.py` (`btx_lib_mail.ConfMail` now has proper type annotations)
 - Late function-body imports in `adapters/cli/commands/config.py` moved to module-level for consistency
 
@@ -480,7 +509,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - Precompile all regex patterns in `scripts/` as module-level constants for consistent compilation
 - **LIBRARIES**: Replace custom redaction/validation with `lib_layered_config` redaction API and `btx_lib_mail` validators; bump both libraries
 - **LIBRARIES**: Replace stdlib `json` with `orjson`; replace `urllib` with `httpx` in scripts
-- **ARCHITECTURE**: Purified domain layer — `emit_greeting()` renamed to `build_greeting()` (returns `str`, no I/O); decoupled `display.py` from Click
+- **ARCHITECTURE**: Purified domain layer - `emit_greeting()` renamed to `build_greeting()` (returns `str`, no I/O); decoupled `display.py` from Click
 - **DATA ARCHITECTURE**: Consolidated `EmailConfig` into single Pydantic `BaseModel` (eliminated dataclass conversion chain)
 
 ## [1.0.0] - 2026-01-15
