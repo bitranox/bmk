@@ -2,15 +2,9 @@
 
 Provides `bump`, `bmp`, and `b` command groups with `major`/`ma`, `minor`/`m`,
 and `patch`/`p` subcommands. Each executes external shell scripts via the
-stagerunner with local override support.
+the Python stage runner.
 
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/bump_{type}_*.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/bump_{type}_*.sh`` (or ``.ps1``)
 
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "bump_{major|minor|patch}" for script discovery
 
 Contents:
     * :func:`cli_bump` - Version bump command group.
@@ -33,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 
 def _run_bump(bump_type: str) -> None:
-    """Execute version bump via stagerunner.
+    """Execute version bump via the stage runner.
 
     Args:
         bump_type: Type of version bump: "major", "minor", or "patch".
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()

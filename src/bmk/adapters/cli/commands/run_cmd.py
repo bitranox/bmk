@@ -4,13 +4,7 @@ Provides ``run`` command that executes the project CLI through uvx with
 automatic local dependency discovery. All arguments after ``run`` are
 forwarded to the project CLI.
 
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/_btx_stagerunner.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/_btx_stagerunner.sh`` (or ``.ps1``)
 
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "run"
 
 Contents:
     * :func:`cli_run` - Run the project CLI via uvx.
@@ -32,14 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 def _run_run(args: tuple[str, ...]) -> None:
-    """Execute run via stagerunner.
+    """Execute run via the stage runner.
 
     Args:
         args: Arguments to forward to the project CLI.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()

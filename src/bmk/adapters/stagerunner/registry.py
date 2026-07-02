@@ -19,7 +19,7 @@ from bmk.makescripts import _clean, _dependencies
 from . import git_ops, tools
 from .actions import HelperAction, PipelineAction, ToolAction
 from .model import Stage, StageContext
-from .overrides import discover_shell_overrides, load_overlay, resolve_pipeline
+from .overrides import load_overlay, resolve_stages
 
 
 def clean_action(ctx: StageContext) -> int:
@@ -123,16 +123,12 @@ PORTED_PREFIXES: frozenset[str] = frozenset(PIPELINES)
 
 
 def resolve_python_pipeline(cwd: Path, prefix: str) -> list[Stage] | None:
-    """Resolve the stages the Python runner should run for ``prefix``, or ``None``.
+    """Resolve the stages to run for ``prefix``, or ``None`` if it is unknown.
 
-    A prefix is claimed by the Python runner when it is a built-in pipeline, has a
-    TOML overlay, or has a legacy shell override (the last two also cover custom
-    prefixes). Returns the resolved stages (possibly empty), or ``None`` when the
-    prefix is unknown so the caller falls back to the shell stagerunner.
+    A prefix is known when it is a built-in pipeline or has a TOML overlay (the
+    latter also covers custom prefixes). Returns the resolved stages (built-in
+    plus any overlay), or ``None`` when nothing defines the prefix.
     """
-    claimed = (
-        prefix in PIPELINES or load_overlay(cwd, prefix) is not None or bool(discover_shell_overrides(cwd, prefix))
-    )
-    if not claimed:
+    if prefix not in PIPELINES and load_overlay(cwd, prefix) is None:
         return None
-    return resolve_pipeline(cwd, prefix, PIPELINES.get(prefix, ()))
+    return resolve_stages(cwd, prefix, PIPELINES.get(prefix, ()))

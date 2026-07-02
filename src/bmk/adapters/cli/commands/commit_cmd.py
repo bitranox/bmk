@@ -1,13 +1,6 @@
 """CLI commands for git commit with timestamp prefix.
 
-Provides `commit` and `c` commands that execute external shell scripts via
-the stagerunner with local override support. Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/commit_*.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/commit_*.sh`` (or ``.ps1``)
-
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "commit" for script discovery
+Provides `commit` and `c` commands that run their pipeline via the Python stage runner.
 
 Contents:
     * :func:`cli_commit` - Create a git commit with timestamped message.
@@ -36,8 +29,8 @@ def _run_commit(args: tuple[str, ...]) -> None:
         args: Message parts to pass to the commit script.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()
@@ -59,9 +52,6 @@ def cli_commit(message: tuple[str, ...]) -> None:
 
     If no message is provided, you will be prompted to enter one.
 
-    Script lookup order (via stagerunner):
-    1. <cwd>/bmk_makescripts/commit_*.sh (local override)
-    2. <package>/makescripts/commit_*.sh (bundled default)
 
     Example:
         bmk commit fix typo in README

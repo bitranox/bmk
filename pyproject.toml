@@ -83,8 +83,6 @@ include = [
     "src/bmk/adapters/config/defaultconfig.toml",
     "src/bmk/adapters/config/defaultconfig.d/*.toml",
     "src/bmk/makefile/Makefile",
-    "src/bmk/makescripts/*.sh",
-    "src/bmk/makescripts/*.ps1",
     "src/bmk/makescripts/*.py",
 ]
 

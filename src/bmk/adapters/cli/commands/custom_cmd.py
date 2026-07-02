@@ -86,18 +86,15 @@ def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> Non
 @argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def cli_custom(ctx: click.Context, command_name: str, args: tuple[str, ...]) -> None:
-    """Run a custom command from the override directory.
+    """Run a custom pipeline named COMMAND_NAME.
 
-    Executes user-defined staged scripts matching COMMAND_NAME from the
-    override directory. The override directory is read from
-    ``bmk.override_dir`` config or defaults to ``<cwd>/makescripts``.
-
-    Scripts must follow the naming convention ``<name>_<NNN>_<desc>.sh``
-    (e.g., ``deploy_01_prepare.sh``, ``deploy_02_upload.sh``).
+    The pipeline is defined declaratively under ``[tool.bmk.pipelines.<name>]``
+    in pyproject.toml or in ``bmk_makescripts/stages.toml``. Extra arguments are
+    forwarded to the pipeline's stages.
 
     Example:
-        bmk custom deploy              # Run deploy_*.sh scripts
-        bmk custom deploy --verbose    # Forward --verbose to scripts
+        bmk custom deploy              # Run the 'deploy' pipeline
+        bmk custom deploy --verbose    # Forward --verbose to the stages
     """
     cli_ctx = get_cli_context(ctx)
     with lib_log_rich.runtime.bind(job_id="cli-custom", extra={"command": "custom", "prefix": command_name}):

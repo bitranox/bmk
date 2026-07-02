@@ -1,16 +1,6 @@
 """CLI commands for running project test scripts.
 
-Provides `test` and `t` commands that execute external shell scripts with
-local override support. Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/test.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/test.sh`` (or ``.ps1``)
-
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Command prefix for staged scripts
-    * ``BMK_OVERRIDE_DIR`` - Per-project override directory (from config, if set)
-    * ``BMK_PACKAGE_NAME`` - Package name override (from config, if set)
-    * ``BMK_OUTPUT_FORMAT`` - Tool output format (``json`` or ``text``)
+Provides `test` and `t` commands that run their pipeline via the Python stage runner.
 
 Contents:
     * :func:`cli_test` - Run the project test script.
@@ -42,13 +32,13 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
     """Shared implementation for test commands.
 
     Args:
-        args: Arguments to pass through to the test script.
+        args: Arguments forwarded to the pipeline's stages.
         config: Loaded layered configuration (with profile and overrides applied).
         human: Use human-readable text output instead of JSON.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
     cwd = Path.cwd()
     bmk_config = config.as_dict().get("bmk", {})
@@ -73,22 +63,15 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
 def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
     """Run the project test script.
 
-    Executes test.sh (Linux/macOS) or test.ps1 (Windows) with the current
-    working directory as the first argument, followed by any additional
-    arguments passed to this command.
-
     Tool output defaults to JSON (machine-readable). Use --human for
     traditional text output.
 
-    Script lookup order:
-    1. <cwd>/bmk_makescripts/test.sh (local override)
-    2. <package>/makescripts/test.sh (bundled default)
 
     Example:
         >>> from click.testing import CliRunner
         >>> runner = CliRunner()
         >>> result = runner.invoke(cli_test)
-        >>> result.exit_code in (0, 2)  # 0 if script exists, 2 if not found
+        >>> result.exit_code in (0, 2)  # 0 on success
         True
     """
     cli_ctx = get_cli_context(ctx)
@@ -110,7 +93,7 @@ def cli_t(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
         >>> from click.testing import CliRunner
         >>> runner = CliRunner()
         >>> result = runner.invoke(cli_t)
-        >>> result.exit_code in (0, 2)  # 0 if script exists, 2 if not found
+        >>> result.exit_code in (0, 2)  # 0 on success
         True
     """
     cli_ctx = get_cli_context(ctx)

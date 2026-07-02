@@ -1,15 +1,9 @@
 """CLI commands for uploading coverage reports to Codecov.
 
 Provides ``codecov``, ``coverage``, and ``cov`` commands that execute external
-shell scripts via the stagerunner with local override support.
+shell scripts via the stage runner with local override support.
 
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/cov_*.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/cov_*.sh`` (or ``.ps1``)
 
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "cov"
 
 Contents:
     * :func:`cli_codecov` - Coverage upload command.
@@ -32,11 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 def _run_cov() -> None:
-    """Execute coverage upload via stagerunner.
+    """Execute coverage upload via the stage runner.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()

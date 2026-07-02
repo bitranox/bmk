@@ -1,15 +1,6 @@
 """CLI commands for building Python wheel and sdist artifacts.
 
-Provides ``build`` and ``bld`` commands that execute external shell
-scripts via the stagerunner with local override support.
-
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/bld_*.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/bld_*.sh`` (or ``.ps1``)
-
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "bld"
+Provides ``build`` and ``bld`` commands that run their pipeline via the Python stage runner.
 
 Contents:
     * :func:`cli_build` - Build command.
@@ -31,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 def _run_build() -> None:
-    """Execute build via stagerunner.
+    """Execute build via the stage runner.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()

@@ -1,16 +1,10 @@
 """CLI commands for dependency checking and updating.
 
 Provides `dependencies`, `deps`, and `d` command groups with `update`/`u`
-subcommands. Each executes external shell scripts via the stagerunner with
+subcommands. Each executes external shell scripts via the stage runner with
 local override support.
 
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/dependencies_*.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/dependencies_*.sh`` (or ``.ps1``)
 
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "dependencies" or "deps_update"
 
 Contents:
     * :func:`cli_dependencies` - Dependency management command group.
@@ -34,14 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 def _run_dependencies(action: str) -> None:
-    """Execute dependency check/update via stagerunner.
+    """Execute dependency check/update via the stage runner.
 
     Args:
         action: Empty string for check, "update" for update.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()

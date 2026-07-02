@@ -2,7 +2,7 @@
 
 Runs a command's staged pipeline via the in-process Python stage runner
 (:mod:`bmk.adapters.stagerunner`). The prefix's stages come from the built-in
-registry, a project ``[tool.bmk.pipelines]`` overlay, or a ``bmk_makescripts``
+registry, a project ``[tool.bmk.pipelines]`` overlay (in pyproject.toml or
 override.
 """
 

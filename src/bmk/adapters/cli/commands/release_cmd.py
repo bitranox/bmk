@@ -1,15 +1,6 @@
 """CLI commands for creating git tags and GitHub releases.
 
-Provides ``release``, ``rel``, and ``r`` commands that execute external shell
-scripts via the stagerunner with local override support.
-
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/_btx_stagerunner.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/_btx_stagerunner.sh`` (or ``.ps1``)
-
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "rel"
+Provides ``release``, ``rel``, and ``r`` commands that run their pipeline via the Python stage runner.
 
 Contents:
     * :func:`cli_release` - Release command.
@@ -33,14 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def run_release(args: tuple[str, ...]) -> None:
-    """Execute release via stagerunner.
+    """Execute release via the stage runner.
 
     Args:
         args: Arguments to forward to the release script.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()

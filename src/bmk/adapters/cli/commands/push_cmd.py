@@ -1,18 +1,6 @@
 """CLI commands for running tests, committing, and pushing to remote.
 
-Provides ``push``, ``psh``, and ``p`` commands that execute external shell
-scripts via the stagerunner with local override support.
-
-Scripts are searched in priority order:
-1. Local override: ``<cwd>/bmk_makescripts/push_*.sh`` (or ``.ps1``)
-2. Bundled default: ``<package>/makescripts/push_*.sh`` (or ``.ps1``)
-
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - Set to "push"
-    * ``BMK_GIT_REMOTE`` - Git remote (default: origin)
-    * ``BMK_GIT_BRANCH`` - Git branch (default: current branch)
-    * ``BMK_COMMIT_MESSAGE`` - Commit message (default: chores)
+Provides ``push``, ``psh``, and ``p`` commands that run their pipeline via the Python stage runner.
 
 Contents:
     * :func:`cli_push` - Push command.
@@ -36,14 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def run_push(message: tuple[str, ...]) -> None:
-    """Execute push via stagerunner.
+    """Execute push via the stage runner.
 
     Args:
         message: Commit message parts to join.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found,
-            or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+            or the pipeline's exit code on failure.
     """
 
     cwd = Path.cwd()
