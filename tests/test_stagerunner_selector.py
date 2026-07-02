@@ -31,6 +31,18 @@ def test_python_runner_runs_ported_pipeline_in_process(tmp_path: Path, monkeypat
     assert not (tmp_path / ".ruff_cache").exists()
 
 
+def test_python_runner_applies_toml_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BMK_RUNNER", "python")
+    # Overlay removes the only clean stage, so nothing is cleaned.
+    (tmp_path / "pyproject.toml").write_text('[tool.bmk.pipelines.clean]\nremove = ["clean"]\n', encoding="utf-8")
+    (tmp_path / ".ruff_cache").mkdir()
+
+    rc = execute_script(Path("ignored"), tmp_path, (), command_prefix="clean", output_format="json")
+
+    assert rc == 0
+    assert (tmp_path / ".ruff_cache").exists()  # overlay removed the clean stage
+
+
 def test_default_runner_does_not_use_python_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BMK_RUNNER", raising=False)
     marker = tmp_path / ".ruff_cache"
