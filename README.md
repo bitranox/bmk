@@ -911,4 +911,5 @@ send_notification(
 - [Contributor Guide](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 - [Module Reference](docs/systemdesign/module_reference.md)
+- [AI transparency](ai-transparency.md), and the [general stance](ai-stance.md) behind it
 - [License](LICENSE)

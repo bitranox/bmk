@@ -6,6 +6,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.2] 2026-07-03 01:31:51
+
+### Added
+- Ship the `devops-bmk` Claude Code skill as a single-plugin marketplace: added
+  `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, and
+  `skills/devops-bmk/SKILL.md` so bmk can be installed as a plugin from any project.
+- `ai-transparency.md` and `ai-stance.md` documenting how AI tooling is used in this
+  project, linked from the README.
+
+### Changed
+- `.gitignore` no longer ignores `.claude/` or `prompts.md`.
+
 ## [3.1.1] 2026-07-02 17:27:40
 
 ### Changed

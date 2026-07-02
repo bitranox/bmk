@@ -182,9 +182,7 @@ uv.lock
 
 # div
 #  .devcontainer/   --> we need that for github codespaces
-.claude/
 CLAUDE.md
-prompts.md
 .grimp_cache/
 
 # Local, per-developer settings (Claude Code etc.) - never commit
