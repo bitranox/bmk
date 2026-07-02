@@ -1,0 +1,16 @@
+{
+  "name": "bmk",
+  "owner": {
+    "name": "bitranox"
+  },
+  "metadata": {
+    "description": "bmk delivered as a single Claude Code plugin: a skill to install, configure and use bmk, the bitranox cross-OS build/test/release task runner."
+  },
+  "plugins": [
+    {
+      "name": "bmk",
+      "source": ".",
+      "description": "Install, configure and use bmk: bootstrap it with uv, deploy its Makefile, and run make test/push/bump/release/ship plus custom pipelines on Linux, macOS and Windows."
+    }
+  ]
+}
