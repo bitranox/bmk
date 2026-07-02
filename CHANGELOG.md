@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.0] 2026-07-02 17:15:59
+
 ### Added
 - `bmk ensure` (and `make ensure`): installs the external tools bmk needs on the host, best-effort
   and per-OS. It reuses the existing prerequisite detector and, for each missing tool, runs a
