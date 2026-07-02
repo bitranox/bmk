@@ -59,6 +59,17 @@ def test_run_pipeline_normalizes_signal_returncode(tmp_path: Path) -> None:
     assert rc == 130
 
 
+def test_run_pipeline_reports_action_exception_as_failure(tmp_path: Path) -> None:
+    def boom(ctx: StageContext, sink: OutputSink) -> int:
+        msg = "helper blew up"
+        raise RuntimeError(msg)
+
+    out = io.StringIO()
+    rc = run_pipeline([Stage("boom", 10, boom)], _ctx(tmp_path), out=out)
+    assert rc == 1
+    assert "helper blew up" in out.getvalue()
+
+
 def test_run_batch_runs_equal_order_in_parallel(tmp_path: Path) -> None:
     def slow(ctx: StageContext, sink: OutputSink) -> int:
         time.sleep(0.3)

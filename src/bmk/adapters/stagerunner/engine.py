@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import time
+import traceback
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,10 +42,21 @@ def _sink_for(stage: Stage, ctx: StageContext, out: SupportsWrite) -> OutputSink
 
 
 def run_stage(stage: Stage, ctx: StageContext, out: SupportsWrite) -> StageResult:
-    """Run one stage, returning its normalized result and captured output."""
+    """Run one stage, returning its normalized result and captured output.
+
+    An exception from the action (e.g. a crash in an in-process helper) is
+    reported as a stage failure with the traceback captured, rather than crashing
+    the runner - matching how a subprocess stage's non-zero exit is handled.
+    ``SystemExit`` (raised by the signal handler) is a ``BaseException`` and is
+    intentionally not caught here.
+    """
     sink = _sink_for(stage, ctx, out)
     start = time.monotonic()
-    returncode = normalize_returncode(stage.action(ctx, sink))
+    try:
+        returncode = normalize_returncode(stage.action(ctx, sink))
+    except Exception:  # a stage action crash is a stage failure, not a harness crash
+        sink.write(f"\n{stage.name} raised an unexpected error:\n{traceback.format_exc()}")
+        returncode = 1
     return StageResult(
         name=stage.name,
         returncode=returncode,
