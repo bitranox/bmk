@@ -12,7 +12,7 @@ retires at once.
 
 from __future__ import annotations
 
-from bmk.makescripts import _clean
+from bmk.makescripts import _clean, _dependencies
 
 from .actions import HelperAction
 from .model import Stage, StageContext
@@ -23,8 +23,27 @@ def clean_action(ctx: StageContext) -> int:
     return _clean.main(project_dir=ctx.project_dir, dry_run=False, verbose=False)
 
 
+def deps_action(ctx: StageContext) -> int:
+    """Check project dependencies against PyPI."""
+    return _dependencies.main(
+        pyproject=ctx.project_dir / "pyproject.toml",
+        quiet=ctx.output_format != "text",
+    )
+
+
+def deps_update_action(ctx: StageContext) -> int:
+    """Update outdated dependencies to their latest versions."""
+    return _dependencies.main(
+        update=True,
+        pyproject=ctx.project_dir / "pyproject.toml",
+        quiet=ctx.output_format != "text",
+    )
+
+
 PIPELINES: dict[str, tuple[Stage, ...]] = {
     "clean": (Stage("clean", 10, HelperAction(clean_action)),),
+    "deps": (Stage("deps", 10, HelperAction(deps_action)),),
+    "deps_update": (Stage("deps_update", 10, HelperAction(deps_update_action)),),
 }
 
 # Prefixes whose Python pipeline is ready. During migration the CLI runs these
