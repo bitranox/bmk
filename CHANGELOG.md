@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.0.1] 2026-07-02 16:08:51
+
+### Fixed
+- Coverage runner reads its settings from the correct config table. `CoverageConfig`
+  loaded a flat `[tool.scripts]` table with underscore keys, but the project convention
+  (shared by the rest of the pipeline via `_toml_config`) is the nested `[tool.scripts.test]`
+  table with hyphenated keys (`pytest-verbosity`, `coverage-report-file`, `src-path`,
+  `exclude-markers`). Every configured value silently fell back to its default (e.g. pytest
+  verbosity stayed `-v` instead of a configured `-vv`). Now reads the correct table and keys;
+  defaults are unchanged.
+
 ## [3.0.0] 2026-07-02 15:17:39
 
 ### Changed
