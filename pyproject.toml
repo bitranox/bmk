@@ -144,6 +144,8 @@ convention = "google"
 "src/bmk/adapters/email/*.py" = ["PLR0913"]
 "src/bmk/adapters/memory/*.py" = ["PLR0913"]
 "src/bmk/adapters/stagerunner/*.py" = ["PLR0913"]
+# git_ops runs git (partial path, on PATH) and prints user-facing commit/push output
+"src/bmk/adapters/stagerunner/git_ops.py" = ["PLR0913", "T201", "S603", "S607"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

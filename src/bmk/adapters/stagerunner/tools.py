@@ -11,6 +11,7 @@ are invoked as subprocesses of the makescripts scripts, matching the shell.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from .model import StageContext
@@ -106,3 +107,31 @@ def psscriptanalyzer_argv(ctx: StageContext) -> list[str]:
 
 def integration_pytest_argv(ctx: StageContext) -> list[str]:
     return ["pytest", "-m", "integration", "--tb=short", "-q", *ctx.args]
+
+
+# --- build / version / release / run -----------------------------------------
+
+
+def python_build_argv(ctx: StageContext) -> list[str]:
+    return [ctx.python_cmd, "-m", "build"]
+
+
+def sync_initconf_argv(ctx: StageContext) -> list[str]:
+    return [ctx.python_cmd, _helper("_sync_initconf.py"), "--project-dir", str(ctx.project_dir)]
+
+
+def bump_argv(kind: str) -> Callable[[StageContext], list[str]]:
+    """Build the argv for a ``bump_{major,minor,patch}`` stage."""
+
+    def build(ctx: StageContext) -> list[str]:
+        return [ctx.python_cmd, _helper("_bump_version.py"), kind, "--project-dir", str(ctx.project_dir)]
+
+    return build
+
+
+def release_argv(ctx: StageContext) -> list[str]:
+    return [ctx.python_cmd, _helper("_release.py"), "--project-dir", str(ctx.project_dir), *ctx.args]
+
+
+def run_project_argv(ctx: StageContext) -> list[str]:
+    return [ctx.python_cmd, _helper("_run.py"), *ctx.args]
