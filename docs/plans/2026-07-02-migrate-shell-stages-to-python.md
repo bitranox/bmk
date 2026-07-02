@@ -28,6 +28,7 @@
 - **No attribution:** never add `Co-Authored-By` or Claude mentions to commits/PRs.
 - **Test discipline:** TDD  -  write the failing test first, watch it fail, implement minimal, watch it pass, commit. Use real objects over mocks per `tests/conftest.py` conventions; mock only the `subprocess`/`signal` boundary.
 - **Parity during migration:** a ported pipeline deletes **both** its `.sh` and `.ps1` at once (never one without the other).
+- **Migration invariant (discovered in Phase 1, CORRECTS the per-pipeline delete idea):** helper `.py` files must NOT be moved and shell scripts must NOT be deleted per-pipeline. The still-shell `bld`/`push` pipelines delegate to the `clean`/`deps`/`test`/`commit` prefixes by re-entering the shell stagerunner, so deleting (or moving the helper out from under) any ported pipeline's shell scripts silently breaks those delegators. So Phases 1-4 are strictly ADDITIVE: each helper stays in `bmk/makescripts/` and is called in-process from `registry.py`; every `.sh`/`.ps1` stays intact; the Python engine is opt-in via `BMK_RUNNER=python` (default stays `shell`). ALL helper moves into `bmk/adapters/stagerunner/helpers/`, `_loader.py` removal, the pyright-exclude shrink, and every `.sh`/`.ps1` deletion happen ATOMICALLY in Phase 5, once the whole graph is ported and green.
 
 ---
 
