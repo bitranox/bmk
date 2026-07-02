@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from bmk.makescripts import _clean, _dependencies
 
-from .actions import HelperAction
+from . import tools
+from .actions import HelperAction, PipelineAction, ToolAction
 from .model import Stage, StageContext
 
 
@@ -40,10 +41,40 @@ def deps_update_action(ctx: StageContext) -> int:
     )
 
 
+# The test pipeline: sequential apply-fixes stages, then a wide parallel batch of
+# checks at order 40, then shellcheck. Mirrors the test_NN_*.sh stage numbering.
+_TEST_PIPELINE: tuple[Stage, ...] = (
+    Stage("update_deps", 10, PipelineAction("deps_update")),
+    Stage("ruff_format_apply", 20, ToolAction(tools.ruff_format_apply_argv)),
+    Stage("ruff_fix_apply", 30, ToolAction(tools.ruff_fix_apply_argv)),
+    Stage("bandit", 40, ToolAction(tools.bandit_argv)),
+    Stage("lint_imports", 40, ToolAction(tools.lint_imports_argv)),
+    Stage("pip_audit", 40, ToolAction(tools.pip_audit_argv)),
+    Stage("pyright", 40, ToolAction(tools.pyright_argv)),
+    Stage("pytest", 40, ToolAction(tools.pytest_cov_argv)),
+    Stage("ruff_format_check", 40, ToolAction(tools.ruff_format_check_argv)),
+    Stage("ruff_lint", 40, ToolAction(tools.ruff_lint_argv)),
+    Stage("psscriptanalyzer", 40, ToolAction(tools.psscriptanalyzer_argv)),
+    Stage("shellcheck", 60, ToolAction(tools.shellcheck_argv)),
+)
+
+_COV_PIPELINE: tuple[Stage, ...] = (
+    Stage("coverage", 10, ToolAction(tools.coverage_run_argv)),
+    Stage("clean", 20, HelperAction(clean_action)),
+)
+
+_TEST_INTEGRATION_PIPELINE: tuple[Stage, ...] = (
+    Stage("pytest_integration", 10, ToolAction(tools.integration_pytest_argv)),
+)
+
+
 PIPELINES: dict[str, tuple[Stage, ...]] = {
     "clean": (Stage("clean", 10, HelperAction(clean_action)),),
     "deps": (Stage("deps", 10, HelperAction(deps_action)),),
     "deps_update": (Stage("deps_update", 10, HelperAction(deps_update_action)),),
+    "test": _TEST_PIPELINE,
+    "cov": _COV_PIPELINE,
+    "test_integration": _TEST_INTEGRATION_PIPELINE,
 }
 
 # Prefixes whose Python pipeline is ready. During migration the CLI runs these
