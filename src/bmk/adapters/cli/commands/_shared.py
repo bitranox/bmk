@@ -107,10 +107,10 @@ def execute_script(
     if os.environ.get("BMK_RUNNER", "shell").strip().lower() == "python":
         from bmk.adapters.stagerunner.context import build_context
         from bmk.adapters.stagerunner.engine import run_pipeline
-        from bmk.adapters.stagerunner.overrides import resolve_pipeline
-        from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
+        from bmk.adapters.stagerunner.registry import resolve_python_pipeline
 
-        if command_prefix in PORTED_PREFIXES:
+        stages = resolve_python_pipeline(cwd, command_prefix)
+        if stages is not None:
             ctx = build_context(
                 cwd,
                 extra_args,
@@ -119,7 +119,6 @@ def execute_script(
                 show_warnings=show_warnings,
                 package_name=package_name,
             )
-            stages = resolve_pipeline(cwd, command_prefix, PIPELINES[command_prefix])
             return run_pipeline(stages, ctx)
 
     env = os.environ.copy()

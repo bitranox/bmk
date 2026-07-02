@@ -12,11 +12,14 @@ retires at once.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from bmk.makescripts import _clean, _dependencies
 
-from . import tools
+from . import git_ops, tools
 from .actions import HelperAction, PipelineAction, ToolAction
 from .model import Stage, StageContext
+from .overrides import discover_shell_overrides, load_overlay, resolve_pipeline
 
 
 def clean_action(ctx: StageContext) -> int:
@@ -68,6 +71,34 @@ _TEST_INTEGRATION_PIPELINE: tuple[Stage, ...] = (
 )
 
 
+def _bump_pipeline(kind: str) -> tuple[Stage, ...]:
+    return (
+        Stage("bump", 10, ToolAction(tools.bump_argv(kind))),
+        Stage("sync_initconf", 20, ToolAction(tools.sync_initconf_argv)),
+    )
+
+
+_COMMIT_PIPELINE: tuple[Stage, ...] = (
+    Stage("sync_initconf", 5, ToolAction(tools.sync_initconf_argv)),
+    Stage("commit", 10, HelperAction(git_ops.commit), interactive=True),
+)
+
+_BLD_PIPELINE: tuple[Stage, ...] = (
+    Stage("clean", 10, PipelineAction("clean")),
+    Stage("build", 20, ToolAction(tools.python_build_argv)),
+)
+
+# push composes other pipelines (build + test run in parallel at order 20).
+_PUSH_PIPELINE: tuple[Stage, ...] = (
+    Stage("update_deps", 10, PipelineAction("deps")),
+    Stage("build", 20, PipelineAction("bld")),
+    Stage("test", 20, PipelineAction("test")),
+    Stage("clean", 30, PipelineAction("clean")),
+    Stage("commit", 40, PipelineAction("commit")),
+    Stage("push", 50, ToolAction(git_ops.push_argv)),
+)
+
+
 PIPELINES: dict[str, tuple[Stage, ...]] = {
     "clean": (Stage("clean", 10, HelperAction(clean_action)),),
     "deps": (Stage("deps", 10, HelperAction(deps_action)),),
@@ -75,9 +106,33 @@ PIPELINES: dict[str, tuple[Stage, ...]] = {
     "test": _TEST_PIPELINE,
     "cov": _COV_PIPELINE,
     "test_integration": _TEST_INTEGRATION_PIPELINE,
+    "bump_major": _bump_pipeline("major"),
+    "bump_minor": _bump_pipeline("minor"),
+    "bump_patch": _bump_pipeline("patch"),
+    "commit": _COMMIT_PIPELINE,
+    "bld": _BLD_PIPELINE,
+    "push": _PUSH_PIPELINE,
+    "rel": (Stage("release", 10, ToolAction(tools.release_argv)),),
+    "run": (Stage("run", 10, ToolAction(tools.run_project_argv)),),
 }
 
 # Prefixes whose Python pipeline is ready. During migration the CLI runs these
 # in-process only when opted in (BMK_RUNNER=python); every other prefix still
 # uses the legacy shell stagerunner, and all shell scripts stay intact.
 PORTED_PREFIXES: frozenset[str] = frozenset(PIPELINES)
+
+
+def resolve_python_pipeline(cwd: Path, prefix: str) -> list[Stage] | None:
+    """Resolve the stages the Python runner should run for ``prefix``, or ``None``.
+
+    A prefix is claimed by the Python runner when it is a built-in pipeline, has a
+    TOML overlay, or has a legacy shell override (the last two also cover custom
+    prefixes). Returns the resolved stages (possibly empty), or ``None`` when the
+    prefix is unknown so the caller falls back to the shell stagerunner.
+    """
+    claimed = (
+        prefix in PIPELINES or load_overlay(cwd, prefix) is not None or bool(discover_shell_overrides(cwd, prefix))
+    )
+    if not claimed:
+        return None
+    return resolve_pipeline(cwd, prefix, PIPELINES.get(prefix, ()))
