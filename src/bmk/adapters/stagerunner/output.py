@@ -10,9 +10,20 @@ from __future__ import annotations
 import io
 import re
 import sys
-from typing import Protocol, TextIO
+from typing import Protocol
 
 from bmk.domain.stages import PipelineSummary, StageResult
+
+
+class SupportsWrite(Protocol):
+    """Anything with a text ``write`` (a stream or a sink).
+
+    Lets a nested pipeline write its output into a parent stage's sink while a
+    top-level pipeline writes to ``sys.stdout`` - both satisfy this.
+    """
+
+    def write(self, text: str, /) -> object: ...
+
 
 # A trailing "N warnings" tool summary is not itself a warning line to surface.
 _WARNING_SUMMARY = re.compile(r"\b\d+\s+warnings?\b", re.IGNORECASE)
@@ -64,8 +75,8 @@ class CapturingSink:
 class PassthroughSink:
     """Writes output straight to a target stream (default ``sys.stdout``)."""
 
-    def __init__(self, target: TextIO | None = None) -> None:
-        self._target = target if target is not None else sys.stdout
+    def __init__(self, target: SupportsWrite | None = None) -> None:
+        self._target: SupportsWrite = target if target is not None else sys.stdout
 
     def write(self, text: str) -> None:
         self._target.write(text)
@@ -74,7 +85,7 @@ class PassthroughSink:
         return ""
 
 
-def report_batch_failures(results: list[StageResult], *, quiet: bool, out: TextIO) -> None:
+def report_batch_failures(results: list[StageResult], *, quiet: bool, out: SupportsWrite) -> None:
     """Print name, exit code, and captured output for each failed stage."""
     failures = [r for r in results if r.returncode != 0]
     if not failures:
@@ -85,7 +96,7 @@ def report_batch_failures(results: list[StageResult], *, quiet: bool, out: TextI
     out.write("\n")
 
 
-def report_success_summary(summary: PipelineSummary, *, quiet: bool, out: TextIO) -> None:
+def report_success_summary(summary: PipelineSummary, *, quiet: bool, out: SupportsWrite) -> None:
     """Emit a single JSON summary line on success in quiet (JSON) mode."""
     if quiet:
         out.write(f'{{"result":"{summary.result}","stages":{summary.stages},"scripts":{summary.scripts}}}\n')

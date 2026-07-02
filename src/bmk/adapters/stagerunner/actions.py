@@ -61,3 +61,23 @@ class HelperAction:
 
     def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
         return self._func(ctx)
+
+
+class PipelineAction:
+    """Run another registered pipeline (the pipeline-composes-pipeline delegator).
+
+    Replaces the shell delegator that re-entered the stagerunner with a different
+    ``BMK_COMMAND_PREFIX``. The sub-pipeline writes into the parent stage's sink,
+    so in JSON mode its output is captured and shown only if the delegate fails.
+    """
+
+    def __init__(self, prefix: str) -> None:
+        self._prefix = prefix
+
+    def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
+        # Deferred imports: registry imports this module, and the engine is a
+        # sibling; importing them at call time avoids an import cycle.
+        from . import registry
+        from .engine import run_pipeline
+
+        return run_pipeline(list(registry.PIPELINES[self._prefix]), ctx, out=sink)
