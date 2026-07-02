@@ -27,7 +27,7 @@ import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..typed_click import argument
-from ._shared import execute_script, get_script_name
+from ._shared import run_command
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +42,11 @@ def run_release(args: tuple[str, ...]) -> None:
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
-    from ._shared import require_script_path
 
     cwd = Path.cwd()
-    script_name = get_script_name()
-    script_path = require_script_path(script_name, cwd, "Release")
 
     command_prefix = "rel"
-    logger.debug("Executing release script: %s with prefix %s", script_path, command_prefix)
-    exit_code = execute_script(script_path, cwd, args, command_prefix=command_prefix)
+    exit_code = run_command(cwd, args, command_prefix=command_prefix)
 
     if exit_code != 0:
         raise SystemExit(exit_code)

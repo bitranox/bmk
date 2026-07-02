@@ -27,11 +27,12 @@ def _sleeper() -> subprocess.Popen[str]:
 
 def test_register_and_unregister_track_process() -> None:
     proc = _sleeper()
+    before = signals.live_count()
     try:
         signals.register(proc)
-        assert proc in signals._LIVE
+        assert signals.live_count() == before + 1
         signals.unregister(proc)
-        assert proc not in signals._LIVE
+        assert signals.live_count() == before
     finally:
         proc.terminate()
         proc.wait(timeout=5)
@@ -41,7 +42,7 @@ def test_terminate_all_kills_registered_process() -> None:
     proc = _sleeper()
     signals.register(proc)
     try:
-        signals._terminate_all()
+        signals.terminate_all()
         assert proc.wait(timeout=5) is not None
         assert proc.poll() is not None
     finally:

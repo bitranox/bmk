@@ -30,7 +30,7 @@ import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..typed_click import argument, option
-from ._shared import execute_script, get_script_name
+from ._shared import run_command
 
 logger = logging.getLogger(__name__)
 
@@ -46,15 +46,8 @@ def _run_test_integration(args: tuple[str, ...], *, human: bool = False) -> None
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
-    from ._shared import require_script_path
-
     cwd = Path.cwd()
-    script_name = get_script_name()
-    script_path = require_script_path(script_name, cwd, "Test runner")
-
-    logger.debug("Executing integration test script: %s", script_path)
-    exit_code = execute_script(
-        script_path,
+    exit_code = run_command(
         cwd,
         args,
         command_prefix="test_integration",

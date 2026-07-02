@@ -1,20 +1,12 @@
-"""CLI command for running custom stagerunner commands.
+"""CLI command for running custom pipelines.
 
-Provides ``custom`` command that executes user-defined staged scripts
-from the override directory. The first argument is the command prefix
-used to match scripts (e.g., ``deploy`` matches ``deploy_01_*.sh``).
-
-Unlike built-in commands (test, clean, build), custom commands have
-no bundled scripts — they exist only in the override directory.
-
-Environment variables set for scripts:
-    * ``BMK_PROJECT_DIR`` - Path to the current working directory
-    * ``BMK_COMMAND_PREFIX`` - The user-supplied command name
-    * ``BMK_OVERRIDE_DIR`` - The override directory (forced to the resolved dir)
-    * ``BMK_PACKAGE_NAME`` - Package name override (from config, if set)
+Provides the ``custom`` command that runs a user-defined pipeline named by its
+first argument (e.g. ``deploy``). Custom pipelines are defined declaratively
+under ``[tool.bmk.pipelines.<name>]`` in ``pyproject.toml`` or in
+``bmk_makescripts/stages.toml``.
 
 Contents:
-    * :func:`cli_custom` - Run a custom command from the override directory.
+    * :func:`cli_custom` - Run a custom pipeline by name.
 """
 
 from __future__ import annotations
@@ -29,9 +21,8 @@ import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
-from ..exit_codes import ExitCode
 from ..typed_click import argument
-from ._shared import execute_script, get_script_name
+from ._shared import run_command
 
 if TYPE_CHECKING:
     from lib_layered_config import Config
@@ -39,27 +30,6 @@ if TYPE_CHECKING:
 _RE_COMMAND_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_override_dir(cwd: Path, bmk_config: dict[str, str]) -> Path:
-    """Read ``bmk.override_dir`` from config dict; default to ``cwd/makescripts``.
-
-    Args:
-        cwd: Current working directory used as fallback base.
-        bmk_config: The ``[bmk]`` config section dict.
-
-    Returns:
-        Resolved override directory path.
-    """
-    override_dir = bmk_config.get("override_dir", "")
-    if override_dir:
-        resolved = Path(override_dir)
-        try:
-            resolved.resolve().relative_to(cwd.resolve())
-        except ValueError:
-            logger.warning("Override directory '%s' is outside project tree '%s'", resolved, cwd)
-        return resolved
-    return cwd / "makescripts"
 
 
 def validate_command_name(name: str) -> None:
@@ -83,73 +53,26 @@ def validate_command_name(name: str) -> None:
         raise click.BadParameter(msg, param_hint="'COMMAND_NAME'")
 
 
-def find_custom_scripts(override_dir: Path, command_name: str) -> list[Path]:
-    """Glob for ``{name}_[0-9]*_*.sh`` in the override directory.
-
-    Args:
-        override_dir: Directory to search for scripts.
-        command_name: Command prefix to match against script filenames.
-
-    Returns:
-        Sorted list of matching script paths.
-    """
-    if not override_dir.is_dir():
-        return []
-    pattern = f"{command_name}_[0-9]*_*.sh"
-    return sorted(override_dir.glob(pattern))
-
-
 def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> None:
-    """Resolve override dir, check for scripts, invoke stagerunner.
+    """Validate the name and run the named custom pipeline.
 
     Args:
-        command_name: User-supplied command prefix.
-        args: Arguments to forward to the scripts.
+        command_name: User-supplied pipeline name.
+        args: Arguments to forward to the pipeline's stages.
         config: Loaded layered configuration (with profile and overrides applied).
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if override dir missing or
-            no scripts match, or the script's exit code on failure.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the
+            name, or the pipeline's exit code on failure.
     """
     validate_command_name(command_name)
     cwd = Path.cwd()
     bmk_config = config.as_dict().get("bmk", {})
-    override_dir = resolve_override_dir(cwd, bmk_config)
 
-    if not override_dir.is_dir():
-        click.echo(
-            f"Error: Override directory '{override_dir}' does not exist",
-            err=True,
-        )
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
-
-    matching_scripts = find_custom_scripts(override_dir, command_name)
-    if not matching_scripts:
-        click.echo(
-            f'custom command "{command_name}" not found in directory {override_dir}',
-            err=True,
-        )
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
-
-    script_name = get_script_name()
-    # Resolve stagerunner from bundled location
-    bundled_script = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-    if not bundled_script.is_file():
-        click.echo(f"Error: Stagerunner '{script_name}' not found", err=True)
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
-
-    logger.debug(
-        "Executing custom command '%s' via stagerunner: %s (override_dir=%s)",
-        command_name,
-        bundled_script,
-        override_dir,
-    )
-    exit_code = execute_script(
-        bundled_script,
+    exit_code = run_command(
         cwd,
         args,
         command_prefix=command_name,
-        override_dir=str(override_dir),
         package_name=bmk_config.get("package_name", ""),
         show_warnings=bmk_config.get("show_warnings", True),
     )

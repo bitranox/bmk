@@ -30,7 +30,7 @@ import rich_click as click
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
 from ..typed_click import argument, option
-from ._shared import execute_script, get_script_name
+from ._shared import run_command
 
 if TYPE_CHECKING:
     from lib_layered_config import Config
@@ -50,20 +50,13 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
         SystemExit: With FILE_NOT_FOUND (2) if script not found,
             or the script's exit code on failure.
     """
-    from ._shared import require_script_path
-
     cwd = Path.cwd()
-    script_name = get_script_name()
-    script_path = require_script_path(script_name, cwd, "Test")
-
     bmk_config = config.as_dict().get("bmk", {})
 
-    logger.debug("Executing test script: %s", script_path)
-    exit_code = execute_script(
-        script_path,
+    exit_code = run_command(
         cwd,
         args,
-        override_dir=bmk_config.get("override_dir", ""),
+        command_prefix="test",
         package_name=bmk_config.get("package_name", ""),
         show_warnings=bmk_config.get("show_warnings", True),
         output_format="text" if human else os.environ.get("BMK_OUTPUT_FORMAT", "json"),

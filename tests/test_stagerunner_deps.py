@@ -52,7 +52,12 @@ def test_deps_action_not_quiet_in_text_mode(tmp_path: Path, monkeypatch: pytest.
     from bmk.makescripts import _dependencies
 
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(_dependencies, "main", lambda **kw: captured.update(kw) or 0)
+
+    def _fake(**kw: Any) -> int:
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(_dependencies, "main", _fake)
 
     PIPELINES["deps"][0].action(_ctx(tmp_path, "text"), CapturingSink())
     assert captured["quiet"] is False
@@ -62,7 +67,12 @@ def test_deps_update_action_sets_update(tmp_path: Path, monkeypatch: pytest.Monk
     from bmk.makescripts import _dependencies
 
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(_dependencies, "main", lambda **kw: captured.update(kw) or 0)
+
+    def _fake(**kw: Any) -> int:
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(_dependencies, "main", _fake)
 
     PIPELINES["deps_update"][0].action(_ctx(tmp_path, "json"), CapturingSink())
     assert captured["update"] is True

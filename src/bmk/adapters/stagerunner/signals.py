@@ -39,7 +39,14 @@ def unregister(proc: subprocess.Popen[str]) -> None:
         _LIVE.discard(proc)
 
 
-def _terminate_all() -> None:
+def live_count() -> int:
+    """Return how many child processes are currently tracked."""
+    with _LOCK:
+        return len(_LIVE)
+
+
+def terminate_all() -> None:
+    """Terminate every tracked child process (best effort)."""
     with _LOCK:
         procs = list(_LIVE)
     for proc in procs:
@@ -70,7 +77,7 @@ def install_signal_handlers() -> Generator[None]:
         return
 
     def handler(signum: int, _frame: object) -> None:
-        _terminate_all()
+        terminate_all()
         raise SystemExit(128 + signum)
 
     previous: dict[signal.Signals, object] = {}

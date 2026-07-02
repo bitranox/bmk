@@ -18,7 +18,7 @@ def test_group_into_batches_preserves_declaration_order_within_batch() -> None:
 
 
 def test_group_into_batches_empty_is_empty() -> None:
-    assert group_into_batches([], key=lambda t: t) == []
+    assert group_into_batches([], key=lambda _t: 0) == []
 
 
 def test_normalize_returncode_maps_signal_to_128_plus_n() -> None:

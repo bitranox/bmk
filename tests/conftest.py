@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, fields
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import lib_cli_exit_tools
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 from lib_layered_config import Config
 from lib_layered_config.domain.config import SourceInfo
 
@@ -639,3 +640,42 @@ def config_cli_context(
         return lambda: test_services
 
     return _create
+
+
+@pytest.fixture
+def cli_pipeline_probe(
+    cli_runner: CliRunner,
+    production_factory: Callable[[], Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[..., Result]:
+    """Run a bmk CLI command end-to-end against a scratch project.
+
+    The named pipeline is replaced (via a real ``[tool.bmk.pipelines]`` overlay)
+    with a single probe stage that writes a ``PROBE`` marker and exits with a
+    chosen code. Nothing internal is mocked: the marker appears only if the
+    command dispatches the expected prefix through the real stage runner.
+    """
+    import rtoml
+
+    from bmk.adapters import cli as cli_mod
+    from bmk.adapters.stagerunner.registry import PIPELINES
+
+    def run(cli_args: list[str], *, prefix: str, exit_code: int = 0) -> Result:
+        probe = tmp_path / "probe.py"
+        probe.write_text(
+            f"import pathlib, sys\npathlib.Path('PROBE').write_text('ran')\nsys.exit({exit_code})\n",
+            encoding="utf-8",
+        )
+        # TOML requires scalar values before tables, so emit 'remove' before 'add'.
+        pipeline: dict[str, Any] = {}
+        remove = [stage.name for stage in PIPELINES.get(prefix, ())]
+        if remove:
+            pipeline["remove"] = remove
+        pipeline["add"] = [{"name": "probe", "order": 1, "argv": [sys.executable, str(probe)]}]
+        overlay = {"tool": {"bmk": {"pipelines": {prefix: pipeline}}}}
+        (tmp_path / "pyproject.toml").write_text(rtoml.dumps(overlay), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        return cli_runner.invoke(cli_mod.cli, cli_args, obj=production_factory)
+
+    return run

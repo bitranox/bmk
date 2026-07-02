@@ -1,9 +1,8 @@
 """Build a StageContext: the resolved environment a pipeline runs against.
 
-Mirrors the environment the legacy shell path set (project dir, output format,
-venv pinning). During migration this duplicates the env logic in
-``cli.commands._shared.execute_script``; the shell copy retires in the final
-phase, leaving this the single source.
+Assembles the environment stages run under: project dir, output format, and the
+venv pinning (``VIRTUAL_ENV`` / ``PIPAPI_PYTHON_LOCATION``) that points tools at
+the target project's interpreter rather than bmk's own.
 """
 
 from __future__ import annotations

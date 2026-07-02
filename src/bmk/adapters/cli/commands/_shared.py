@@ -1,207 +1,69 @@
-"""Shared helpers for CLI command modules.
+"""Shared helper for CLI command modules.
 
-Internal module (underscore prefix) providing common patterns used across
-multiple command implementations.
-
-Contents:
-    * :func:`normalize_returncode` - Convert signal codes to POSIX 128+N.
-    * :func:`get_script_name` - Return OS-appropriate stagerunner name.
-    * :func:`resolve_script_path` - Find script in local override or bundled location.
-    * :func:`execute_script` - Execute script with BMK environment variables.
-    * :func:`require_script_path` - Resolve script path or exit with FILE_NOT_FOUND.
+Runs a command's staged pipeline via the in-process Python stage runner
+(:mod:`bmk.adapters.stagerunner`). The prefix's stages come from the built-in
+registry, a project ``[tool.bmk.pipelines]`` overlay, or a ``bmk_makescripts``
+override.
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import rich_click as click
 
+from bmk.domain.stages import normalize_returncode
+
 from ..exit_codes import ExitCode
 
 
-def normalize_returncode(code: int) -> int:
-    """Convert negative signal return codes to POSIX 128+N convention.
-
-    Python's ``subprocess`` reports signal-killed processes as negative values
-    (e.g., -2 for SIGINT). POSIX convention is 128+N (e.g., 130 for SIGINT).
-
-    Args:
-        code: Raw return code from subprocess.
-
-    Returns:
-        POSIX-conventional exit code.
-    """
-    if code < 0:
-        return 128 + abs(code)
-    return code
-
-
-def get_script_name() -> str:
-    """Return OS-appropriate script name.
-
-    Returns:
-        ``_btx_stagerunner.ps1`` on Windows, ``_btx_stagerunner.sh`` otherwise.
-    """
-    return "_btx_stagerunner.ps1" if sys.platform == "win32" else "_btx_stagerunner.sh"
-
-
-def resolve_script_path(script_name: str, cwd: Path) -> Path | None:
-    """Find script in local override or bundled location.
-
-    Args:
-        script_name: Name of the script file (e.g., ``test.sh``).
-        cwd: Current working directory to check for local override.
-
-    Returns:
-        Path to the script if found, None otherwise.
-    """
-    local_script = cwd / "bmk_makescripts" / script_name
-    if local_script.is_file():
-        return local_script
-
-    # Path from _shared.py up to bmk package: commands -> cli -> adapters -> bmk
-    bundled_script = Path(__file__).parent.parent.parent.parent / "makescripts" / script_name
-    if bundled_script.is_file():
-        return bundled_script
-
-    return None
-
-
-def execute_script(
-    script_path: Path,
+def run_command(
     cwd: Path,
     extra_args: tuple[str, ...],
     *,
-    command_prefix: str = "test",
-    override_dir: str = "",
-    package_name: str = "",
-    show_warnings: bool = True,
+    command_prefix: str,
     output_format: str = "json",
+    show_warnings: bool = True,
+    package_name: str = "",
 ) -> int:
-    """Execute script with BMK environment variables.
-
-    Pure function: receives all configuration values as parameters instead
-    of reaching for global state. Callers are responsible for loading config.
+    """Resolve and run the pipeline for ``command_prefix`` via the stage runner.
 
     Args:
-        script_path: Path to the script to execute.
-        cwd: Current working directory (set as BMK_PROJECT_DIR env var).
-        extra_args: Additional arguments to pass to the script.
-        command_prefix: Command prefix for staged scripts (set as BMK_COMMAND_PREFIX env var).
-        override_dir: Override directory path (set as BMK_OVERRIDE_DIR if non-empty).
-        package_name: Package name override (set as BMK_PACKAGE_NAME if non-empty).
-        show_warnings: Show warnings from passing parallel jobs (set as BMK_SHOW_WARNINGS env var).
-        output_format: Output format for tool results (set as BMK_OUTPUT_FORMAT env var).
-            ``"json"`` for machine-readable output, ``"text"`` for human-readable.
+        cwd: Project directory (the pipeline runs here).
+        extra_args: Arguments forwarded to the pipeline's stages.
+        command_prefix: Pipeline to run (e.g. ``"test"``, ``"clean"``).
+        output_format: ``"json"`` (machine-readable, quiet) or ``"text"`` (verbose).
+        show_warnings: Show warnings from passing parallel stages.
+        package_name: Import package name override (else derived from pyproject).
 
     Returns:
-        Exit code from the script execution.
-    """
-    # Migration selector: run the in-process Python engine only when opted in
-    # (BMK_RUNNER=python) and the prefix is ported. Otherwise fall through to the
-    # legacy shell stagerunner below, which stays the default.
-    if os.environ.get("BMK_RUNNER", "shell").strip().lower() == "python":
-        from bmk.adapters.stagerunner.context import build_context
-        from bmk.adapters.stagerunner.engine import run_pipeline
-        from bmk.adapters.stagerunner.registry import resolve_python_pipeline
-
-        stages = resolve_python_pipeline(cwd, command_prefix)
-        if stages is not None:
-            ctx = build_context(
-                cwd,
-                extra_args,
-                command_prefix=command_prefix,
-                output_format=output_format,
-                show_warnings=show_warnings,
-                package_name=package_name,
-            )
-            return run_pipeline(stages, ctx)
-
-    env = os.environ.copy()
-    env["BMK_PROJECT_DIR"] = str(cwd)
-    env["BMK_COMMAND_PREFIX"] = command_prefix
-    env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
-    env["BMK_PYTHON_CMD"] = sys.executable
-    env["BMK_OUTPUT_FORMAT"] = output_format
-
-    # Point tools at the target project's venv, not bmk's own (uvx) venv.
-    # Tools like pyright and pip-audit use VIRTUAL_ENV for environment resolution.
-    # Check pyvenv.cfg to detect broken venvs (stale NFS mounts, corrupt symlinks).
-    project_venv = cwd / ".venv"
-    if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
-        env["VIRTUAL_ENV"] = str(project_venv)
-        # pip-audit resolves the pip it audits via sys.executable / PATH, NOT VIRTUAL_ENV, so when a
-        # different venv is active in the caller's shell (e.g. an editor's venv) it audits the wrong
-        # environment. Pin it to the project venv's interpreter via PIPAPI_PYTHON_LOCATION - the override
-        # pip-audit's pip-api documents for exactly this case.
-        venv_python = project_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if venv_python.exists():
-            env["PIPAPI_PYTHON_LOCATION"] = str(venv_python)
-        else:
-            env.pop("PIPAPI_PYTHON_LOCATION", None)
-    else:
-        env.pop("VIRTUAL_ENV", None)
-        env.pop("PIPAPI_PYTHON_LOCATION", None)
-
-    if override_dir:
-        env["BMK_OVERRIDE_DIR"] = str(override_dir)
-    if package_name:
-        env["BMK_PACKAGE_NAME"] = str(package_name)
-
-    if script_path.suffix == ".ps1":
-        cmd = [
-            "pwsh",
-            "-NoProfile",
-            "-NonInteractive",
-            "-File",
-            str(script_path),
-            *extra_args,
-        ]
-    else:
-        cmd = [str(script_path), *extra_args]
-
-    result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
-    return normalize_returncode(result.returncode)
-
-
-def require_script_path(script_name: str, cwd: Path, command_label: str) -> Path:
-    """Resolve script path or exit with FILE_NOT_FOUND.
-
-    Combines :func:`resolve_script_path` with standardized error reporting.
-    If the script is found, returns its path. Otherwise, prints the search
-    locations and raises SystemExit.
-
-    Args:
-        script_name: Name of the script file (e.g., ``_btx_stagerunner.sh``).
-        cwd: Current working directory to check for local override.
-        command_label: Human-readable label for error messages (e.g., "Test", "Build").
-
-    Returns:
-        Path to the resolved script.
+        Exit code from the pipeline.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if script not found.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the prefix.
     """
-    script_path = resolve_script_path(script_name, cwd)
-    if script_path is not None:
-        return script_path
+    from bmk.adapters.stagerunner.context import build_context
+    from bmk.adapters.stagerunner.engine import run_pipeline
+    from bmk.adapters.stagerunner.registry import resolve_python_pipeline
 
-    click.echo(f"Error: {command_label} script '{script_name}' not found", err=True)
-    click.echo("Searched locations:", err=True)
-    click.echo(f"  - {cwd / 'bmk_makescripts' / script_name}", err=True)
-    bundled = Path(__file__).parent.parent.parent / "makescripts" / script_name
-    click.echo(f"  - {bundled}", err=True)
-    raise SystemExit(ExitCode.FILE_NOT_FOUND)
+    stages = resolve_python_pipeline(cwd, command_prefix)
+    if stages is None:
+        click.echo(f"Error: no pipeline defined for '{command_prefix}'", err=True)
+        click.echo(
+            "Define one under [tool.bmk.pipelines] in pyproject.toml or in bmk_makescripts/stages.toml.",
+            err=True,
+        )
+        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+
+    ctx = build_context(
+        cwd,
+        extra_args,
+        command_prefix=command_prefix,
+        output_format=output_format,
+        show_warnings=show_warnings,
+        package_name=package_name,
+    )
+    return run_pipeline(stages, ctx)
 
 
-__all__ = [
-    "execute_script",
-    "get_script_name",
-    "normalize_returncode",
-    "require_script_path",
-    "resolve_script_path",
-]
+__all__ = ["normalize_returncode", "run_command"]
