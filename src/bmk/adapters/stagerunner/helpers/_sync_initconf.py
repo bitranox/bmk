@@ -27,56 +27,21 @@ _MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")
 
 
 def derive_package_name(project_dir: Path) -> str:
-    """Derive the importable package name from pyproject.toml.
+    """Derive the importable package name from ``project_dir``'s pyproject.toml.
 
-    Uses the same resolution order as _btx_stagerunner.sh:
-        1. hatch wheel packages
-        2. project.scripts entry points
-        3. project.name (hyphens replaced with underscores)
-
-    Args:
-        project_dir: Project root containing pyproject.toml.
-
-    Returns:
-        Package name string.
+    Delegates to the canonical reader in ``stagerunner.project`` (hatch wheel ->
+    script entry point -> project name).
 
     Raises:
         ValueError: If no package name can be derived.
     """
-    try:
-        import rtoml
-    except ImportError:
-        import tomllib as rtoml  # type: ignore[no-redef]
+    from bmk.adapters.stagerunner.project import derive_package_name as _derive
 
-    pyproject_path = project_dir / "pyproject.toml"
-    with pyproject_path.open("r", encoding="utf-8") as fh:
-        data = rtoml.load(fh)  # type: ignore[arg-type]
-
-    # 1. hatch wheel packages
-    tool = data.get("tool", {})
-    hatch = tool.get("hatch", {})
-    build = hatch.get("build", {})
-    targets = build.get("targets", {})
-    wheel = targets.get("wheel", {})
-    packages = wheel.get("packages", [])
-    if packages:
-        return Path(packages[0]).name
-
-    # 2. project.scripts entry points
-    project = data.get("project", {})
-    scripts = project.get("scripts", {})
-    for spec in scripts.values():
-        if ":" in spec:
-            module = spec.split(":", 1)[0]
-            return module.split(".", 1)[0]
-
-    # 3. project.name fallback
-    name = project.get("name", "")
-    if name:
-        return name.replace("-", "_")
-
-    msg = "Cannot derive package name from pyproject.toml"
-    raise ValueError(msg)
+    name = _derive(project_dir / "pyproject.toml")
+    if name is None:
+        msg = "Cannot derive package name from pyproject.toml"
+        raise ValueError(msg)
+    return name
 
 
 def sync_initconf_version(project_dir: Path) -> bool:
