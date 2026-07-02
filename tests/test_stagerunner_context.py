@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +22,18 @@ def test_build_context_sets_project_env(tmp_path: Path) -> None:
     assert ctx.env["BMK_COMMAND_PREFIX"] == "clean"
     assert ctx.env["BMK_OUTPUT_FORMAT"] == "json"
     assert ctx.env["BMK_SHOW_WARNINGS"] == "1"
+
+
+def test_build_context_prepends_src_to_pythonpath(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    ctx = build_context(tmp_path, (), command_prefix="test", output_format=ToolOutputFormat.JSON, show_warnings=True)
+    assert ctx.env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "src")
+
+
+def test_build_context_no_pythonpath_when_no_src(tmp_path: Path) -> None:
+    ctx = build_context(tmp_path, (), command_prefix="test", output_format=ToolOutputFormat.JSON, show_warnings=True)
+    # No src/ dir -> PYTHONPATH is only whatever was inherited (not forced to src).
+    assert str(tmp_path / "src") not in ctx.env.get("PYTHONPATH", "")
 
 
 def test_build_context_omits_virtualenv_when_no_venv(tmp_path: Path) -> None:

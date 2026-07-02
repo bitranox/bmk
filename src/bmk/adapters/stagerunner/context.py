@@ -38,6 +38,20 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
         env.pop("PIPAPI_PYTHON_LOCATION", None)
 
 
+def _prepend_src_to_pythonpath(env: dict[str, str], cwd: Path) -> None:
+    """Put the project's ``src/`` on PYTHONPATH so tools can import the package.
+
+    Tools like import-linter and integration pytest import the target project's
+    package; when bmk runs from its own (uv tool) venv, the project's ``src`` is
+    not otherwise importable. Uses ``os.pathsep`` for cross-OS correctness.
+    """
+    src_dir = cwd / "src"
+    if not src_dir.is_dir():
+        return
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+
+
 def build_context(
     cwd: Path,
     args: tuple[str, ...],
@@ -56,6 +70,7 @@ def build_context(
     env["BMK_OUTPUT_FORMAT"] = output_format.value  # serialize enum -> env string at the subprocess boundary
     if package_name:
         env["BMK_PACKAGE_NAME"] = package_name
+    _prepend_src_to_pythonpath(env, cwd)
     _pin_project_venv(env, cwd)
 
     return StageContext(
