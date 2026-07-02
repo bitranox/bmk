@@ -23,7 +23,7 @@ def run_command(
     extra_args: tuple[str, ...],
     *,
     command_prefix: str,
-    output_format: ToolOutputFormat = ToolOutputFormat.JSON,
+    output_format: ToolOutputFormat | None = None,
     show_warnings: bool = True,
     package_name: str = "",
 ) -> int:
@@ -33,7 +33,8 @@ def run_command(
         cwd: Project directory (the pipeline runs here).
         extra_args: Arguments forwarded to the pipeline's stages.
         command_prefix: Pipeline to run (e.g. ``"test"``, ``"clean"``).
-        output_format: TEXT (verbose) or JSON (machine-readable, quiet).
+        output_format: TEXT (verbose) or JSON (machine-readable, quiet). When
+            ``None``, resolved from ``BMK_OUTPUT_FORMAT`` (default JSON).
         show_warnings: Show warnings from passing parallel stages.
         package_name: Import package name override (else derived from pyproject).
 
@@ -46,6 +47,9 @@ def run_command(
     from bmk.adapters.stagerunner.context import build_context
     from bmk.adapters.stagerunner.engine import run_pipeline
     from bmk.adapters.stagerunner.registry import resolve_python_pipeline
+
+    if output_format is None:
+        output_format = resolve_output_format(human=False)
 
     stages = resolve_python_pipeline(cwd, command_prefix)
     if stages is None:
