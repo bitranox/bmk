@@ -13,16 +13,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import bmk
-
 from .model import StageContext
 from .project import derive_package_name, pip_audit_ignore_flags
 
-# Locate the makescripts helper dir relative to the bmk package (which has an
-# __init__.py); makescripts itself is a namespace package with no usable __file__.
-_bmk_file = bmk.__file__
-assert _bmk_file is not None, "bmk package must have a __file__"
-_MAKESCRIPTS_DIR = Path(_bmk_file).parent / "makescripts"
+# Locate the makescripts helper dir by walking up from this file
+# (src/bmk/adapters/stagerunner/tools.py -> src/bmk/makescripts). Importing the
+# top-level ``bmk`` package here would create an adapters -> composition edge
+# (bmk/__init__ imports composition) and break the layers contract.
+_MAKESCRIPTS_DIR = Path(__file__).resolve().parents[2] / "makescripts"
 
 
 def _is_json(ctx: StageContext) -> bool:
