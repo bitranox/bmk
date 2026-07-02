@@ -83,7 +83,6 @@ include = [
     "src/bmk/adapters/config/defaultconfig.toml",
     "src/bmk/adapters/config/defaultconfig.d/*.toml",
     "src/bmk/makefile/Makefile",
-    "src/bmk/makescripts/*.py",
 ]
 
 [tool.ruff]
@@ -130,8 +129,8 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Notebooks: unused imports are often intentional for side effects
 "notebooks/*.ipynb" = ["F401"]
-# Makescripts: standalone CLI utilities with subprocess calls, print output, and magic values
-"src/bmk/makescripts/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0912", "PLR0913", "PLR2004"]
+# Stage helpers: CLI-style utilities with subprocess calls, print output, and magic values
+"src/bmk/adapters/stagerunner/helpers/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0912", "PLR0913", "PLR2004"]
 # Tests: assert is standard, test fixtures have passwords, magic values are clearer inline, temp paths are fine
 "tests/*.py" = ["T20", "S101", "S105", "S106", "S108", "S603", "S607", "E501", "ERA001", "FBT001", "FBT003", "PLR0913", "PLR2004", "PLW1510"]
 # CLI: Click framework injects boolean params; commands have many options
@@ -149,10 +148,6 @@ convention = "google"
 typeCheckingMode = "strict"
 extraPaths = [
   "src",
-]
-# Exclude makescripts - standalone CLI utilities using dynamic imports
-exclude = [
-  "src/bmk/makescripts",
 ]
 
 [tool.pytest.ini_options]

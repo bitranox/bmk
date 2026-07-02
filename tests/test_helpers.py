@@ -28,7 +28,7 @@ class TestCoverageConfig:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -97,7 +97,7 @@ class TestCoverageFileManagement:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -158,7 +158,7 @@ class TestBuildEnv:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -192,7 +192,7 @@ class TestEnsureCodecovToken:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -291,7 +291,7 @@ class TestFindDotenvUpward:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -335,7 +335,7 @@ class TestGitServiceHelpers:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -382,7 +382,7 @@ class TestBuildCodecovEnv:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -407,7 +407,7 @@ class TestHandleCodecovResult:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -436,7 +436,7 @@ class TestMain:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -475,7 +475,7 @@ class TestCleanPatterns:
     @pytest.fixture
     def clean_module(self) -> Any:
         """Import clean module."""
-        from bmk.makescripts import _clean
+        from bmk.adapters.stagerunner.helpers import _clean
 
         return _clean
 
@@ -512,7 +512,7 @@ class TestCleanFunction:
     @pytest.fixture
     def clean_module(self) -> Any:
         """Import clean module."""
-        from bmk.makescripts import _clean
+        from bmk.adapters.stagerunner.helpers import _clean
 
         return _clean
 
@@ -574,7 +574,7 @@ class TestDependencyVersionParsing:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -639,7 +639,7 @@ class TestVersionComparison:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -702,7 +702,7 @@ class TestStatusIcon:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -729,7 +729,7 @@ class TestBuildUpdatedSpec:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -792,7 +792,7 @@ class TestBuildUpdatedSpecExtended:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -873,7 +873,7 @@ class TestPrintReport:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -970,7 +970,7 @@ class TestPrintInstallReport:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -1006,7 +1006,7 @@ class TestExtractDependenciesFromList:
     @pytest.fixture
     def deps_module(self) -> Any:
         """Import dependencies module."""
-        from bmk.makescripts import _dependencies
+        from bmk.adapters.stagerunner.helpers import _dependencies
 
         return _dependencies
 
@@ -1089,7 +1089,7 @@ class TestResolveCommitSha:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -1151,7 +1151,7 @@ class TestResolveGitBranch:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -1204,7 +1204,7 @@ class TestCheckCodecovPrerequisites:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 
@@ -1289,7 +1289,7 @@ class TestBuildCodecovArgs:
     @pytest.fixture
     def coverage_module(self) -> Any:
         """Import coverage module."""
-        from bmk.makescripts import _coverage
+        from bmk.adapters.stagerunner.helpers import _coverage
 
         return _coverage
 

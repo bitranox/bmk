@@ -24,10 +24,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from _loader import load_pyproject_config
-except ModuleNotFoundError:
-    from bmk.makescripts._loader import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:

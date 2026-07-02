@@ -17,11 +17,8 @@ from pathlib import Path
 from .model import StageContext
 from .project import derive_package_name, pip_audit_ignore_flags
 
-# Locate the makescripts helper dir by walking up from this file
-# (src/bmk/adapters/stagerunner/tools.py -> src/bmk/makescripts). Importing the
-# top-level ``bmk`` package here would create an adapters -> composition edge
-# (bmk/__init__ imports composition) and break the layers contract.
-_MAKESCRIPTS_DIR = Path(__file__).resolve().parents[2] / "makescripts"
+# The subprocess-invoked helper scripts live next to this module, in helpers/.
+_HELPERS_DIR = Path(__file__).resolve().parent / "helpers"
 
 
 def _is_json(ctx: StageContext) -> bool:
@@ -29,7 +26,7 @@ def _is_json(ctx: StageContext) -> bool:
 
 
 def _helper(name: str) -> str:
-    return str(_MAKESCRIPTS_DIR / name)
+    return str(_HELPERS_DIR / name)
 
 
 # --- ruff -------------------------------------------------------------------

@@ -266,7 +266,8 @@ def run_coverage_tests(
             env=env,
             cwd=project_dir,
             check=False,
-            **({"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}),
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.DEVNULL if quiet else None,
         )
         if report_result.returncode != 0:
             return report_result.returncode

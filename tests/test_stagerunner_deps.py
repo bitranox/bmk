@@ -31,7 +31,7 @@ def test_deps_pipelines_registered_and_ported() -> None:
 
 
 def test_deps_action_calls_helper_with_pyproject_and_quiet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from bmk.makescripts import _dependencies
+    from bmk.adapters.stagerunner.helpers import _dependencies
 
     captured: dict[str, Any] = {}
 
@@ -49,7 +49,7 @@ def test_deps_action_calls_helper_with_pyproject_and_quiet(tmp_path: Path, monke
 
 
 def test_deps_action_not_quiet_in_text_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from bmk.makescripts import _dependencies
+    from bmk.adapters.stagerunner.helpers import _dependencies
 
     captured: dict[str, Any] = {}
 
@@ -64,7 +64,7 @@ def test_deps_action_not_quiet_in_text_mode(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_deps_update_action_sets_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from bmk.makescripts import _dependencies
+    from bmk.adapters.stagerunner.helpers import _dependencies
 
     captured: dict[str, Any] = {}
 

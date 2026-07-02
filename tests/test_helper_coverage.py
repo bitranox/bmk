@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bmk.makescripts._coverage import (
+from bmk.adapters.stagerunner.helpers._coverage import (
     CoverageConfig,
     _build_codecov_args,
     _build_codecov_env,
@@ -293,7 +293,7 @@ def test_run_coverage_tests_returns_zero_on_success(tmp_path: Path, monkeypatch:
         "fail_under = 80\n"
     )
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
         result = run_coverage_tests(project_dir=tmp_path)
 
     assert result == 0
@@ -305,7 +305,7 @@ def test_run_coverage_tests_returns_nonzero_when_pytest_fails(tmp_path: Path, mo
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(1)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(1)):
         result = run_coverage_tests(project_dir=tmp_path)
 
     assert result == 1
@@ -326,7 +326,7 @@ def test_run_coverage_tests_returns_nonzero_when_report_fails(tmp_path: Path) ->
             return _make_completed(0)  # pytest passes
         return _make_completed(2)  # coverage report fails
 
-    with patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
         result = run_coverage_tests(project_dir=tmp_path)
 
     assert result == 2
@@ -347,7 +347,7 @@ def test_run_coverage_tests_xml_failure_does_not_fail_run(tmp_path: Path, capsys
             return _make_completed(0)  # pytest and report pass
         return _make_completed(3)  # xml generation fails
 
-    with patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
         result = run_coverage_tests(project_dir=tmp_path, generate_xml=True)
 
     assert result == 0
@@ -368,7 +368,7 @@ def test_run_coverage_tests_skips_xml_when_disabled(tmp_path: Path) -> None:
         call_count += 1
         return _make_completed(0)
 
-    with patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
         result = run_coverage_tests(project_dir=tmp_path, generate_xml=False)
 
     assert result == 0
@@ -381,7 +381,7 @@ def test_run_coverage_tests_includes_marker_filter_by_default(tmp_path: Path) ->
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)) as mock_run:
         run_coverage_tests(project_dir=tmp_path)
 
     first_call_args = mock_run.call_args_list[0][0][0]
@@ -397,7 +397,7 @@ def test_run_coverage_tests_omits_marker_filter_for_integration(tmp_path: Path) 
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)) as mock_run:
         run_coverage_tests(project_dir=tmp_path, include_integration=True)
 
     first_call_args = mock_run.call_args_list[0][0][0]
@@ -414,7 +414,7 @@ def test_run_coverage_tests_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
         result = run_coverage_tests()
 
     assert result == 0
@@ -426,7 +426,7 @@ def test_run_coverage_tests_prints_commands(tmp_path: Path, capsys: pytest.Captu
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
         run_coverage_tests(project_dir=tmp_path)
 
     captured = capsys.readouterr()
@@ -562,7 +562,7 @@ def test_resolve_commit_sha_falls_back_to_git(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("GITHUB_SHA", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="deadbeef1234\n"),
     ):
         result = _resolve_commit_sha()
@@ -576,7 +576,7 @@ def test_resolve_commit_sha_returns_none_on_git_failure(monkeypatch: pytest.Monk
     monkeypatch.delenv("GITHUB_SHA", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
         result = _resolve_commit_sha()
@@ -590,7 +590,7 @@ def test_resolve_commit_sha_returns_none_for_empty_output(monkeypatch: pytest.Mo
     monkeypatch.delenv("GITHUB_SHA", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout=""),
     ):
         result = _resolve_commit_sha()
@@ -629,7 +629,7 @@ def test_resolve_git_branch_falls_back_to_git(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="develop\n"),
     ):
         result = _resolve_git_branch()
@@ -643,7 +643,7 @@ def test_resolve_git_branch_returns_none_on_git_failure(monkeypatch: pytest.Monk
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
         result = _resolve_git_branch()
@@ -657,7 +657,7 @@ def test_resolve_git_branch_returns_none_for_detached_head(monkeypatch: pytest.M
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="HEAD\n"),
     ):
         result = _resolve_git_branch()
@@ -671,7 +671,7 @@ def test_resolve_git_branch_returns_none_for_empty_output(monkeypatch: pytest.Mo
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout=""),
     ):
         result = _resolve_git_branch()
@@ -758,7 +758,7 @@ def test_get_repo_slug_returns_none_when_both_missing() -> None:
 def test_get_repo_metadata_parses_ssh_url() -> None:
     """Parses SSH URL format git@host:owner/repo.git."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com:myorg/myrepo.git\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -772,7 +772,7 @@ def test_get_repo_metadata_parses_ssh_url() -> None:
 def test_get_repo_metadata_parses_ssh_url_without_git_suffix() -> None:
     """Parses SSH URL without .git suffix."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@gitlab.com:team/project\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -791,7 +791,7 @@ def test_get_repo_metadata_parses_ssh_url_without_git_suffix() -> None:
 def test_get_repo_metadata_parses_https_url() -> None:
     """Parses HTTPS URL format https://host/owner/repo.git."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://github.com/myorg/myrepo.git\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -805,7 +805,7 @@ def test_get_repo_metadata_parses_https_url() -> None:
 def test_get_repo_metadata_parses_https_url_without_git_suffix() -> None:
     """Parses HTTPS URL without .git suffix."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://bitbucket.org/team/project\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -819,7 +819,7 @@ def test_get_repo_metadata_parses_https_url_without_git_suffix() -> None:
 def test_get_repo_metadata_parses_http_url() -> None:
     """Parses HTTP URL (non-TLS) format."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="http://gitea.local/dev/app.git\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -838,7 +838,7 @@ def test_get_repo_metadata_parses_http_url() -> None:
 def test_get_repo_metadata_returns_none_tuple_on_git_failure() -> None:
     """Returns (None, None, None) when git command fails."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -852,7 +852,7 @@ def test_get_repo_metadata_returns_none_tuple_on_git_failure() -> None:
 def test_get_repo_metadata_returns_none_tuple_for_unknown_format() -> None:
     """Returns (None, None, None) for unrecognised URL format."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="svn://example.com/repo\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -897,7 +897,7 @@ def test_check_prerequisites_returns_none_when_codecovcli_missing(
     (tmp_path / "coverage.xml").write_text("<coverage/>")
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
-    with patch("bmk.makescripts._coverage.shutil.which", return_value=None):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value=None):
         result = _check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="token123")
 
     assert result is None
@@ -909,7 +909,7 @@ def test_check_prerequisites_returns_uploader_path(tmp_path: Path, monkeypatch: 
     (tmp_path / "coverage.xml").write_text("<coverage/>")
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
-    with patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"):
         result = _check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="token123")
 
     assert result == "/usr/bin/codecovcli"
@@ -922,7 +922,7 @@ def test_check_prerequisites_allows_ci_without_token(tmp_path: Path, monkeypatch
     monkeypatch.delenv("CODECOV_TOKEN", raising=False)
     monkeypatch.setenv("CI", "true")
 
-    with patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"):
         result = _check_codecov_prerequisites(tmp_path, "coverage.xml")
 
     assert result == "/usr/bin/codecovcli"
@@ -938,7 +938,7 @@ def test_build_codecov_args_includes_required_flags(monkeypatch: pytest.MonkeyPa
     """Builds argument list with required flags."""
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(128)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)):
         args = _build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
@@ -974,7 +974,7 @@ def test_build_codecov_args_includes_git_service(monkeypatch: pytest.MonkeyPatch
     """Adds --git-service flag when host maps to a known service."""
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(128)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)):
         args = _build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
@@ -990,7 +990,7 @@ def test_build_codecov_args_includes_slug(monkeypatch: pytest.MonkeyPatch) -> No
     """Adds --slug flag when owner and name are available."""
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(128)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)):
         args = _build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
@@ -1077,8 +1077,8 @@ def test_upload_coverage_report_returns_true_when_no_commit_sha(
     monkeypatch.delenv("GITHUB_SHA", raising=False)
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(128)),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)),
     ):
         result = upload_coverage_report(project_dir=tmp_path, codecov_token="token123")
 
@@ -1106,8 +1106,8 @@ def test_upload_coverage_report_runs_full_workflow(tmp_path: Path, monkeypatch: 
         return _make_completed(0)  # codecov upload succeeds
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         result = upload_coverage_report(project_dir=tmp_path, codecov_token="token123")
 
@@ -1130,8 +1130,8 @@ def test_upload_coverage_report_returns_false_when_upload_fails(
         return _make_completed(1)  # codecov upload fails
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         result = upload_coverage_report(project_dir=tmp_path, codecov_token="token123")
 
@@ -1155,8 +1155,8 @@ def test_upload_coverage_report_injects_token_into_env(tmp_path: Path, monkeypat
         return _make_completed(0)
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         upload_coverage_report(project_dir=tmp_path, codecov_token="token123")
 
@@ -1187,7 +1187,7 @@ def test_main_runs_tests_and_returns_zero_on_success(
     pyproject.write_text('[project]\nname = "test"\n')
     monkeypatch.delenv("CODECOV_TOKEN", raising=False)
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
         result = main(project_dir=tmp_path, run_tests=True, upload=False)
 
     assert result == 0
@@ -1204,7 +1204,7 @@ def test_main_returns_nonzero_when_tests_fail(
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(5)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(5)):
         result = main(project_dir=tmp_path, run_tests=True, upload=False)
 
     assert result == 5
@@ -1219,7 +1219,7 @@ def test_main_skips_upload_when_tests_fail(tmp_path: Path, monkeypatch: pytest.M
     pyproject.write_text('[project]\nname = "test"\n')
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
-    with patch("bmk.makescripts._coverage.subprocess.run", return_value=_make_completed(1)):
+    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(1)):
         result = main(project_dir=tmp_path, run_tests=True, upload=True)
 
     assert result == 1
@@ -1246,8 +1246,8 @@ def test_main_uploads_and_returns_zero_on_success(
         return _make_completed(0)
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         result = main(project_dir=tmp_path, run_tests=False, upload=True)
 
@@ -1270,8 +1270,8 @@ def test_main_returns_one_when_upload_fails(tmp_path: Path, monkeypatch: pytest.
         return _make_completed(1)
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         result = main(project_dir=tmp_path, run_tests=False, upload=True)
 
@@ -1309,7 +1309,7 @@ def test_main_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_get_repo_metadata_returns_none_for_ssh_without_colon() -> None:
     """Returns (None, None, None) when SSH URL has no colon separator."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com/owner/repo.git\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -1323,7 +1323,7 @@ def test_get_repo_metadata_returns_none_for_ssh_without_colon() -> None:
 def test_get_repo_metadata_returns_none_for_ssh_single_path_segment() -> None:
     """Returns (None, None, None) when SSH URL has only one path segment after colon."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com:repoonly\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -1337,7 +1337,7 @@ def test_get_repo_metadata_returns_none_for_ssh_single_path_segment() -> None:
 def test_get_repo_metadata_returns_none_for_https_too_few_parts() -> None:
     """Returns (None, None, None) when HTTPS URL has too few path segments."""
     with patch(
-        "bmk.makescripts._coverage.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://github.com/owner-only\n"),
     ):
         host, owner, name = _get_repo_metadata_from_git()
@@ -1364,8 +1364,8 @@ def test_upload_coverage_report_without_explicit_token(tmp_path: Path, monkeypat
         return _make_completed(0)
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         result = upload_coverage_report(project_dir=tmp_path)
 
@@ -1394,8 +1394,8 @@ def test_main_runs_tests_then_uploads(tmp_path: Path, monkeypatch: pytest.Monkey
         return _make_completed(0)
 
     with (
-        patch("bmk.makescripts._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
-        patch("bmk.makescripts._coverage.subprocess.run", side_effect=_side_effect),
+        patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
+        patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
         result = main(project_dir=tmp_path, run_tests=True, upload=True)
 

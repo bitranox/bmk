@@ -26,15 +26,12 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-try:
-    from _loader import load_pyproject_config
-except ModuleNotFoundError:
-    from bmk.makescripts._loader import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 if TYPE_CHECKING:
-    from bmk.makescripts._toml_config import PyprojectConfig
+    from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 _RE_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
@@ -71,13 +68,6 @@ def _git_tag_exists(name: str) -> bool:
 def _git_create_annotated_tag(name: str, message: str) -> None:
     """Create an annotated git tag."""
     _run(["git", "tag", "-a", name, "-m", message])
-
-
-def _git_delete_tag(name: str, *, remote: str | None = None) -> None:
-    """Delete a git tag locally and optionally from remote."""
-    _run(["git", "tag", "-d", name], check=False, capture=True)
-    if remote:
-        _run(["git", "push", remote, f":refs/tags/{name}"], check=False)
 
 
 def _git_push(remote: str, ref: str) -> None:
@@ -128,9 +118,9 @@ def _get_default_remote(config: PyprojectConfig) -> str:
     try:
         tool = config.raw_data.get("tool")
         if isinstance(tool, dict):
-            git_config = tool.get("git")
+            git_config = cast("dict[str, Any]", tool).get("git")
             if isinstance(git_config, dict):
-                remote = git_config.get("default-remote")
+                remote = cast("dict[str, Any]", git_config).get("default-remote")
                 if isinstance(remote, str) and remote.strip():
                     return remote.strip()
     except (ValueError, OSError):

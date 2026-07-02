@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bmk.makescripts._shellcheck import (
+from bmk.adapters.stagerunner.helpers._shellcheck import (
     find_sh_files,
     get_bashate_config,
     main,
@@ -163,7 +163,7 @@ def test_run_shellcheck_returns_zero_on_clean(tmp_path: Path) -> None:
     """Returns 0 when shellcheck reports no violations."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
         result = run_shellcheck(files=[script])
 
     assert result == 0
@@ -177,7 +177,7 @@ def test_run_shellcheck_returns_nonzero_on_violations(tmp_path: Path) -> None:
     """Returns non-zero when shellcheck finds violations."""
     script = tmp_path / "bad.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(1)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(1)):
         result = run_shellcheck(files=[script])
 
     assert result == 1
@@ -188,7 +188,7 @@ def test_run_shellcheck_verbose_prints_command(tmp_path: Path, capsys: pytest.Ca
     """Verbose mode prints the command being run."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)):
         run_shellcheck(files=[script], verbose=True)
 
     assert "Running:" in capsys.readouterr().out
@@ -204,7 +204,7 @@ def test_run_shfmt_returns_zero_when_no_diffs(tmp_path: Path) -> None:
     """Returns 0 when shfmt finds no formatting differences."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)):
         result = run_shfmt(files=[script])
 
     assert result == 0
@@ -216,7 +216,7 @@ def test_run_shfmt_returns_one_when_diffs_found(tmp_path: Path, capsys: pytest.C
     script = tmp_path / "bad.sh"
     script.write_text("#!/bin/bash\n")
     with patch(
-        "bmk.makescripts._shellcheck.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run",
         return_value=_make_completed(0, stdout="--- a/bad.sh\n+++ b/bad.sh\n"),
     ):
         result = run_shfmt(files=[script])
@@ -232,7 +232,7 @@ def test_run_shfmt_verbose_prints_command(tmp_path: Path, capsys: pytest.Capture
     """Verbose mode prints the command being run."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)):
         run_shfmt(files=[script], verbose=True)
 
     assert "Running:" in capsys.readouterr().out
@@ -248,7 +248,7 @@ def test_run_bashate_returns_zero_on_clean(tmp_path: Path) -> None:
     """Returns 0 when bashate reports no style issues."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
         result = run_bashate(files=[script], max_line_length=120, ignores=("E003",))
 
     assert result == 0
@@ -262,7 +262,7 @@ def test_run_bashate_returns_nonzero_on_violations(tmp_path: Path) -> None:
     """Returns non-zero when bashate finds style issues."""
     script = tmp_path / "bad.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(1)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(1)):
         result = run_bashate(files=[script], max_line_length=120, ignores=())
 
     assert result == 1
@@ -273,7 +273,7 @@ def test_run_bashate_omits_ignore_flag_when_empty(tmp_path: Path) -> None:
     """No --ignore flag when ignores tuple is empty."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
         run_bashate(files=[script], max_line_length=80, ignores=())
 
     cmd = mock_run.call_args[0][0]
@@ -285,7 +285,7 @@ def test_run_bashate_verbose_prints_command(tmp_path: Path, capsys: pytest.Captu
     """Verbose mode prints the command being run."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)):
         run_bashate(files=[script], max_line_length=120, ignores=(), verbose=True)
 
     assert "Running:" in capsys.readouterr().out
@@ -313,7 +313,7 @@ def test_main_returns_zero_when_all_tools_pass(tmp_path: Path) -> None:
         '[project]\nname = "test"\n\n[tool.bashate]\nmax-line-length = 120\nignores = ["E003"]\n'
     )
 
-    with patch("bmk.makescripts._shellcheck.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)):
         result = main(project_dir=tmp_path)
 
     assert result == 0
@@ -332,7 +332,7 @@ def test_main_returns_one_when_shellcheck_fails(tmp_path: Path) -> None:
             return _make_completed(1)
         return _make_completed(0)
 
-    with patch("bmk.makescripts._shellcheck.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1
@@ -351,7 +351,7 @@ def test_main_returns_one_when_shfmt_fails(tmp_path: Path) -> None:
             return _make_completed(0, stdout="--- diff output\n")
         return _make_completed(0)
 
-    with patch("bmk.makescripts._shellcheck.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1
@@ -370,7 +370,7 @@ def test_main_returns_one_when_bashate_fails(tmp_path: Path) -> None:
             return _make_completed(1)
         return _make_completed(0)
 
-    with patch("bmk.makescripts._shellcheck.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1
@@ -390,7 +390,7 @@ def test_main_aggregates_failures_from_multiple_tools(tmp_path: Path) -> None:
         call_count += 1
         return _make_completed(1)
 
-    with patch("bmk.makescripts._shellcheck.subprocess.run", side_effect=_side_effect):
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1

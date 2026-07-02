@@ -24,11 +24,7 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-try:
-    from _loader import load_pyproject_config
-except ModuleNotFoundError:
-    from bmk.makescripts._loader import load_pyproject_config
-
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 _FALLBACK_PATTERNS: tuple[str, ...] = (
     "**/__pycache__",

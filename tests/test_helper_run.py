@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from bmk.makescripts._run import _extract_dependency_names, _find_local_dependencies, run_cli
-from bmk.makescripts._toml_config import ProjectSection, PyprojectConfig
+from bmk.adapters.stagerunner.helpers._run import _extract_dependency_names, _find_local_dependencies, run_cli
+from bmk.adapters.stagerunner.helpers._toml_config import ProjectSection, PyprojectConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -283,8 +283,8 @@ def test_run_cli_returns_zero_on_success(tmp_path: Path) -> None:
     config = _config_with_dependencies(["requests>=2.0"])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(0)),
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(0)),
     ):
         result = run_cli(project_dir=project_dir, args=["--version"])
 
@@ -299,8 +299,8 @@ def test_run_cli_propagates_nonzero_exit_code(tmp_path: Path) -> None:
     config = _config_with_dependencies([])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(42)),
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(42)),
     ):
         result = run_cli(project_dir=project_dir, args=["bad-command"])
 
@@ -319,7 +319,7 @@ def test_run_cli_returns_one_when_project_name_empty(tmp_path: Path, capsys: pyt
     project_dir.mkdir()
     config = PyprojectConfig(project=ProjectSection(name="", dependencies=()))
 
-    with patch("bmk.makescripts._run.load_pyproject_config", return_value=config):
+    with patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config):
         result = run_cli(project_dir=project_dir, args=["--help"])
 
     assert result == 1
@@ -339,8 +339,8 @@ def test_run_cli_defaults_to_help_when_args_empty(tmp_path: Path) -> None:
     config = _config_with_dependencies([])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
     ):
         run_cli(project_dir=project_dir, args=[])
 
@@ -361,8 +361,8 @@ def test_run_cli_builds_uvx_command_with_project_dir(tmp_path: Path) -> None:
     config = _config_with_dependencies([])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
     ):
         run_cli(project_dir=project_dir, args=["info"])
 
@@ -381,8 +381,8 @@ def test_run_cli_appends_project_name_and_args(tmp_path: Path) -> None:
     config = _config_with_dependencies([])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
     ):
         run_cli(project_dir=project_dir, args=["--verbose", "test"])
 
@@ -403,8 +403,8 @@ def test_run_cli_includes_local_deps_with_flags(tmp_path: Path) -> None:
     config = _config_with_dependencies(["lib-alpha>=1.0"])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(0)) as mock_run,
     ):
         run_cli(project_dir=project_dir, args=["info"])
 
@@ -421,8 +421,8 @@ def test_run_cli_prints_command(tmp_path: Path, capsys: pytest.CaptureFixture[st
     config = _config_with_dependencies([])
 
     with (
-        patch("bmk.makescripts._run.load_pyproject_config", return_value=config),
-        patch("bmk.makescripts._run.subprocess.run", return_value=_make_completed(0)),
+        patch("bmk.adapters.stagerunner.helpers._run.load_pyproject_config", return_value=config),
+        patch("bmk.adapters.stagerunner.helpers._run.subprocess.run", return_value=_make_completed(0)),
     ):
         run_cli(project_dir=project_dir, args=["info"])
 

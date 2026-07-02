@@ -31,13 +31,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-try:
-    from _loader import load_pyproject_config
-except ModuleNotFoundError:
-    from bmk.makescripts._loader import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 if TYPE_CHECKING:
-    from bmk.makescripts._toml_config import PyprojectConfig
+    from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 __all__ = ["run_cli"]
 

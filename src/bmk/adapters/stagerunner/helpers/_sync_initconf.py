@@ -20,10 +20,7 @@ import re
 import sys
 from pathlib import Path
 
-try:
-    from _loader import load_pyproject_config
-except ModuleNotFoundError:
-    from bmk.makescripts._loader import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 _VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
 _MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bmk.makescripts._clean import clean, get_clean_patterns, main
+from bmk.adapters.stagerunner.helpers._clean import clean, get_clean_patterns, main
 
 # ---------------------------------------------------------------------------
 # get_clean_patterns

@@ -31,13 +31,10 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx2
 import orjson
 
-try:
-    from _loader import load_pyproject_config
-except ModuleNotFoundError:
-    from bmk.makescripts._loader import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 if TYPE_CHECKING:
-    from _toml_config import PyprojectConfig
+    from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 
 __all__ = [

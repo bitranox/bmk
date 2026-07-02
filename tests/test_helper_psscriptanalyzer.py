@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bmk.makescripts._psscriptanalyzer import (
+from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (
     check_pwsh,
     ensure_psscriptanalyzer,
     find_ps1_files,
@@ -73,8 +73,8 @@ def test_check_pwsh_returns_path_when_available() -> None:
     """Returns a path string when pwsh is on PATH and launches successfully."""
     probe_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
     with (
-        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
-        patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=probe_result),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=probe_result),
     ):
         result = check_pwsh()
 
@@ -84,7 +84,7 @@ def test_check_pwsh_returns_path_when_available() -> None:
 @pytest.mark.os_agnostic
 def test_check_pwsh_returns_none_when_missing() -> None:
     """Returns None when pwsh is not on PATH."""
-    with patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value=None):
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value=None):
         result = check_pwsh()
 
     assert result is None
@@ -95,8 +95,8 @@ def test_check_pwsh_returns_none_when_probe_fails() -> None:
     """Returns None when pwsh is installed but cannot actually launch (e.g. snap-confine)."""
     probe_result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="snap-confine error")
     with (
-        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/snap/bin/pwsh"),
-        patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=probe_result),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/snap/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=probe_result),
     ):
         result = check_pwsh()
 
@@ -193,7 +193,7 @@ def _make_completed(returncode: int, *, stdout: str = "", stderr: str = "") -> s
 def test_ensure_psscriptanalyzer_skips_install_when_present() -> None:
     """Does not install when PSScriptAnalyzer is already available."""
     with patch(
-        "bmk.makescripts._psscriptanalyzer.subprocess.run",
+        "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run",
         return_value=_make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
     ) as mock_run:
         ensure_psscriptanalyzer("/usr/bin/pwsh")
@@ -205,7 +205,7 @@ def test_ensure_psscriptanalyzer_skips_install_when_present() -> None:
 @pytest.mark.os_agnostic
 def test_ensure_psscriptanalyzer_installs_when_missing() -> None:
     """Installs module when PSScriptAnalyzer is not found."""
-    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run") as mock_run:
         mock_run.side_effect = [
             _make_completed(0, stdout=""),
             _make_completed(0),
@@ -225,7 +225,7 @@ def test_ensure_psscriptanalyzer_installs_when_missing() -> None:
 @pytest.mark.os_agnostic
 def test_run_psscriptanalyzer_returns_zero_on_clean(tmp_path: Path) -> None:
     """Returns 0 when PSScriptAnalyzer reports no violations."""
-    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)) as mock_run:
         result = run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
             project_dir=tmp_path,
@@ -242,7 +242,7 @@ def test_run_psscriptanalyzer_returns_zero_on_clean(tmp_path: Path) -> None:
 @pytest.mark.os_agnostic
 def test_run_psscriptanalyzer_returns_nonzero_on_violations(tmp_path: Path) -> None:
     """Returns non-zero when PSScriptAnalyzer finds violations."""
-    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=_make_completed(3)):
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(3)):
         result = run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
             project_dir=tmp_path,
@@ -255,7 +255,7 @@ def test_run_psscriptanalyzer_returns_nonzero_on_violations(tmp_path: Path) -> N
 @pytest.mark.os_agnostic
 def test_run_psscriptanalyzer_verbose_prints_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Verbose mode prints the command being run."""
-    with patch("bmk.makescripts._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)):
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)):
         run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
             project_dir=tmp_path,
@@ -274,7 +274,7 @@ def test_run_psscriptanalyzer_verbose_prints_command(tmp_path: Path, capsys: pyt
 @pytest.mark.os_agnostic
 def test_main_returns_zero_when_pwsh_not_found(capsys: pytest.CaptureFixture[str]) -> None:
     """Returns 0 and prints skip message when pwsh is absent."""
-    with patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value=None):
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value=None):
         result = main(project_dir=Path("/nonexistent"))
 
     assert result == 0
@@ -285,9 +285,9 @@ def test_main_returns_zero_when_pwsh_not_found(capsys: pytest.CaptureFixture[str
 def test_main_returns_zero_when_no_ps1_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Returns 0 and prints skip message when no .ps1 files exist."""
     with (
-        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
         patch(
-            "bmk.makescripts._psscriptanalyzer.subprocess.run",
+            "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run",
             return_value=_make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
         ),
     ):
@@ -306,8 +306,8 @@ def test_main_returns_zero_when_lint_passes(tmp_path: Path) -> None:
     )
 
     with (
-        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
-        patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run,
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run") as mock_run,
     ):
         mock_run.side_effect = [
             _make_completed(0),  # check_pwsh launch probe
@@ -328,8 +328,8 @@ def test_main_returns_nonzero_when_lint_fails(tmp_path: Path, capsys: pytest.Cap
     )
 
     with (
-        patch("bmk.makescripts._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
-        patch("bmk.makescripts._psscriptanalyzer.subprocess.run") as mock_run,
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run") as mock_run,
     ):
         mock_run.side_effect = [
             _make_completed(0),  # check_pwsh launch probe

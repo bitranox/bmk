@@ -1,23 +1,18 @@
 """Built-in pipeline registry.
 
-Maps a command prefix to its ordered tuple of stages. Grows one pipeline per
-migration phase.
-
-During migration the stage helpers stay in ``bmk.makescripts`` and are called
-in-process here; the legacy shell scripts remain intact so unported pipelines
-(and cross-pipeline delegators such as ``bld`` -> ``clean``) keep working. The
-helpers move into this package only in the final phase, when every shell script
-retires at once.
+Maps a command prefix to its ordered tuple of stages. Leaf helpers live in the
+``helpers`` subpackage and are called in-process (``HelperAction``) or as
+subprocesses (``tools.py``); external tools run via ``ToolAction``; a pipeline can
+delegate to another via ``PipelineAction`` (e.g. ``bld`` -> ``clean``).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from bmk.makescripts import _clean, _dependencies
-
 from . import git_ops, tools
 from .actions import HelperAction, PipelineAction, ToolAction
+from .helpers import _clean, _dependencies
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
 
@@ -45,7 +40,7 @@ def deps_update_action(ctx: StageContext) -> int:
 
 
 # The test pipeline: sequential apply-fixes stages, then a wide parallel batch of
-# checks at order 40, then shellcheck. Mirrors the test_NN_*.sh stage numbering.
+# checks at order 40, then shellcheck.
 _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("update_deps", 10, PipelineAction("deps_update")),
     Stage("ruff_format_apply", 20, ToolAction(tools.ruff_format_apply_argv)),
@@ -116,9 +111,7 @@ PIPELINES: dict[str, tuple[Stage, ...]] = {
     "run": (Stage("run", 10, ToolAction(tools.run_project_argv)),),
 }
 
-# Prefixes whose Python pipeline is ready. During migration the CLI runs these
-# in-process only when opted in (BMK_RUNNER=python); every other prefix still
-# uses the legacy shell stagerunner, and all shell scripts stay intact.
+# All built-in pipeline prefixes (kept for introspection and tests).
 PORTED_PREFIXES: frozenset[str] = frozenset(PIPELINES)
 
 

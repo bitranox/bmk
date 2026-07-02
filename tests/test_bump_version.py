@@ -9,21 +9,12 @@ import pytest
 
 
 # Import the module under test
-# Note: makescripts is not in the standard pytest path, so we import directly
 @pytest.fixture
 def bump_module() -> Any:
-    """Import _bump_version module dynamically."""
-    import importlib.util
+    """The version-bump helper module."""
+    from bmk.adapters.stagerunner.helpers import _bump_version
 
-    spec = importlib.util.spec_from_file_location(
-        "_bump_version",
-        Path(__file__).parent.parent / "src" / "bmk" / "makescripts" / "_bump_version.py",
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _bump_version
 
 
 # =============================================================================

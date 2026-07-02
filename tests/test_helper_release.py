@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from bmk.makescripts._release import _cmd_exists, _get_default_remote, _looks_like_semver
-from bmk.makescripts._toml_config import PyprojectConfig
+from bmk.adapters.stagerunner.helpers._release import _cmd_exists, _get_default_remote, _looks_like_semver
+from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 if TYPE_CHECKING:
     from pytest import CaptureFixture
@@ -220,7 +220,7 @@ class TestEnsureClean:
     @pytest.fixture
     def release_module(self) -> Any:
         """Import release module."""
-        from bmk.makescripts import _release
+        from bmk.adapters.stagerunner.helpers import _release
 
         return _release
 
@@ -272,7 +272,7 @@ class TestReleaseOrchestrator:
     @pytest.fixture
     def release_module(self) -> Any:
         """Import release module."""
-        from bmk.makescripts import _release
+        from bmk.adapters.stagerunner.helpers import _release
 
         return _release
 
