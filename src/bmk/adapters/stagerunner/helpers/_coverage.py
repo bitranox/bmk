@@ -33,6 +33,9 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+import rtoml
 
 __all__ = [
     "prune_coverage_data_files",
@@ -81,13 +84,9 @@ class CoverageConfig:
                 exclude_markers="integration",
             )
 
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-
-        with pyproject_path.open("rb") as f:
-            data = tomllib.load(f)
+        # rtoml (not stdlib tomllib) so parsing works on Python 3.10, where
+        # tomllib does not exist; rtoml is a declared dependency and fully typed.
+        data: dict[str, Any] = rtoml.loads(pyproject_path.read_text(encoding="utf-8"))
 
         tool = data.get("tool", {})
         scripts = tool.get("scripts", {})

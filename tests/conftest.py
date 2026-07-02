@@ -68,6 +68,37 @@ def pytest_configure(config: pytest.Config) -> None:
         os.environ["COVERAGE_FILE"] = str(cov_path)
 
 
+_PLATFORM_MARKERS = ("os_windows", "os_macos", "os_linux", "os_posix")
+
+
+def _platform_marker_matches(marker_name: str) -> bool:
+    """Return whether the current host satisfies a platform-scoping marker."""
+    if marker_name == "os_windows":
+        return os.name == "nt"
+    if marker_name == "os_macos":
+        return sys.platform == "darwin"
+    if marker_name == "os_linux":
+        return sys.platform.startswith("linux")
+    if marker_name == "os_posix":
+        return os.name == "posix"
+    return True
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip platform-scoped tests whose marker does not match the host platform.
+
+    Markers like ``os_posix`` / ``os_windows`` declare that a test needs that
+    platform's semantics; running it elsewhere is meaningless and can wedge the
+    session (a POSIX-only SIGINT test interrupts pytest on Windows). A test with
+    several platform markers runs if any of them matches (OR semantics).
+    """
+    for item in items:
+        restricting = [name for name in _PLATFORM_MARKERS if name in item.keywords]
+        if restricting and not any(_platform_marker_matches(name) for name in restricting):
+            reason = "requires " + " or ".join(name.removeprefix("os_") for name in restricting)
+            item.add_marker(pytest.mark.skip(reason=reason))
+
+
 def _load_dotenv() -> None:
     """Load .env file when it exists for integration test configuration."""
     from dotenv import load_dotenv
