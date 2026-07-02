@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from bmk.domain.stages import normalize_returncode
 
@@ -81,3 +82,21 @@ class PipelineAction:
         from .engine import run_pipeline
 
         return run_pipeline(list(registry.PIPELINES[self._prefix]), ctx, out=sink)
+
+
+class ShellStageAction:
+    """Run a legacy ``bmk_makescripts`` shell/PowerShell override script.
+
+    Bridges downstream projects still shipping shell overrides during the
+    migration. Retired in the final phase with the rest of the shell layer.
+    """
+
+    def __init__(self, script: Path) -> None:
+        self._script = script
+
+    def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
+        if self._script.suffix == ".ps1":
+            argv = ["pwsh", "-NoProfile", "-NonInteractive", "-File", str(self._script), *ctx.args]
+        else:
+            argv = [str(self._script), *ctx.args]
+        return run_argv(argv, ctx, sink)

@@ -14,6 +14,8 @@ untyped ``rtoml`` result is confined here behind explicit casts (typed facade).
 
 from __future__ import annotations
 
+import re
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +23,7 @@ from typing import Any, cast
 
 import rtoml
 
-from .actions import ToolAction
+from .actions import ShellStageAction, ToolAction
 from .model import Stage, StageContext
 
 _MAX_ARGV = 256
@@ -161,10 +163,46 @@ def resolve_stages(cwd: Path, prefix: str, base: Sequence[Stage]) -> list[Stage]
     return list(apply_overlay(base, overlay))
 
 
+def discover_shell_overrides(cwd: Path, prefix: str) -> list[Stage]:
+    """Find legacy ``bmk_makescripts/{prefix}_NN_*`` shell overrides for ``prefix``.
+
+    Mirrors the shell stagerunner's discovery: ``NN`` (2-6 digits) becomes the
+    stage order. Uses ``.ps1`` on Windows and ``.sh`` elsewhere. Empty if none.
+    """
+    override_dir = cwd / "bmk_makescripts"
+    if not override_dir.is_dir():
+        return []
+    suffix = ".ps1" if sys.platform == "win32" else ".sh"
+    pattern = re.compile(rf"^{re.escape(prefix)}_(\d{{2,6}})_.*{re.escape(suffix)}$")
+
+    stages: list[Stage] = []
+    for script in sorted(override_dir.iterdir()):
+        match = pattern.match(script.name)
+        if match is None:
+            continue
+        stages.append(Stage(script.stem, int(match.group(1)), ShellStageAction(script)))
+    return stages
+
+
+def resolve_pipeline(cwd: Path, prefix: str, base: Sequence[Stage]) -> list[Stage]:
+    """Resolve the stages to run for ``prefix``.
+
+    A legacy shell override (if present) replaces the built-in pipeline entirely,
+    matching the old stagerunner. Otherwise the built-in pipeline is used with any
+    TOML overlay applied.
+    """
+    shell_stages = discover_shell_overrides(cwd, prefix)
+    if shell_stages:
+        return shell_stages
+    return resolve_stages(cwd, prefix, base)
+
+
 __all__ = [
     "Overlay",
     "StageSpec",
     "apply_overlay",
+    "discover_shell_overrides",
     "load_overlay",
+    "resolve_pipeline",
     "resolve_stages",
 ]
