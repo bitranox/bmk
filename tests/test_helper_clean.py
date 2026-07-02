@@ -320,3 +320,9 @@ def test_main_passes_dry_run_and_verbose(tmp_path: Path, capsys: pytest.CaptureF
 
     captured = capsys.readouterr()
     assert "[DRY RUN]" in captured.out
+
+
+def test_clean_quiet_suppresses_summary(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / ".ruff_cache").mkdir()
+    clean(project_dir=tmp_path, patterns=[".ruff_cache"], quiet=True)
+    assert capsys.readouterr().out == ""

@@ -111,6 +111,7 @@ def clean(
     patterns: Iterable[str] | None = None,
     dry_run: bool = False,
     verbose: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Remove cached artefacts and build outputs matching ``patterns``.
 
@@ -125,6 +126,7 @@ def clean(
                   or uses built-in defaults.
         dry_run: If True, only show what would be deleted without removing.
         verbose: If True, list each file/directory being deleted.
+        quiet: If True, suppress the routine "Removed N items" summary (JSON mode).
 
     Returns:
         Exit code (0 on success).
@@ -168,7 +170,7 @@ def clean(
         print(f"Skipped {skipped_count} paths outside project directory")
     if dry_run:
         print(f"\n[DRY RUN] Would remove {removed_count} items")
-    elif verbose or removed_count > 0:
+    elif not quiet and (verbose or removed_count > 0):
         print(f"Removed {removed_count} items")
 
     return 0
@@ -179,6 +181,7 @@ def main(
     project_dir: Path | None = None,
     dry_run: bool = False,
     verbose: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Main entry point for clean utility.
 
@@ -186,14 +189,16 @@ def main(
         project_dir: Root directory to clean from. Defaults to cwd.
         dry_run: If True, only show what would be deleted.
         verbose: If True, list each file/directory being deleted.
+        quiet: If True, suppress routine informational output (JSON mode).
 
     Returns:
         Exit code (0 on success).
     """
     if project_dir is None:
         project_dir = Path.cwd()
-    print(f"Cleaning build artifacts in {project_dir}...")
-    return clean(project_dir=project_dir, dry_run=dry_run, verbose=verbose)
+    if not quiet:
+        print(f"Cleaning build artifacts in {project_dir}...")
+    return clean(project_dir=project_dir, dry_run=dry_run, verbose=verbose, quiet=quiet)
 
 
 if __name__ == "__main__":  # pragma: no cover

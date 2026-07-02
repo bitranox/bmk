@@ -21,7 +21,12 @@ from .overrides import load_overlay, resolve_stages
 
 def clean_action(ctx: StageContext) -> int:
     """Remove build artifacts and caches for the project."""
-    return _clean.main(project_dir=ctx.project_dir, dry_run=False, verbose=False)
+    return _clean.main(
+        project_dir=ctx.project_dir,
+        dry_run=False,
+        verbose=False,
+        quiet=ctx.output_format is not ToolOutputFormat.TEXT,
+    )
 
 
 def deps_action(ctx: StageContext) -> int:
