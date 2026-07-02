@@ -18,6 +18,7 @@ from bmk.adapters.stagerunner.overrides import (
     load_overlay,
     resolve_stages,
 )
+from bmk.domain.enums import ToolOutputFormat
 
 
 def _base() -> tuple[Stage, ...]:
@@ -27,7 +28,7 @@ def _base() -> tuple[Stage, ...]:
     )
 
 
-def _ctx(tmp_path: Path, output_format: str = "text") -> StageContext:
+def _ctx(tmp_path: Path, output_format: ToolOutputFormat = ToolOutputFormat.TEXT) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=(),
@@ -40,7 +41,7 @@ def _ctx(tmp_path: Path, output_format: str = "text") -> StageContext:
 
 
 def test_apply_overlay_add_appends_stage() -> None:
-    overlay = Overlay(add=(StageSpec("mypy", 50, ("mypy", "src")),))
+    overlay = Overlay(add=(StageSpec(name="mypy", order=50, argv=("mypy", "src")),))
     result = apply_overlay(_base(), overlay)
     assert [s.name for s in result] == ["ruff_lint", "pyright", "mypy"]
     assert result[-1].order == 50
@@ -53,7 +54,7 @@ def test_apply_overlay_remove_drops_stage_by_name() -> None:
 
 
 def test_apply_overlay_replace_swaps_action_keeping_order(tmp_path: Path) -> None:
-    overlay = Overlay(replace=(StageSpec("ruff_lint", 0, (sys.executable, "-c", "print('replaced')")),))
+    overlay = Overlay(replace=(StageSpec(name="ruff_lint", order=0, argv=(sys.executable, "-c", "print('replaced')")),))
     result = apply_overlay(_base(), overlay)
     ruff = next(s for s in result if s.name == "ruff_lint")
     assert ruff.order == 40  # original order kept
@@ -76,7 +77,7 @@ def test_load_overlay_reads_pyproject_tool_bmk(tmp_path: Path) -> None:
     overlay = load_overlay(tmp_path, "clean")
     assert overlay is not None
     assert overlay.remove == ("clean",)
-    assert overlay.add == (StageSpec("extra", 20, ("echo", "hi")),)
+    assert overlay.add == (StageSpec(name="extra", order=20, argv=("echo", "hi")),)
 
 
 def test_load_overlay_none_when_no_section(tmp_path: Path) -> None:
@@ -94,7 +95,7 @@ def test_load_overlay_from_stages_toml_wins(tmp_path: Path) -> None:
     )
     overlay = load_overlay(tmp_path, "clean")
     assert overlay is not None
-    assert overlay.add == (StageSpec("only", 5, ("true",)),)
+    assert overlay.add == (StageSpec(name="only", order=5, argv=("true",)),)
     assert overlay.remove == ()  # stages.toml replaced the pyproject overlay
 
 

@@ -9,13 +9,14 @@ from pathlib import Path
 from bmk.adapters.stagerunner.actions import HelperAction, ToolAction, run_argv
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
+from bmk.domain.enums import ToolOutputFormat
 
 
 def _ctx(tmp_path: Path) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=(),
-        output_format="json",
+        output_format=ToolOutputFormat.JSON,
         python_cmd=sys.executable,
         package_name="x",
         env=dict(os.environ),

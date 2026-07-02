@@ -12,7 +12,6 @@ Contents:
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import lib_log_rich.runtime
@@ -20,7 +19,7 @@ import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..typed_click import argument, option
-from ._shared import run_command
+from ._shared import resolve_output_format, run_command
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,7 @@ def _run_test_integration(args: tuple[str, ...], *, human: bool = False) -> None
         cwd,
         args,
         command_prefix="test_integration",
-        output_format="text" if human else os.environ.get("BMK_OUTPUT_FORMAT", "json"),
+        output_format=resolve_output_format(human=human),
     )
 
     if exit_code != 0:

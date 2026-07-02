@@ -12,13 +12,14 @@ import pytest
 from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
 from bmk.adapters.stagerunner.registry import PIPELINES
+from bmk.domain.enums import ToolOutputFormat
 
 
 def _ctx(tmp_path: Path) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=(),
-        output_format="text",
+        output_format=ToolOutputFormat.TEXT,
         python_cmd=sys.executable,
         package_name="x",
         env=dict(os.environ),

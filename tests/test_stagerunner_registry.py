@@ -7,6 +7,7 @@ from pathlib import Path
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
 from bmk.adapters.stagerunner.registry import PIPELINES
+from bmk.domain.enums import ToolOutputFormat
 
 
 def test_clean_pipeline_registered_single_stage() -> None:
@@ -21,7 +22,7 @@ def test_clean_action_removes_artifacts(tmp_path: Path) -> None:
     ctx = StageContext(
         project_dir=tmp_path,
         args=(),
-        output_format="json",
+        output_format=ToolOutputFormat.JSON,
         python_cmd="python3",
         package_name="x",
         env={},

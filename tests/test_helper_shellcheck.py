@@ -163,7 +163,9 @@ def test_run_shellcheck_returns_zero_on_clean(tmp_path: Path) -> None:
     """Returns 0 when shellcheck reports no violations."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch(
+        "bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
         result = run_shellcheck(files=[script])
 
     assert result == 0
@@ -248,7 +250,9 @@ def test_run_bashate_returns_zero_on_clean(tmp_path: Path) -> None:
     """Returns 0 when bashate reports no style issues."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch(
+        "bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
         result = run_bashate(files=[script], max_line_length=120, ignores=("E003",))
 
     assert result == 0
@@ -273,7 +277,9 @@ def test_run_bashate_omits_ignore_flag_when_empty(tmp_path: Path) -> None:
     """No --ignore flag when ignores tuple is empty."""
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/bash\n")
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch(
+        "bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
         run_bashate(files=[script], max_line_length=80, ignores=())
 
     cmd = mock_run.call_args[0][0]

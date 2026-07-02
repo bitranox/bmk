@@ -6,13 +6,14 @@ from pathlib import Path
 
 from bmk.adapters.stagerunner import tools
 from bmk.adapters.stagerunner.model import StageContext
+from bmk.domain.enums import ToolOutputFormat
 
 
 def _ctx(tmp_path: Path, *, args: tuple[str, ...] = ()) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=args,
-        output_format="json",
+        output_format=ToolOutputFormat.JSON,
         python_cmd="/usr/bin/python3",
         package_name="x",
         env={},

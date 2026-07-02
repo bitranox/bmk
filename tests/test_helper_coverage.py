@@ -381,7 +381,9 @@ def test_run_coverage_tests_includes_marker_filter_by_default(tmp_path: Path) ->
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch(
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
         run_coverage_tests(project_dir=tmp_path)
 
     first_call_args = mock_run.call_args_list[0][0][0]
@@ -397,7 +399,9 @@ def test_run_coverage_tests_omits_marker_filter_for_integration(tmp_path: Path) 
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n')
 
-    with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch(
+        "bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
         run_coverage_tests(project_dir=tmp_path, include_integration=True)
 
     first_call_args = mock_run.call_args_list[0][0][0]

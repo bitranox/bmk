@@ -13,6 +13,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 
+from bmk.domain.enums import ToolOutputFormat
 from bmk.domain.stages import (
     PipelineSummary,
     StageResult,
@@ -34,7 +35,7 @@ from .signals import install_signal_handlers
 
 def _sink_for(stage: Stage, ctx: StageContext, out: SupportsWrite) -> OutputSink:
     """Capture output for later (JSON mode) unless the stage is interactive."""
-    if ctx.output_format != "text" and not stage.interactive:
+    if ctx.output_format is not ToolOutputFormat.TEXT and not stage.interactive:
         return CapturingSink()
     return PassthroughSink(out)
 
@@ -72,7 +73,7 @@ def run_pipeline(stages: Sequence[Stage], ctx: StageContext, *, out: SupportsWri
     output is shown.
     """
     stream = out if out is not None else sys.stdout
-    quiet = ctx.output_format != "text"
+    quiet = ctx.output_format is not ToolOutputFormat.TEXT
     batches = group_into_batches(list(stages), key=lambda stage: stage.order)
 
     with install_signal_handlers():

@@ -10,13 +10,14 @@ import pytest
 from bmk.adapters.stagerunner.actions import PipelineAction
 from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
+from bmk.domain.enums import ToolOutputFormat
 
 
 def _ctx(tmp_path: Path) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=(),
-        output_format="json",
+        output_format=ToolOutputFormat.JSON,
         python_cmd="python3",
         package_name="x",
         env={},

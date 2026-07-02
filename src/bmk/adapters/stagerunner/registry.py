@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from bmk.domain.enums import ToolOutputFormat
+
 from . import git_ops, tools
 from .actions import HelperAction, PipelineAction, ToolAction
 from .helpers import _clean, _dependencies
@@ -26,7 +28,7 @@ def deps_action(ctx: StageContext) -> int:
     """Check project dependencies against PyPI."""
     return _dependencies.main(
         pyproject=ctx.project_dir / "pyproject.toml",
-        quiet=ctx.output_format != "text",
+        quiet=ctx.output_format is not ToolOutputFormat.TEXT,
     )
 
 
@@ -35,7 +37,7 @@ def deps_update_action(ctx: StageContext) -> int:
     return _dependencies.main(
         update=True,
         pyproject=ctx.project_dir / "pyproject.toml",
-        quiet=ctx.output_format != "text",
+        quiet=ctx.output_format is not ToolOutputFormat.TEXT,
     )
 
 

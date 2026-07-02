@@ -6,6 +6,7 @@ from pathlib import Path
 
 from bmk.adapters.stagerunner.model import Stage, StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
+from bmk.domain.enums import ToolOutputFormat
 
 
 def test_stage_is_frozen_and_defaults_non_interactive() -> None:
@@ -20,7 +21,7 @@ def test_stage_action_is_callable_with_context_and_sink() -> None:
     ctx = StageContext(
         project_dir=Path("/proj"),
         args=(),
-        output_format="json",
+        output_format=ToolOutputFormat.JSON,
         python_cmd="python3",
         package_name="bmk",
         env={},
@@ -33,7 +34,7 @@ def test_stage_context_carries_project_dir_and_args() -> None:
     ctx = StageContext(
         project_dir=Path("/proj"),
         args=("--x",),
-        output_format="text",
+        output_format=ToolOutputFormat.TEXT,
         python_cmd="python3",
         package_name="bmk",
         env={"BMK_PROJECT_DIR": "/proj"},

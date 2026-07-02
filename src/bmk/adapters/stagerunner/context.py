@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from bmk.domain.enums import ToolOutputFormat
+
 from .model import StageContext
 
 
@@ -41,7 +43,7 @@ def build_context(
     args: tuple[str, ...],
     *,
     command_prefix: str,
-    output_format: str,
+    output_format: ToolOutputFormat,
     show_warnings: bool,
     package_name: str = "",
 ) -> StageContext:
@@ -51,7 +53,7 @@ def build_context(
     env["BMK_COMMAND_PREFIX"] = command_prefix
     env["BMK_SHOW_WARNINGS"] = "1" if show_warnings else "0"
     env["BMK_PYTHON_CMD"] = sys.executable
-    env["BMK_OUTPUT_FORMAT"] = output_format
+    env["BMK_OUTPUT_FORMAT"] = output_format.value  # serialize enum -> env string at the subprocess boundary
     if package_name:
         env["BMK_PACKAGE_NAME"] = package_name
     _pin_project_venv(env, cwd)

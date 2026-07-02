@@ -26,6 +26,22 @@ class OutputFormat(str, Enum):
     JSON = "json"
 
 
+class ToolOutputFormat(str, Enum):
+    """Tool output mode for the stage runner.
+
+    ``JSON`` captures tool output and shows it only on failure (machine-readable,
+    the default); ``TEXT`` streams full verbose output. Distinct from
+    :class:`OutputFormat` (which is ``human`` vs ``json`` for config display).
+
+    Example:
+        >>> ToolOutputFormat.JSON == "json"
+        True
+    """
+
+    TEXT = "text"
+    JSON = "json"
+
+
 class DeployTarget(str, Enum):
     """Configuration deployment target layers.
 
@@ -52,4 +68,5 @@ class DeployTarget(str, Enum):
 __all__ = [
     "DeployTarget",
     "OutputFormat",
+    "ToolOutputFormat",
 ]

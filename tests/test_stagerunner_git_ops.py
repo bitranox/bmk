@@ -13,13 +13,14 @@ import pytest
 
 from bmk.adapters.stagerunner import git_ops
 from bmk.adapters.stagerunner.model import StageContext
+from bmk.domain.enums import ToolOutputFormat
 
 
 def _ctx(tmp_path: Path, *, args: tuple[str, ...] = (), env: dict[str, str] | None = None) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=args,
-        output_format="text",
+        output_format=ToolOutputFormat.TEXT,
         python_cmd=sys.executable,
         package_name="x",
         env=env if env is not None else dict(os.environ),

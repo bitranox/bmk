@@ -12,6 +12,7 @@ from pathlib import Path
 
 import rich_click as click
 
+from bmk.domain.enums import ToolOutputFormat
 from bmk.domain.stages import normalize_returncode
 
 from ..exit_codes import ExitCode
@@ -22,7 +23,7 @@ def run_command(
     extra_args: tuple[str, ...],
     *,
     command_prefix: str,
-    output_format: str = "json",
+    output_format: ToolOutputFormat = ToolOutputFormat.JSON,
     show_warnings: bool = True,
     package_name: str = "",
 ) -> int:
@@ -32,7 +33,7 @@ def run_command(
         cwd: Project directory (the pipeline runs here).
         extra_args: Arguments forwarded to the pipeline's stages.
         command_prefix: Pipeline to run (e.g. ``"test"``, ``"clean"``).
-        output_format: ``"json"`` (machine-readable, quiet) or ``"text"`` (verbose).
+        output_format: TEXT (verbose) or JSON (machine-readable, quiet).
         show_warnings: Show warnings from passing parallel stages.
         package_name: Import package name override (else derived from pyproject).
 
@@ -66,4 +67,17 @@ def run_command(
     return run_pipeline(stages, ctx)
 
 
-__all__ = ["normalize_returncode", "run_command"]
+def resolve_output_format(*, human: bool) -> ToolOutputFormat:
+    """Parse the tool output format at the CLI boundary.
+
+    ``--human`` forces TEXT; otherwise ``BMK_OUTPUT_FORMAT=text`` selects TEXT and
+    anything else (including unset) defaults to JSON.
+    """
+    import os
+
+    if human or os.environ.get("BMK_OUTPUT_FORMAT") == ToolOutputFormat.TEXT.value:
+        return ToolOutputFormat.TEXT
+    return ToolOutputFormat.JSON
+
+
+__all__ = ["normalize_returncode", "resolve_output_format", "run_command"]

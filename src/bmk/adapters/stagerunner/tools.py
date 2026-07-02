@@ -14,6 +14,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from bmk.domain.enums import ToolOutputFormat
+
 from .model import StageContext
 from .project import derive_package_name, pip_audit_ignore_flags
 
@@ -22,7 +24,7 @@ _HELPERS_DIR = Path(__file__).resolve().parent / "helpers"
 
 
 def _is_json(ctx: StageContext) -> bool:
-    return ctx.output_format == "json"
+    return ctx.output_format is ToolOutputFormat.JSON
 
 
 def _helper(name: str) -> str:

@@ -10,7 +10,6 @@ Contents:
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,7 +19,7 @@ import rich_click as click
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
 from ..typed_click import argument, option
-from ._shared import run_command
+from ._shared import resolve_output_format, run_command
 
 if TYPE_CHECKING:
     from lib_layered_config import Config
@@ -49,7 +48,7 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
         command_prefix="test",
         package_name=bmk_config.get("package_name", ""),
         show_warnings=bmk_config.get("show_warnings", True),
-        output_format="text" if human else os.environ.get("BMK_OUTPUT_FORMAT", "json"),
+        output_format=resolve_output_format(human=human),
     )
 
     if exit_code != 0:

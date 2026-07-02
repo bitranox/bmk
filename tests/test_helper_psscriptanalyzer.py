@@ -225,7 +225,9 @@ def test_ensure_psscriptanalyzer_installs_when_missing() -> None:
 @pytest.mark.os_agnostic
 def test_run_psscriptanalyzer_returns_zero_on_clean(tmp_path: Path) -> None:
     """Returns 0 when PSScriptAnalyzer reports no violations."""
-    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)) as mock_run:
+    with patch(
+        "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
         result = run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
             project_dir=tmp_path,

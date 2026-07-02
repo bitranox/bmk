@@ -10,9 +10,10 @@ import pytest
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
+from bmk.domain.enums import ToolOutputFormat
 
 
-def _ctx(tmp_path: Path, output_format: str = "json") -> StageContext:
+def _ctx(tmp_path: Path, output_format: ToolOutputFormat = ToolOutputFormat.JSON) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=(),
@@ -41,7 +42,7 @@ def test_deps_action_calls_helper_with_pyproject_and_quiet(tmp_path: Path, monke
 
     monkeypatch.setattr(_dependencies, "main", fake_main)
 
-    rc = PIPELINES["deps"][0].action(_ctx(tmp_path, "json"), CapturingSink())
+    rc = PIPELINES["deps"][0].action(_ctx(tmp_path, ToolOutputFormat.JSON), CapturingSink())
     assert rc == 0
     assert captured["pyproject"] == tmp_path / "pyproject.toml"
     assert captured["quiet"] is True
@@ -59,7 +60,7 @@ def test_deps_action_not_quiet_in_text_mode(tmp_path: Path, monkeypatch: pytest.
 
     monkeypatch.setattr(_dependencies, "main", _fake)
 
-    PIPELINES["deps"][0].action(_ctx(tmp_path, "text"), CapturingSink())
+    PIPELINES["deps"][0].action(_ctx(tmp_path, ToolOutputFormat.TEXT), CapturingSink())
     assert captured["quiet"] is False
 
 
@@ -74,6 +75,6 @@ def test_deps_update_action_sets_update(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(_dependencies, "main", _fake)
 
-    PIPELINES["deps_update"][0].action(_ctx(tmp_path, "json"), CapturingSink())
+    PIPELINES["deps_update"][0].action(_ctx(tmp_path, ToolOutputFormat.JSON), CapturingSink())
     assert captured["update"] is True
     assert captured["pyproject"] == tmp_path / "pyproject.toml"

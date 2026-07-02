@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from bmk.domain.enums import ToolOutputFormat
+
 from .output import OutputSink
 
 
@@ -20,7 +22,7 @@ class StageContext:
 
     project_dir: Path
     args: tuple[str, ...]
-    output_format: str  # "json" | "text"
+    output_format: ToolOutputFormat
     python_cmd: str
     package_name: str
     env: Mapping[str, str]

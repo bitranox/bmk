@@ -9,9 +9,10 @@ from pathlib import Path
 from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
 from bmk.adapters.stagerunner.output import OutputSink
+from bmk.domain.enums import ToolOutputFormat
 
 
-def _ctx(tmp_path: Path, output_format: str = "json") -> StageContext:
+def _ctx(tmp_path: Path, output_format: ToolOutputFormat = ToolOutputFormat.JSON) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
         args=(),
