@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from bmk.adapters.stagerunner.actions import ToolAction
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES, resolve_python_pipeline
 
 
@@ -33,6 +34,22 @@ def test_push_pipeline_orders() -> None:
         ("commit", 40),
         ("push", 50),
     ]
+
+
+def test_push_does_not_clean_before_or_during_test() -> None:
+    # The .venv-vs-clean race guard: no `clean` may run at or before `test`'s order,
+    # else it removes the .venv/caches the pinned test tools (pyright, pip-audit, ...)
+    # depend on. push's only clean runs strictly AFTER test.
+    stages = PIPELINES["push"]
+    test_order = next(s.order for s in stages if s.name == "test")
+    assert all(s.order > test_order for s in stages if s.name == "clean")
+
+
+def test_push_build_stage_does_not_clean() -> None:
+    # push builds directly (not via `bld`, which cleans first) so nothing rmtree's the
+    # workspace while the parallel `test` batch is pinned to it.
+    build = next(s for s in PIPELINES["push"] if s.name == "build")
+    assert isinstance(build.action, ToolAction)
 
 
 def test_rel_and_run_pipelines() -> None:

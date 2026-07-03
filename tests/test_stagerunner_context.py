@@ -6,8 +6,21 @@ import os
 import sys
 from pathlib import Path
 
-from bmk.adapters.stagerunner.context import build_context
+from bmk.adapters.stagerunner.context import build_context, resolve_audit_python
+from bmk.adapters.stagerunner.model import StageContext
 from bmk.domain.enums import ToolOutputFormat
+
+
+def _ctx(env: dict[str, str]) -> StageContext:
+    return StageContext(
+        project_dir=Path("/proj"),
+        args=(),
+        output_format=ToolOutputFormat.JSON,
+        python_cmd="/bmk/bin/python",
+        package_name="",
+        env=env,
+        show_warnings=True,
+    )
 
 
 def test_build_context_sets_project_env(tmp_path: Path) -> None:
@@ -58,3 +71,19 @@ def test_build_context_pins_venv_when_present(tmp_path: Path) -> None:
     ctx = build_context(tmp_path, (), command_prefix="clean", output_format=ToolOutputFormat.TEXT, show_warnings=True)
     assert ctx.env["VIRTUAL_ENV"] == str(venv)
     assert ctx.env["PIPAPI_PYTHON_LOCATION"] == str(exe)
+
+
+def test_resolve_audit_python_prefers_existing_pinned_interpreter(tmp_path: Path) -> None:
+    exe = tmp_path / "python"
+    exe.write_text("", encoding="utf-8")
+    assert resolve_audit_python(_ctx({"PIPAPI_PYTHON_LOCATION": str(exe)})) == str(exe)
+
+
+def test_resolve_audit_python_falls_back_when_pinned_interpreter_gone(tmp_path: Path) -> None:
+    # A clean removed the pinned .venv interpreter: fall back to bmk's own (python_cmd).
+    missing = tmp_path / ".venv" / "bin" / "python"
+    assert resolve_audit_python(_ctx({"PIPAPI_PYTHON_LOCATION": str(missing)})) == "/bmk/bin/python"
+
+
+def test_resolve_audit_python_falls_back_when_unpinned() -> None:
+    assert resolve_audit_python(_ctx({})) == "/bmk/bin/python"

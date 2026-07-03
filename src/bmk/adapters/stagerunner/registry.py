@@ -13,7 +13,8 @@ from pathlib import Path
 from bmk.domain.enums import ToolOutputFormat
 
 from . import git_ops, tools
-from .actions import HelperAction, PipelineAction, ToolAction, ToolActionWithSetup
+from .actions import HelperAction, PipAuditAction, PipelineAction, ToolAction
+from .context import resolve_audit_python
 from .helpers import _clean, _dependencies
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
@@ -54,7 +55,7 @@ _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("ruff_fix_apply", 30, ToolAction(tools.ruff_fix_apply_argv)),
     Stage("bandit", 40, ToolAction(tools.bandit_argv)),
     Stage("lint_imports", 40, ToolAction(tools.lint_imports_argv)),
-    Stage("pip_audit", 40, ToolActionWithSetup(tools.ensure_audit_pip_argv, tools.pip_audit_argv)),
+    Stage("pip_audit", 40, PipAuditAction(resolve_audit_python, tools.ensure_audit_pip_argv, tools.pip_audit_argv)),
     Stage("pyright", 40, ToolAction(tools.pyright_argv)),
     Stage("pytest", 40, ToolAction(tools.pytest_cov_argv)),
     Stage("ruff_format_check", 40, ToolAction(tools.ruff_format_check_argv)),
@@ -91,9 +92,16 @@ _BLD_PIPELINE: tuple[Stage, ...] = (
 )
 
 # push composes other pipelines (build + test run in parallel at order 20).
+# `build` runs a direct `python -m build` here, NOT the `bld` pipeline: `bld` cleans
+# first, and that clean - running in the same order-20 batch as `test` - rmtree's the
+# project `.venv` and the caches (.pytest_cache/.ruff_cache/.pyright/.coverage/...) that
+# the concurrent `test` tools read and write, while they are pinned to `.venv` via
+# VIRTUAL_ENV / PIPAPI_PYTHON_LOCATION (pip-audit crashed on the vanished interpreter;
+# pyright/cache deletions were latent flakiness). So push does NOT clean before `test`;
+# the sole `clean` runs at order 30, AFTER `test`, leaving every pin valid throughout.
 _PUSH_PIPELINE: tuple[Stage, ...] = (
     Stage("update_deps", 10, PipelineAction("deps")),
-    Stage("build", 20, PipelineAction("bld")),
+    Stage("build", 20, ToolAction(tools.python_build_argv)),
     Stage("test", 20, PipelineAction("test")),
     Stage("clean", 30, PipelineAction("clean")),
     Stage("commit", 40, PipelineAction("commit")),

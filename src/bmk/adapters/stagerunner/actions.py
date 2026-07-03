@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable, Sequence
+from dataclasses import replace
+from pathlib import Path
 
 from bmk.domain.stages import normalize_returncode
 
@@ -53,26 +55,46 @@ class ToolAction:
         return run_argv(self._build_argv(ctx), ctx, sink)
 
 
-class ToolActionWithSetup:
-    """Run a best-effort setup argv, then the main tool argv, into one sink.
+class PipAuditAction:
+    """Run pip-audit against a run-time-resolved, self-healing interpreter.
 
-    Both run through :func:`run_argv`, so their output is captured and shown only on
-    failure (JSON mode). Setup is best-effort: its exit code does not by itself fail
-    the stage, the main tool decides. This lets a transient ``uv`` hiccup pass when
-    pip is already current, while a genuinely-missing pip still fails via the tool.
+    ``resolve_python`` picks the interpreter to audit when the stage runs (the pinned
+    project ``.venv`` while it exists, else bmk's own interpreter), so pip-audit does
+    not crash on a ``PIPAPI_PYTHON_LOCATION`` that an earlier ``clean`` removed (the
+    ``.venv``-vs-clean race). ``PIPAPI_PYTHON_LOCATION`` is repointed at the resolved
+    interpreter for both child processes. A current pip is bootstrapped into it first
+    (best-effort - uv venvs ship no pip); its exit code does not fail the stage, only
+    pip-audit's does. Both run through :func:`run_argv` so their output is captured and
+    shown only on failure (JSON mode).
+
+    If pip-audit fails *and* the resolved interpreter has since vanished (a ``clean``
+    removed the project ``.venv`` between resolution and the audit - the TOCTOU window a
+    concurrent clean could still open), it retries once against bmk's own interpreter,
+    which is never a clean target. Real audit findings (interpreter still present) are
+    not retried.
     """
 
     def __init__(
         self,
+        resolve_python: Callable[[StageContext], str],
         setup_argv: Callable[[StageContext], list[str]],
         build_argv: Callable[[StageContext], list[str]],
     ) -> None:
+        self._resolve_python = resolve_python
         self._setup_argv = setup_argv
         self._build_argv = build_argv
 
     def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
-        run_argv(self._setup_argv(ctx), ctx, sink)  # best-effort; output captured
-        return run_argv(self._build_argv(ctx), ctx, sink)
+        python = self._resolve_python(ctx)
+        rc = self._audit(ctx, python, sink)
+        if rc != 0 and python != ctx.python_cmd and not Path(python).exists():
+            rc = self._audit(ctx, ctx.python_cmd, sink)  # pinned interpreter vanished mid-audit; self-heal
+        return rc
+
+    def _audit(self, ctx: StageContext, python: str, sink: OutputSink) -> int:
+        audit_ctx = replace(ctx, env={**ctx.env, "PIPAPI_PYTHON_LOCATION": python})
+        run_argv(self._setup_argv(audit_ctx), audit_ctx, sink)  # best-effort pip bootstrap
+        return run_argv(self._build_argv(audit_ctx), audit_ctx, sink)
 
 
 class HelperAction:

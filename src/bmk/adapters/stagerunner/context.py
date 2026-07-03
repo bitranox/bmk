@@ -35,9 +35,11 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
       audits *that*, not whatever ``pip-audit`` sits first on PATH (e.g. an
       editor's venv full of unrelated packages).
 
-    A uv-created ``.venv`` ships no pip, so the ``pip_audit`` stage bootstraps a
-    current pip (via uv) into whichever interpreter this function pins before
-    auditing - see ``tools.ensure_audit_pip_argv``.
+    This is the pin at context-build time; the ``pip_audit`` stage re-resolves the
+    interpreter when it runs (see ``resolve_audit_python``) so a ``clean`` that removed
+    the ``.venv`` in between cannot crash it, and bootstraps a current pip into the
+    resolved interpreter (a uv-created ``.venv`` ships no pip) via
+    ``tools.ensure_audit_pip_argv``.
     """
     project_venv = cwd / ".venv"
     if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
@@ -50,6 +52,22 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
     else:
         env.pop("VIRTUAL_ENV", None)
         env["PIPAPI_PYTHON_LOCATION"] = sys.executable
+
+
+def resolve_audit_python(ctx: StageContext) -> str:
+    """Interpreter pip-audit should audit, resolved when the stage runs.
+
+    Prefer the pinned ``PIPAPI_PYTHON_LOCATION`` while it still exists on disk; if it
+    is gone (e.g. a ``clean`` stage removed the project ``.venv`` earlier in the same
+    pipeline run), fall back to bmk's own interpreter, whose tool venv holds the full
+    dependency tree. Resolving at run time - not at context-build time - keeps pip-audit
+    from crashing on a pinned interpreter that no longer exists (the ``.venv``-vs-clean
+    race).
+    """
+    pinned = ctx.env.get("PIPAPI_PYTHON_LOCATION")
+    if pinned and Path(pinned).exists():
+        return pinned
+    return ctx.python_cmd
 
 
 def _prepend_src_to_pythonpath(env: dict[str, str], cwd: Path) -> None:

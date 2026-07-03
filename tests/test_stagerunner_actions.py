@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from bmk.adapters.stagerunner import actions as actions_mod
-from bmk.adapters.stagerunner.actions import HelperAction, ToolAction, ToolActionWithSetup, run_argv
+from bmk.adapters.stagerunner.actions import HelperAction, PipAuditAction, ToolAction, run_argv
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink, OutputSink
 from bmk.domain.enums import ToolOutputFormat
@@ -61,31 +61,75 @@ def test_helper_action_calls_func_in_process(tmp_path: Path) -> None:
     assert seen and seen[0].project_dir == tmp_path
 
 
-def test_tool_action_with_setup_runs_setup_then_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[list[str]] = []
+def test_pip_audit_action_repoints_interpreter_and_runs_setup_then_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], str]] = []
 
     def fake_run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
-        calls.append(list(argv))
+        calls.append((list(argv), ctx.env["PIPAPI_PYTHON_LOCATION"]))
         return 0 if argv[0] == "setup" else 7
 
     monkeypatch.setattr(actions_mod, "run_argv", fake_run_argv)
-    action = ToolActionWithSetup(lambda _ctx: ["setup"], lambda _ctx: ["main"])
-    rc = action(_ctx(tmp_path), CapturingSink())
-    assert calls == [["setup"], ["main"]]  # setup runs before main, into the same sink
-    assert rc == 7  # the stage's exit code is the main tool's, not setup's
+    # Resolver reports the interpreter to audit (an existing one, so the self-heal retry
+    # does not fire); both children must see it via env.
+    action = PipAuditAction(lambda ctx: ctx.python_cmd, lambda _ctx: ["setup"], lambda _ctx: ["main"])
+    ctx = _ctx(tmp_path)
+    rc = action(ctx, CapturingSink())
+    assert [argv for argv, _ in calls] == [["setup"], ["main"]]  # setup (pip bootstrap) before pip-audit
+    assert all(pipapi == ctx.python_cmd for _, pipapi in calls)  # PIPAPI_PYTHON_LOCATION repointed
+    assert rc == 7  # the stage's exit code is pip-audit's, not the best-effort setup's
 
 
-def test_tool_action_with_setup_runs_main_even_when_setup_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pip_audit_action_setup_failure_does_not_fail_stage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
 
     def fake_run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
         calls.append(list(argv))
-        return 1 if argv[0] == "setup" else 0  # setup fails, main succeeds
+        return 1 if argv[0] == "setup" else 0  # pip bootstrap fails, pip-audit succeeds
 
     monkeypatch.setattr(actions_mod, "run_argv", fake_run_argv)
-    action = ToolActionWithSetup(lambda _ctx: ["setup"], lambda _ctx: ["main"])
+    action = PipAuditAction(lambda ctx: ctx.python_cmd, lambda _ctx: ["setup"], lambda _ctx: ["main"])
     rc = action(_ctx(tmp_path), CapturingSink())
-    assert calls == [["setup"], ["main"]]  # best-effort setup does not short-circuit the main tool
-    assert rc == 0  # setup's non-zero is ignored; the main tool decides
+    assert calls == [["setup"], ["main"]]  # best-effort setup does not short-circuit pip-audit
+    assert rc == 0  # setup's non-zero is ignored; pip-audit decides
+
+
+def test_pip_audit_action_retries_own_interpreter_when_pinned_vanished(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = tmp_path / ".venv" / "bin" / "python"  # resolved then removed (TOCTOU): does not exist
+    seen_pipapi: list[str] = []
+
+    def fake_run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
+        if argv[0] == "setup":
+            return 0
+        pipapi = ctx.env["PIPAPI_PYTHON_LOCATION"]
+        seen_pipapi.append(pipapi)
+        return 1 if pipapi == str(missing) else 0  # audit fails on the vanished pin, passes on fallback
+
+    monkeypatch.setattr(actions_mod, "run_argv", fake_run_argv)
+    action = PipAuditAction(lambda _ctx: str(missing), lambda _ctx: ["setup"], lambda _ctx: ["main"])
+    ctx = _ctx(tmp_path)  # python_cmd == sys.executable, which exists
+    rc = action(ctx, CapturingSink())
+    assert seen_pipapi == [str(missing), ctx.python_cmd]  # first the vanished pin, then the self-heal retry
+    assert rc == 0
+
+
+def test_pip_audit_action_does_not_retry_real_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Interpreter still exists but pip-audit reports findings: a genuine failure, not the
+    # race - must NOT be retried (retrying would mask real vulnerabilities).
+    audits = 0
+
+    def fake_run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
+        nonlocal audits
+        if argv[0] == "setup":
+            return 0
+        audits += 1
+        return 1  # findings
+
+    monkeypatch.setattr(actions_mod, "run_argv", fake_run_argv)
+    action = PipAuditAction(lambda ctx: ctx.python_cmd, lambda _ctx: ["setup"], lambda _ctx: ["main"])
+    rc = action(_ctx(tmp_path), CapturingSink())  # resolves to python_cmd, which exists
+    assert rc == 1
+    assert audits == 1  # no retry

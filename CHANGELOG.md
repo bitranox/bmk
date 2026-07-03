@@ -6,6 +6,30 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.4] 2026-07-03 11:41:32
+
+### Fixed
+- **`.venv`-vs-clean race in `make push`.** `push` built via the `bld` pipeline (which
+  cleans first) in the same parallel batch as `test`; that clean rmtree'd the project
+  `.venv` and tool caches while the concurrent test tools were pinned to them
+  (`VIRTUAL_ENV` for pyright, `PIPAPI_PYTHON_LOCATION` for pip-audit). pip-audit crashed
+  with `FileNotFoundError`; pyright and cache deletions were latent flakiness. `push` now
+  builds via a direct `python -m build` and runs its only `clean` at order 30, strictly
+  after `test`, so every pin stays valid through the build+test window - fixing the whole
+  class of clean-vs-test races, not just `.venv`.
+
+### Added
+- `actions.PipAuditAction` and `context.resolve_audit_python`: the `pip_audit` stage now
+  re-resolves its interpreter when it runs (the pinned `.venv` if it still exists, else
+  bmk's own interpreter) and, if pip-audit fails because the interpreter vanished mid-run
+  (a concurrent clean in a custom overlay pipeline), retries once against bmk's own
+  interpreter. Robust to a removed `.venv` regardless of pipeline structure. Adds a
+  `local_only` integration test that drives the removed-`.venv` path end to end.
+
+### Changed
+- `actions.ToolActionWithSetup` (added in 3.1.3) replaced by `PipAuditAction`, which folds
+  in the pip bootstrap plus the interpreter re-resolution and self-heal retry.
+
 ## [3.1.3] 2026-07-03 10:29:05
 
 ### Fixed
