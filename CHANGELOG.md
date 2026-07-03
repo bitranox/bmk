@@ -6,6 +6,28 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.3] 2026-07-03 10:29:05
+
+### Fixed
+- `pip_audit` stage no longer fails with `No module named pip` when the audited
+  interpreter is a uv-created `.venv` (uv venvs ship no pip). The stage now bootstraps a
+  current pip into the pinned interpreter (`PIPAPI_PYTHON_LOCATION`) via
+  `uv pip install --python <target> --upgrade pip` before auditing, using uv (a bmk
+  prerequisite) so it installs the latest pip directly instead of ensurepip's bundled
+  pip 25.2 (which is itself flagged). This also inoculates CI's tool venv against the
+  same pip CVE.
+
+### Added
+- `tools.ensure_audit_pip_argv` (the pip-bootstrap argv builder) and
+  `actions.ToolActionWithSetup` (runs a best-effort setup argv, then the main tool argv,
+  into one capture-on-failure sink; the main tool's exit code decides the stage).
+
+### Changed
+- CI: bump `actions/cache` to v6.
+- `[tool.pip-audit].ignore-vulns` emptied: both audit targets (project `.venv` and bmk's
+  tool venv) are clean, and the new pip auto-upgrade removes the former pip-CVE ignores'
+  reason to exist.
+
 ## [3.1.2] 2026-07-03 01:31:51
 
 ### Added

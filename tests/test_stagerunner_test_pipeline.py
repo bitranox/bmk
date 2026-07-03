@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bmk.adapters.stagerunner.actions import ToolActionWithSetup
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
 from bmk.domain.stages import group_into_batches
 
@@ -44,3 +45,10 @@ def test_cov_pipeline() -> None:
 
 def test_test_integration_pipeline() -> None:
     assert [(s.name, s.order) for s in PIPELINES["test_integration"]] == [("pytest_integration", 10)]
+
+
+def test_pip_audit_stage_bootstraps_pip() -> None:
+    # The pip_audit stage installs a current pip into the pinned interpreter before
+    # auditing, so a uv-created (pip-less) .venv does not break pip-audit.
+    pip_audit = next(s for s in PIPELINES["test"] if s.name == "pip_audit")
+    assert isinstance(pip_audit.action, ToolActionWithSetup)

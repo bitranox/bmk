@@ -66,6 +66,18 @@ def lint_imports_argv(_ctx: StageContext) -> list[str]:
     return ["lint-imports"]
 
 
+def ensure_audit_pip_argv(ctx: StageContext) -> list[str]:
+    """Install/upgrade a current pip in the interpreter pip-audit will audit.
+
+    pip-audit runs ``<PIPAPI_PYTHON_LOCATION> -m pip``; a uv-created ``.venv`` ships
+    no pip, and ensurepip's bundled pip (25.2) is itself flagged. Install the latest
+    pip via uv into the pinned interpreter (uv is a bmk prerequisite). Targeting the
+    same interpreter ``_pin_project_venv`` pinned keeps ensure-target == audit-target.
+    """
+    target = ctx.env.get("PIPAPI_PYTHON_LOCATION") or ctx.python_cmd
+    return ["uv", "pip", "install", "--python", target, "--upgrade", "pip"]
+
+
 def pip_audit_argv(ctx: StageContext) -> list[str]:
     ignores = pip_audit_ignore_flags(ctx.project_dir / "pyproject.toml")
     fmt = ["-f", "json"] if _is_json(ctx) else []

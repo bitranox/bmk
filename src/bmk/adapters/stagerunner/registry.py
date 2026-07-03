@@ -13,7 +13,7 @@ from pathlib import Path
 from bmk.domain.enums import ToolOutputFormat
 
 from . import git_ops, tools
-from .actions import HelperAction, PipelineAction, ToolAction
+from .actions import HelperAction, PipelineAction, ToolAction, ToolActionWithSetup
 from .helpers import _clean, _dependencies
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
@@ -54,7 +54,7 @@ _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("ruff_fix_apply", 30, ToolAction(tools.ruff_fix_apply_argv)),
     Stage("bandit", 40, ToolAction(tools.bandit_argv)),
     Stage("lint_imports", 40, ToolAction(tools.lint_imports_argv)),
-    Stage("pip_audit", 40, ToolAction(tools.pip_audit_argv)),
+    Stage("pip_audit", 40, ToolActionWithSetup(tools.ensure_audit_pip_argv, tools.pip_audit_argv)),
     Stage("pyright", 40, ToolAction(tools.pyright_argv)),
     Stage("pytest", 40, ToolAction(tools.pytest_cov_argv)),
     Stage("ruff_format_check", 40, ToolAction(tools.ruff_format_check_argv)),

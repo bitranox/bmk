@@ -73,6 +73,33 @@ def test_pip_audit_argv_with_ignores_and_json(tmp_path: Path) -> None:
     assert tools.pip_audit_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)) == ["pip-audit", "--ignore-vuln=GHSA-x"]
 
 
+def test_ensure_audit_pip_argv_targets_pinned_interpreter(tmp_path: Path) -> None:
+    ctx = dataclasses.replace(_ctx(tmp_path), env={"PIPAPI_PYTHON_LOCATION": "/proj/.venv/bin/python"})
+    assert tools.ensure_audit_pip_argv(ctx) == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/proj/.venv/bin/python",
+        "--upgrade",
+        "pip",
+    ]
+
+
+def test_ensure_audit_pip_argv_falls_back_to_python_cmd(tmp_path: Path) -> None:
+    # No PIPAPI_PYTHON_LOCATION pinned -> target bmk's own interpreter (ctx.python_cmd).
+    ctx = _ctx(tmp_path)  # env={} in the helper
+    assert tools.ensure_audit_pip_argv(ctx) == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/usr/bin/python3",
+        "--upgrade",
+        "pip",
+    ]
+
+
 def test_pytest_cov_argv(tmp_path: Path) -> None:
     argv = tools.pytest_cov_argv(_ctx(tmp_path, ToolOutputFormat.JSON))
     assert argv[0] == "/usr/bin/python3"

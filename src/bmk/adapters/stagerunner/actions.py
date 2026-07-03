@@ -53,6 +53,28 @@ class ToolAction:
         return run_argv(self._build_argv(ctx), ctx, sink)
 
 
+class ToolActionWithSetup:
+    """Run a best-effort setup argv, then the main tool argv, into one sink.
+
+    Both run through :func:`run_argv`, so their output is captured and shown only on
+    failure (JSON mode). Setup is best-effort: its exit code does not by itself fail
+    the stage, the main tool decides. This lets a transient ``uv`` hiccup pass when
+    pip is already current, while a genuinely-missing pip still fails via the tool.
+    """
+
+    def __init__(
+        self,
+        setup_argv: Callable[[StageContext], list[str]],
+        build_argv: Callable[[StageContext], list[str]],
+    ) -> None:
+        self._setup_argv = setup_argv
+        self._build_argv = build_argv
+
+    def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
+        run_argv(self._setup_argv(ctx), ctx, sink)  # best-effort; output captured
+        return run_argv(self._build_argv(ctx), ctx, sink)
+
+
 class HelperAction:
     """Call a migrated Python helper in-process; ``func`` returns an exit code."""
 

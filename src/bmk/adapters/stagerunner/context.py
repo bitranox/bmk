@@ -34,6 +34,10 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
       tool venv holds bmk plus the project's full dependency tree, so pip-audit
       audits *that*, not whatever ``pip-audit`` sits first on PATH (e.g. an
       editor's venv full of unrelated packages).
+
+    A uv-created ``.venv`` ships no pip, so the ``pip_audit`` stage bootstraps a
+    current pip (via uv) into whichever interpreter this function pins before
+    auditing - see ``tools.ensure_audit_pip_argv``.
     """
     project_venv = cwd / ".venv"
     if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
