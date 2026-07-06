@@ -49,6 +49,15 @@ def test_build_context_no_pythonpath_when_no_src(tmp_path: Path) -> None:
     assert str(tmp_path / "src") not in ctx.env.get("PYTHONPATH", "")
 
 
+def test_build_context_prepends_tool_bin_to_path(tmp_path: Path) -> None:
+    # bmk's own venv bin dir (dir of sys.executable, where ruff/pytest/pyright are
+    # installed by `uv tool install --with .`) must be first on PATH so bare-name
+    # tool stages resolve on a machine with no global ruff/pytest (the Windows bug:
+    # FileNotFoundError / WinError 2).
+    ctx = build_context(tmp_path, (), command_prefix="test", output_format=ToolOutputFormat.JSON, show_warnings=True)
+    assert ctx.env["PATH"].split(os.pathsep)[0] == str(Path(sys.executable).parent)
+
+
 def test_build_context_pins_pip_audit_to_bmk_interpreter_when_no_venv(tmp_path: Path) -> None:
     # No project .venv: pin pip-audit at bmk's own interpreter. Its env (a
     # `uv tool install --with .` tool venv) holds bmk plus the project's full

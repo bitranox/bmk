@@ -6,6 +6,33 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.5] 2026-07-06 17:03:41
+
+### Fixed
+- **Tool stages failed on Windows (and any host without a global ruff/pytest on `PATH`)**
+  with `FileNotFoundError` / `WinError 2` at the first tool stage (e.g. `ruff_format_apply`).
+  `uv tool install ... --with .` installs bmk's toolchain (ruff/pytest/pyright/bandit/
+  pip-audit/lint-imports) into bmk's own venv but exposes only the `bmk`/`mk` entry points,
+  so the tools' bin dir is not on `PATH`, and tool stages spawn those tools by bare name.
+  On Windows `CreateProcess` resolves the executable against the *parent* process `PATH`,
+  not the child `env`, so pointing the child env's `PATH` at the tools was not enough.
+  `run_argv` now resolves `argv[0]` to an absolute path via `shutil.which` against the child
+  `PATH` before spawning, and `build_context` prepends bmk's own venv bin dir
+  (`Path(sys.executable).parent`) to that `PATH`. Bare-name tool stages now resolve on every
+  OS and are pinned to bmk's own toolchain rather than whatever ruff/pytest sits first on
+  `PATH`. No-op on Linux/macOS, where the child env `PATH` was already honored. This was the
+  first run of bmk on Windows, on a project living on a shared network (UNC-backed) mount;
+  the `uv tool install --from ./` build from that mount itself worked fine (uv used the
+  drive-letter `file:///V:/...` form, not an extended `\\?\UNC\...` path), so no install or
+  Makefile change was needed.
+
+### Added
+- `actions._resolve_executable`: resolves a bare-name `argv[0]` against the child `PATH`
+  (honouring `PATHEXT` on Windows, so `ruff` finds `ruff.exe`) before `subprocess.Popen`,
+  and leaves an unresolvable tool unchanged so the original `FileNotFoundError` still surfaces.
+- `context._prepend_tool_bin_to_path`: puts bmk's own venv bin dir first on the child `PATH`,
+  giving `shutil.which` a place to find the toolchain and letting grandchild processes see it.
+
 ## [3.1.4] 2026-07-03 11:41:32
 
 ### Fixed

@@ -8,8 +8,9 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,15 +21,38 @@ from .model import StageContext
 from .output import OutputSink
 
 
+def _resolve_executable(argv: Sequence[str], env: Mapping[str, str]) -> list[str]:
+    """Resolve ``argv[0]`` to an absolute path against the child env's PATH.
+
+    On Windows, ``CreateProcess`` locates the executable using the *parent*
+    process's ``PATH``, not the ``env`` passed to the child - so prepending bmk's
+    tool-venv bin dir to ``env['PATH']`` (see ``context._prepend_tool_bin_to_path``)
+    is not enough to find bare-name tools like ``ruff`` / ``pytest`` / ``pyright``
+    installed in that venv. Resolve ``argv[0]`` here via ``shutil.which`` against the
+    child ``PATH`` (which also honours ``PATHEXT`` on Windows, appending ``.exe``) so
+    the spawn receives an absolute path. Absolute argv[0] (e.g. ``sys.executable``)
+    and tools on the inherited PATH (``git`` / ``uv``) resolve unchanged; a tool that
+    cannot be found is left as-is so ``Popen`` raises the original ``FileNotFoundError``.
+    """
+    resolved = list(argv)
+    if resolved:
+        found = shutil.which(resolved[0], path=env.get("PATH"))
+        if found:
+            resolved[0] = found
+    return resolved
+
+
 def run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
     """Run ``argv`` in the project dir, stream combined output to ``sink``.
 
     Uses an argv list with ``shell=False`` for cross-OS behaviour and to avoid
-    shell interpolation. The child is tracked so a signal handler can terminate
-    it mid-run.
+    shell interpolation. ``argv[0]`` is resolved to an absolute path against the
+    child ``PATH`` first (see :func:`_resolve_executable`) so bmk's own toolchain is
+    found on Windows. The child is tracked so a signal handler can terminate it
+    mid-run.
     """
     proc = subprocess.Popen(  # noqa: S603 - argv list, never shell=True
-        list(argv),
+        _resolve_executable(argv, ctx.env),
         cwd=ctx.project_dir,
         env=dict(ctx.env),
         stdout=subprocess.PIPE,

@@ -28,6 +28,39 @@ def _ctx(tmp_path: Path) -> StageContext:
     )
 
 
+def _ctx_with_path(tmp_path: Path, path_value: str) -> StageContext:
+    return StageContext(
+        project_dir=tmp_path,
+        args=(),
+        output_format=ToolOutputFormat.JSON,
+        python_cmd=sys.executable,
+        package_name="x",
+        env={**os.environ, "PATH": path_value},
+        show_warnings=True,
+    )
+
+
+def test_run_argv_resolves_bare_name_tool_against_env_path(tmp_path: Path) -> None:
+    # run_argv resolves a bare-name executable (as tools.py emits: ["ruff", ...]) against
+    # the child env PATH before spawning, so bmk's own toolchain - installed next to
+    # sys.executable - is found even on Windows, where CreateProcess otherwise ignores the
+    # child env PATH for the executable lookup. Use the running interpreter as a
+    # guaranteed-present executable whose dir is the only thing on PATH.
+    name = Path(sys.executable).name  # e.g. "python.exe" / "python3"
+    ctx = _ctx_with_path(tmp_path, str(Path(sys.executable).parent))
+    sink = CapturingSink()
+    rc = run_argv([name, "-c", "print('resolved')"], ctx, sink)
+    assert rc == 0
+    assert "resolved" in sink.getvalue()
+
+
+def test_run_argv_raises_when_bare_tool_not_found(tmp_path: Path) -> None:
+    # An unresolvable tool is left unchanged so the spawn raises the original error
+    # (FileNotFoundError / WinError 2), rather than being silently swallowed.
+    with pytest.raises(FileNotFoundError):
+        run_argv(["definitely-not-a-real-tool-xyz"], _ctx_with_path(tmp_path, str(tmp_path)), CapturingSink())
+
+
 def test_run_argv_captures_output_and_returncode(tmp_path: Path) -> None:
     sink = CapturingSink()
     rc = run_argv([sys.executable, "-c", "print('hi'); raise SystemExit(3)"], _ctx(tmp_path), sink)

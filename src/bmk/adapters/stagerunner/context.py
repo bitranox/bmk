@@ -84,6 +84,25 @@ def _prepend_src_to_pythonpath(env: dict[str, str], cwd: Path) -> None:
     env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
 
 
+def _prepend_tool_bin_to_path(env: dict[str, str]) -> None:
+    """Put bmk's own venv bin dir on PATH so bare-name tool stages resolve.
+
+    Tool stages spawn ``ruff`` / ``pytest`` / ``pyright`` / ``pip-audit`` / ``bandit``
+    / ``lint-imports`` by bare name (see ``tools.py``), and ``subprocess`` resolves
+    those against ``PATH``. bmk's runtime dependencies install those executables next
+    to bmk's own interpreter - the ``uv tool install --with .`` venv's ``Scripts``
+    (Windows) / ``bin`` (POSIX) dir, i.e. ``Path(sys.executable).parent`` - but that
+    dir is *not* on ``PATH`` by default: ``uv tool install`` only exposes bmk's own
+    entry points (``bmk``/``mk``). Without this, a machine with no global ruff/pytest
+    on PATH fails the first tool stage with ``FileNotFoundError`` (WinError 2 on
+    Windows). Prepending also pins tool stages to bmk's *own* pinned toolchain rather
+    than whatever ruff/pytest happens to sit first on PATH.
+    """
+    tool_bin = str(Path(sys.executable).parent)
+    existing = env.get("PATH", "")
+    env["PATH"] = f"{tool_bin}{os.pathsep}{existing}" if existing else tool_bin
+
+
 def build_context(
     cwd: Path,
     args: tuple[str, ...],
@@ -104,6 +123,7 @@ def build_context(
         env["BMK_PACKAGE_NAME"] = package_name
     _prepend_src_to_pythonpath(env, cwd)
     _pin_project_venv(env, cwd)
+    _prepend_tool_bin_to_path(env)
 
     return StageContext(
         project_dir=cwd,

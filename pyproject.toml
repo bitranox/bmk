@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.1.4"
+version = "3.1.5"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ dependencies = [
     "orjson>=3.11.9",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "hypothesis>=6.155.7",
+    "hypothesis>=6.156.1",
     "ruff>=0.15.20",
     "pyright[nodejs]>=1.1.411",
     "bandit>=1.9.4",
@@ -23,7 +23,7 @@ dependencies = [
     "codecov-cli>=11.2.8",
     "pip-audit>=2.10.1",
     "textual>=8.2.8",
-    "import-linter>=2.12",
+    "import-linter>=2.13",
     "shellcheck-py>=0.11.0.1",
     "shfmt-py>=4.0.0",
     "bashate>=2.1.1",
