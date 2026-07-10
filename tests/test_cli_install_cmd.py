@@ -141,3 +141,26 @@ def test_cli_install_errors_when_bundled_missing(
 
     assert result.exit_code == ExitCode.FILE_NOT_FOUND
     assert "Bundled Makefile not found" in result.output
+
+
+# =============================================================================
+# Tool-venv provisioning
+# =============================================================================
+
+
+@pytest.mark.os_agnostic
+def test_bundled_makefile_provisions_dev_extra() -> None:
+    """The bundled Makefile installs bmk's tool venv WITH the project's [dev] extra.
+
+    Test-only deps declared in [dev] (test-import libraries, fakes, property-test
+    helpers) must land in the venv bmk runs pytest in, otherwise `make test`
+    diverges from CI. The base-deps install is kept as a fallback for projects
+    that have no [dev] extra.
+    """
+    import bmk
+
+    bundled_makefile = Path(bmk.__file__).parent / "makefile" / "Makefile"
+    content = bundled_makefile.read_text(encoding="utf-8")
+
+    assert '--with ".[dev]"' in content
+    assert "--with ." in content  # base-deps fallback preserved

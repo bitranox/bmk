@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.7] 2026-07-10 10:52:43
+
+### Fixed
+- `make test` now provisions bmk's tool venv with the project's `[dev]` extra
+  (`uv tool install ... --with ".[dev]"`, falling back to base deps when a project
+  has no `[dev]` extra), so test-only dependencies the tests import - fakes,
+  test-support libraries, property-test helpers - are present in the interpreter
+  bmk runs pytest with. Previously only base deps were installed, so a hermetic
+  test importing a `[dev]`-only package failed locally even though CI (which
+  installs `[dev]`) passed.
+
 ## [3.1.6] 2026-07-10 09:53:04
 
 ### Fixed
