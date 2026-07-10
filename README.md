@@ -255,7 +255,10 @@ BMK_OUTPUT_FORMAT=text bmk test
 
 ### testintegration
 
-Run integration tests only (tests marked `@pytest.mark.integration`).
+Run integration tests only (tests marked `@pytest.mark.integration`) - the long-running / external
+lane. The quick `make test` runs everything except `integration` (unit + `local_only`); see
+[DEVELOPMENT.md "Test Markers"](DEVELOPMENT.md#test-markers-and-what-each-command-runs) for how the
+`local_only` / `integration` / `os_*` markers and `[tool.scripts.test].exclude-markers` fit together.
 
 |                  |                                                                               |
 |------------------|-------------------------------------------------------------------------------|

@@ -2,28 +2,28 @@
 
 ## Make Targets
 
-| Target            | Description                                                                                |
-|-------------------|--------------------------------------------------------------------------------------------|
-| `help`            | Show help                                                                                  |
-| `install`         | Install package editable                                                                   |
-| `dev`             | Install package with dev extras                                                            |
-| `test`            | Lint, type-check, run tests with coverage, upload to Codecov                               |
-| `test-human`      | Run test suite with human-readable output (alias: `th`)                                    |
-| `testintegration-human` | Run integration tests with human-readable output (alias: `tih`)                      |
-| `run`             | Run module CLI (requires dev install or src on PYTHONPATH)                                 |
-| `version-current` | Print current version from pyproject.toml                                                  |
-| `bump`            | Bump version (updates pyproject.toml and CHANGELOG.md)                                     |
-| `bump-patch`      | Bump patch version (X.Y.Z -> X.Y.(Z+1))                                                    |
-| `bump-minor`      | Bump minor version (X.Y.Z -> X.(Y+1).0)                                                    |
-| `bump-major`      | Bump major version ((X+1).0.0)                                                             |
-| `clean`           | Remove caches, build artifacts, and coverage                                               |
-| `push`            | Run tests, prompt for/accept a commit message, create (allow-empty) commit, push to remote |
-| `build`           | Build wheel/sdist artifacts via `python -m build`                                          |
-| `coverage`        | Generate coverage reports                                                                  |
-| `test-slow`       | Run slow integration tests (SMTP, external resources)                                      |
-| `dependencies`    | Check and list project dependencies                                                        |
-| `dependencies-update` | Update dependencies to latest versions                                                |
-| `menu`            | Interactive TUI to run targets and edit parameters (requires dev dep: textual)             |
+| Target                  | Description                                                                                |
+|-------------------------|--------------------------------------------------------------------------------------------|
+| `help`                  | Show help                                                                                  |
+| `install`               | Install package editable                                                                   |
+| `dev`                   | Install package with dev extras                                                            |
+| `test`                  | Lint, type-check, run tests with coverage, upload to Codecov                               |
+| `test-human`            | Run test suite with human-readable output (alias: `th`)                                    |
+| `testintegration-human` | Run integration tests with human-readable output (alias: `tih`)                            |
+| `run`                   | Run module CLI (requires dev install or src on PYTHONPATH)                                 |
+| `version-current`       | Print current version from pyproject.toml                                                  |
+| `bump`                  | Bump version (updates pyproject.toml and CHANGELOG.md)                                     |
+| `bump-patch`            | Bump patch version (X.Y.Z -> X.Y.(Z+1))                                                    |
+| `bump-minor`            | Bump minor version (X.Y.Z -> X.(Y+1).0)                                                    |
+| `bump-major`            | Bump major version ((X+1).0.0)                                                             |
+| `clean`                 | Remove caches, build artifacts, and coverage                                               |
+| `push`                  | Run tests, prompt for/accept a commit message, create (allow-empty) commit, push to remote |
+| `build`                 | Build wheel/sdist artifacts via `python -m build`                                          |
+| `coverage`              | Generate coverage reports                                                                  |
+| `test-slow`             | Run slow integration tests (SMTP, external resources)                                      |
+| `dependencies`          | Check and list project dependencies                                                        |
+| `dependencies-update`   | Update dependencies to latest versions                                                     |
+| `menu`                  | Interactive TUI to run targets and edit parameters (requires dev dep: textual)             |
 
 ### Target Parameters (env vars)
 
@@ -96,58 +96,48 @@ make menu
 - `bump`: updates `pyproject.toml` version and inserts a new section in `CHANGELOG.md`. Use `VERSION=X.Y.Z make bump` or `make bump-minor`/`bump-major`/`bump-patch`.
 - Additional scripts (`pipx-*`, `uv-*`, `which-cmd`, `verify-install`) provide install/run diagnostics.
 
-## Running Integration Tests
+## Test Markers and What Each Command Runs
 
-Some tests require external resources (SMTP servers, databases) and are excluded from the default test run. These are marked with `@pytest.mark.local_only`.
+`make test` runs `pytest -m "not <exclude-markers>"`, where `exclude-markers` comes from
+`[tool.scripts.test].exclude-markers` in `pyproject.toml` and **defaults to `integration`**. The
+markers split tests across the local gate, the integration lane, and CI:
+
+- **`local_only`** - needs a local resource the CI runners lack (a real service, device, or OS
+  feature on your machine). `make test` **runs** these locally (guard each with a `skipif` so it
+  skips when the resource is absent) and CI **excludes** them (`pytest -m "not local_only"`). The
+  local-vs-CI difference is intentional; `make test` is not meant to be identical to CI.
+- **`integration`** - long-running tests kept out of the quick `make test`; run them on demand with
+  `make testintegration` (`-m integration`; aliases `testi`, `ti`).
+- **`os_agnostic` / `os_windows` / `os_macos` / `os_posix` / `os_linux`** - label the target OS; the
+  marker itself does not skip, so pair each with its own `skipif(sys.platform ...)`.
+
+Raise `exclude-markers` only to skip MORE from `make test` (e.g. a project whose `local_only` tests
+mutate the host and are unsafe on a real dev machine can tag them `mutating` and set
+`exclude-markers = "mutating"`). Do not set it to "match CI" - that drops the local coverage
+`local_only` exists to provide.
 
 ### Quick Reference
 
-| Command | What it runs |
-|---------|--------------|
-| `make test` | All tests EXCEPT `local_only` (default for CI) |
-| `make test-slow` | ONLY `local_only` integration tests |
-| `pytest tests/` | ALL tests (no marker filter) |
+| Command                                | What it runs                                                                                    |
+|----------------------------------------|-------------------------------------------------------------------------------------------------|
+| `make test`                            | Everything EXCEPT `integration` (unit + `local_only`, which skip when their resource is absent) |
+| `make testintegration` (`testi`, `ti`) | Only `@pytest.mark.integration` (long-running / external)                                       |
+| `pytest -m "not local_only"`           | The CI gate                                                                                     |
+| `pytest tests/`                        | ALL tests (no marker filter)                                                                    |
 
-### Email Integration Tests
+### Adding a test that needs a resource
 
-To run email tests that actually send messages:
-
-1. **Create a `.env` file** in the project root with your SMTP settings:
-
-```bash
-# .env (copy from .env.example)
-EMAIL__SMTP_HOSTS=smtp.example.com:587
-EMAIL__FROM_ADDRESS=sender@example.com
-EMAIL__RECIPIENTS=recipient@example.com
-EMAIL__SMTP_USER=your_username
-EMAIL__SMTP_PASSWORD=your_password
-```
-
-2. **Run the integration tests**:
-
-```bash
-make test-slow
-```
-
-3. **Or run specific email tests**:
-
-```bash
-pytest tests/test_cli_email_smtp.py -v
-```
-
-### Adding New Integration Tests
-
-Mark tests that require external resources:
+Mark it `local_only` when it needs a *local* resource CI lacks (run by `make test` locally, excluded
+from CI); mark it `integration` when it is long-running/external (run via `make testintegration`).
+Pair an OS- or resource-specific test with a `skipif` so it skips cleanly when unavailable:
 
 ```python
 @pytest.mark.local_only
 @pytest.mark.os_agnostic
-def test_real_external_service(...):
-    """Integration test requiring external service."""
+def test_needs_a_local_resource(...):
+    """Skipped in CI; runs in `make test` when the resource is available."""
     ...
 ```
-
-These tests will be skipped in CI but run with `make test-slow`.
 
 ## Development Workflow
 
@@ -202,7 +192,7 @@ dependencies = [
 ]
 ```
 
-bmk automatically skips these during PyPI dependency checking — direct URL references
+bmk automatically skips these during PyPI dependency checking - direct URL references
 are not on PyPI and need no version comparison.
 
 Authentication is handled by global git config URL rewriting, not by bmk.
@@ -212,7 +202,7 @@ To scope access to a single organisation:
 git config --global url."https://<token>@github.com/MyOrg/".insteadOf "https://github.com/MyOrg/"
 ```
 
-This keeps credentials out of project files and `.env` — git handles auth transparently.
+This keeps credentials out of project files and `.env` - git handles auth transparently.
 
 ### Dependency Auditing
 
