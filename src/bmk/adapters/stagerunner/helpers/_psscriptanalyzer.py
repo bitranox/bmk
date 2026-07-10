@@ -37,7 +37,6 @@ _FALLBACK_EXCLUDED_RULES: tuple[str, ...] = (
 )
 
 _EXCLUDED_DIRS: tuple[str, ...] = (
-    ".venv",
     "node_modules",
     ".git",
 )
@@ -135,8 +134,17 @@ def ensure_psscriptanalyzer(pwsh: str) -> None:
 
 
 def _is_excluded_dir(path: Path) -> bool:
-    """Return True if any path component matches an excluded directory."""
-    return any(excluded in path.parts for excluded in _EXCLUDED_DIRS)
+    """Return True if any path component is a virtualenv or vendored directory.
+
+    A component starting with ``.venv`` counts as a Python virtualenv - the plain
+    ``.venv`` plus the dual-OS ``.venv-win`` / ``.venv-linux`` layout - so vendored
+    scripts bundled inside any of them (an ``Activate.ps1``, an ``npm.ps1``) never
+    trip the linter. ``node_modules`` and ``.git`` still match exactly.
+    """
+    parts = path.parts
+    if any(part.startswith(".venv") for part in parts):
+        return True
+    return any(excluded in parts for excluded in _EXCLUDED_DIRS)
 
 
 def find_ps1_files(project_dir: Path) -> list[Path]:

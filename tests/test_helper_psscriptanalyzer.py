@@ -126,6 +126,23 @@ def test_find_ps1_files_excludes_venv(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
+def test_find_ps1_files_excludes_suffixed_venv(tmp_path: Path) -> None:
+    """A suffixed venv dir (.venv-win, the Windows env in the dual-OS layout) is excluded."""
+    venv_dir = tmp_path / ".venv-win" / "Scripts"
+    venv_dir.mkdir(parents=True)
+    (venv_dir / "Activate.ps1").write_text("# win venv")
+
+    project_script = tmp_path / "src" / "scripts"
+    project_script.mkdir(parents=True)
+    (project_script / "build.ps1").write_text("# build")
+
+    files = find_ps1_files(tmp_path)
+
+    assert len(files) == 1
+    assert files[0].name == "build.ps1"
+
+
+@pytest.mark.os_agnostic
 def test_find_ps1_files_excludes_node_modules(tmp_path: Path) -> None:
     """Files under node_modules are excluded from results."""
     nm_dir = tmp_path / "node_modules" / "pkg"

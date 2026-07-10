@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.1.6] 2026-07-10 09:53:04
+
+### Fixed
+- PowerShell (`.ps1`) and shell (`.sh`) linting now skip any `.venv`-prefixed
+  directory, not just `.venv` - so a dual-OS layout that keeps a separate Windows
+  virtualenv (`.venv-win`) or Linux one (`.venv-linux`) no longer trips the linter
+  on vendored scripts bundled inside it (e.g. `Activate.ps1`, `npm.ps1`).
+
 ## [3.1.5] 2026-07-06 17:03:41
 
 ### Fixed
