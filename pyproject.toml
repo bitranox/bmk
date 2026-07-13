@@ -284,4 +284,5 @@ skips = [
   "B404",  # Consider possible security implications associated with subprocess module
   "B603",  # subprocess call - check for execution of untrusted input
   "B607",  # Starting a process with a partial executable path (git, shell scripts)
+  "PYSEC-2026-2132",      # click 8.2.1: click.edit() command injection (fixed 8.3.3); dev-env-only, codecov-cli caps click<8.3.0, app never calls click.edit()
 ]
