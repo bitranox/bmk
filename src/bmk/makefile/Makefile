@@ -1,4 +1,4 @@
-# BMK MAKEFILE 3.4.0
+# BMK MAKEFILE 3.5.0
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper using `uv tool install` for persistent bmk
@@ -73,12 +73,22 @@ ARGS ?=
 #   * collapse the retry. It covers the transient __pycache__ removal race
 #     ("Directory not empty", os error 39). If BOTH attempts fail, make fails loudly -
 #     correct, because there is no safe degraded state to continue from.
+#   * drop the FLOOR from `bmk>=$(BMK_MIN)`. bmk and the project's deps resolve TOGETHER,
+#     so a project dependency that caps something bmk requires does not fail - uv simply
+#     backtracks BMK to an older release that fits, silently. That is not hypothetical:
+#     `codecov-cli` caps click<8.3.0 while bmk requires click>=8.4.2 (CVE-2026-7246), so an
+#     unpinned `bmk` resolves to 3.1.7 and the repo never sees another bmk update, with no
+#     error at all. The floor turns that into an unsatisfiable-requirements error that names
+#     the offending package. If it fires, remove the capping dependency - do not lower the
+#     floor, or you are back to a silently ancient bmk.
+BMK_MIN := 3.5.0
+
 .PHONY: _ensure_bmk
 _ensure_bmk:
 	@UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
-	  uv tool install --reinstall --force bmk --with-editable ".[dev]" \
+	  uv tool install --reinstall --force "bmk>=$(BMK_MIN)" --with-editable ".[dev]" \
 	  || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
-	  uv tool install --reinstall --force bmk --with-editable ".[dev]"
+	  uv tool install --reinstall --force "bmk>=$(BMK_MIN)" --with-editable ".[dev]"
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS

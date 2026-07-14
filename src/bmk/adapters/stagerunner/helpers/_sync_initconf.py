@@ -24,6 +24,11 @@ from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 _VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
 _MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")
+# The template's minimum-bmk floor. It must track the package version: it is the
+# version this template was generated from, and it is what stops uv from silently
+# backtracking bmk to an ancient release when a project dependency caps something
+# bmk requires.
+_MAKEFILE_MIN_RE = re.compile(r"^(BMK_MIN := )\S+", re.MULTILINE)
 
 
 def derive_package_name(project_dir: Path) -> str:
@@ -101,12 +106,15 @@ def sync_makefile_version(project_dir: Path) -> bool:
 
     content = makefile_path.read_text(encoding="utf-8")
     new_content = _MAKEFILE_VERSION_RE.sub(rf"\g<1>{version}", content, count=1)
+    # The floor is the version the template was generated from; left behind it would
+    # let uv backtrack bmk past this release without anyone noticing.
+    new_content = _MAKEFILE_MIN_RE.sub(rf"\g<1>{version}", new_content, count=1)
 
     if new_content == content:
         return False
 
     makefile_path.write_text(new_content, encoding="utf-8")
-    print(f"Synced Makefile version to {version}")
+    print(f"Synced Makefile version and BMK_MIN to {version}")
     return True
 
 

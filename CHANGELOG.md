@@ -6,6 +6,19 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.5.0] 2026-07-14 18:40:00
+
+### Fixed
+- **The template installs `bmk>=$(BMK_MIN)` instead of a bare `bmk`, so bmk can no longer be
+  silently downgraded.** bmk and the project's dependencies resolve TOGETHER, so a project
+  dependency that caps something bmk requires does not fail - uv backtracks BMK to an older
+  release that fits, with no error. Real and measured: `codecov-cli` caps `click<8.3.0` while bmk
+  requires `click>=8.4.2` (CVE-2026-7246), so an unpinned `bmk` resolved to **3.1.7** and those
+  repos never received another bmk update. The floor turns that into an unsatisfiable-requirements
+  error naming the offending package. It is inert otherwise: with no capper, `bmk>=X` still
+  resolves to the newest release. `_sync_initconf.py` keeps `BMK_MIN` equal to the package
+  version, and a test asserts it, so the floor cannot lag a release.
+
 ## [3.4.0] 2026-07-14 18:05:00
 
 ### Changed

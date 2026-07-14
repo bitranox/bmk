@@ -191,6 +191,42 @@ def test_install_runs_before_every_target() -> None:
 
 
 @pytest.mark.os_agnostic
+def test_bmk_is_installed_with_a_version_floor() -> None:
+    """Every install attempt pins `bmk>=$(BMK_MIN)`, never a bare `bmk`.
+
+    bmk and the project's dependencies resolve TOGETHER, so a project dependency
+    that caps something bmk requires does not fail - uv backtracks BMK to an older
+    release that fits, silently. Real case: codecov-cli caps click<8.3.0 while bmk
+    requires click>=8.4.2, so an unpinned `bmk` resolves to 3.1.7 and that repo
+    never sees another bmk update, with no error at all. The floor turns that into
+    an unsatisfiable-requirements error naming the offending package.
+    """
+    recipe = _install_recipe(_template_text())
+    installs = re.findall(r"uv tool install[^|]*", recipe)
+
+    assert installs
+    for attempt in installs:
+        assert '"bmk>=$(BMK_MIN)"' in attempt, f"install attempt has no version floor: {attempt.strip()!r}"
+
+
+@pytest.mark.os_agnostic
+def test_bmk_min_matches_the_package_version() -> None:
+    """BMK_MIN equals [project].version, so the floor cannot lag the release.
+
+    `_sync_initconf.py` patches it on every bump. A floor left behind would let uv
+    backtrack bmk past this release again - the very thing it exists to prevent.
+    """
+    version = rtoml.load(PROJECT_DIR / "pyproject.toml")["project"]["version"]
+    match = re.search(r"^BMK_MIN := (\S+)$", _template_text(), re.M)
+
+    assert match, "the template must define BMK_MIN"
+    assert match.group(1) == version, (
+        f"BMK_MIN {match.group(1)!r} does not match pyproject version {version!r}; "
+        "run src/bmk/adapters/stagerunner/helpers/_sync_initconf.py"
+    )
+
+
+@pytest.mark.os_agnostic
 def test_windows_executable_suffix_is_handled() -> None:
     """uv names the entry point bmk.exe on Windows.
 
