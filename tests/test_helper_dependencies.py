@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -21,7 +22,7 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
     _fetch_latest_version_below,
     _fetch_pypi_data,
     _find_packages_needing_install,
-    _get_installed_version,
+    _installed_versions,
     _run_pip_install,
     check_dependencies,
     compare_versions,
@@ -848,25 +849,53 @@ def test_build_updated_spec_preserves_upper_bound() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_installed_version — found and not found
+# _installed_versions — reads the TARGET environment, not this process
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
-def test_get_installed_version_returns_version_for_installed_package() -> None:
-    """Returns the installed version of a known package."""
-    version = _get_installed_version("pip")
+@patch("subprocess.run")
+def test_installed_versions_queries_the_given_interpreter(mock_run: MagicMock) -> None:
+    """Asks uv about the passed interpreter, not the running one."""
+    mock_run.return_value = _make_completed(0, stdout='[{"name":"click","version":"8.2.1"}]')
 
-    assert version is not None
-    assert len(version) > 0
+    result = _installed_versions("/proj/.venv/bin/python")
+
+    assert result == {"click": "8.2.1"}
+    cmd = mock_run.call_args[0][0]
+    assert cmd[:3] == ["uv", "pip", "list"]
+    assert cmd[cmd.index("--python") + 1] == "/proj/.venv/bin/python"
+    assert sys.executable not in cmd
 
 
 @pytest.mark.os_agnostic
-def test_get_installed_version_returns_none_for_missing_package() -> None:
-    """Returns None for a package that is not installed."""
-    version = _get_installed_version("nonexistent-fake-package-xyz-12345")
+@patch("subprocess.run")
+def test_installed_versions_normalizes_names(mock_run: MagicMock) -> None:
+    """Keys are PEP 503 normalized so lookups match pyproject spellings."""
+    mock_run.return_value = _make_completed(0, stdout='[{"name":"Lib_Shopware6.Api","version":"6.0.3"}]')
 
-    assert version is None
+    assert _installed_versions("/p/bin/python") == {"lib-shopware6-api": "6.0.3"}
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [(1, ""), (0, "not json"), (0, "[{}]")],
+    ids=["uv-failed", "bad-json", "missing-keys"],
+)
+@patch("subprocess.run")
+def test_installed_versions_degrades_to_empty(mock_run: MagicMock, returncode: int, stdout: str) -> None:
+    """An unreadable environment yields an empty map rather than raising."""
+    mock_run.return_value = _make_completed(returncode, stdout=stdout)
+
+    assert _installed_versions("/p/bin/python") == {}
+
+
+@pytest.mark.os_agnostic
+@patch("subprocess.run", side_effect=OSError("uv not found"))
+def test_installed_versions_handles_missing_uv(_mock_run: MagicMock) -> None:
+    """Returns an empty map rather than raising when uv is absent."""
+    assert _installed_versions("/p/bin/python") == {}
 
 
 # ---------------------------------------------------------------------------
@@ -875,39 +904,33 @@ def test_get_installed_version_returns_none_for_missing_package() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._get_installed_version")
-def test_find_packages_needing_install_not_installed(mock_installed: MagicMock) -> None:
+def test_find_packages_needing_install_not_installed() -> None:
     """Packages not installed are included in the results."""
-    mock_installed.return_value = None
     deps = [_make_dep(name="missing-pkg", current_min="1.0.0")]
 
-    results = _find_packages_needing_install(deps)
+    results = _find_packages_needing_install(deps, {})
 
     assert len(results) == 1
     assert results[0] == ("missing-pkg", None, "1.0.0")
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._get_installed_version")
-def test_find_packages_needing_install_outdated(mock_installed: MagicMock) -> None:
+def test_find_packages_needing_install_outdated() -> None:
     """Packages with an installed version below the required minimum are included."""
-    mock_installed.return_value = "0.9.0"
     deps = [_make_dep(name="old-pkg", current_min="1.0.0")]
 
-    results = _find_packages_needing_install(deps)
+    results = _find_packages_needing_install(deps, {"old-pkg": "0.9.0"})
 
     assert len(results) == 1
     assert results[0] == ("old-pkg", "0.9.0", "1.0.0")
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._get_installed_version")
-def test_find_packages_needing_install_up_to_date(mock_installed: MagicMock) -> None:
+def test_find_packages_needing_install_up_to_date() -> None:
     """Up-to-date packages are not included."""
-    mock_installed.return_value = "2.0.0"
     deps = [_make_dep(name="good-pkg", current_min="1.0.0")]
 
-    results = _find_packages_needing_install(deps)
+    results = _find_packages_needing_install(deps, {"good-pkg": "2.0.0"})
 
     assert len(results) == 0
 
@@ -917,30 +940,44 @@ def test_find_packages_needing_install_skips_no_min_version() -> None:
     """Dependencies without a current_min are skipped."""
     deps = [_make_dep(name="bare-pkg", current_min="")]
 
-    results = _find_packages_needing_install(deps)
+    results = _find_packages_needing_install(deps, {})
 
     assert len(results) == 0
 
 
+@pytest.mark.os_agnostic
+def test_find_packages_needing_install_preserves_extras() -> None:
+    """Extras survive into the install spec.
+
+    Extras change what gets installed (pyright[nodejs] pulls a bundled Node), so
+    rebuilding the spec from the extras-stripped name installs the wrong thing.
+    """
+    deps = [_make_dep(name="pyright", current_min="1.1.411", original_spec="pyright[nodejs]>=1.1.400")]
+
+    results = _find_packages_needing_install(deps, {"pyright": "1.1.400"})
+
+    assert results[0][0] == "pyright[nodejs]"
+
+
 # ---------------------------------------------------------------------------
-# _run_pip_install — subprocess invocation, EXTERNALLY-MANAGED detection
+# _run_pip_install — install target isolation
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 @patch("subprocess.run")
-def test_run_pip_install_builds_pip_command(mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Builds a pip install command with --upgrade and package specs."""
+def test_run_pip_install_builds_uv_command(mock_run: MagicMock) -> None:
+    """Builds a uv pip install command with --upgrade and package specs."""
     mock_run.return_value = _make_completed(0)
-    monkeypatch.setattr("sys.platform", "win32")  # Avoid EXTERNALLY-MANAGED check
 
     needs: list[tuple[str, str | None, str]] = [("requests", None, "2.31.0"), ("click", "8.0.0", "8.1.0")]
 
-    exit_code = _run_pip_install(needs)
+    exit_code = _run_pip_install(needs, "/proj/.venv/bin/python")
 
     assert exit_code == 0
     mock_run.assert_called_once()
     cmd = mock_run.call_args[0][0]
+    assert cmd[:3] == ["uv", "pip", "install"]
     assert "--upgrade" in cmd
     assert "requests>=2.31.0" in cmd
     assert "click>=8.1.0" in cmd
@@ -948,45 +985,65 @@ def test_run_pip_install_builds_pip_command(mock_run: MagicMock, monkeypatch: py
 
 @pytest.mark.os_agnostic
 @patch("subprocess.run")
-def test_run_pip_install_adds_break_system_packages_on_linux(
-    mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Adds --break-system-packages when EXTERNALLY-MANAGED marker exists on Linux."""
+def test_run_pip_install_targets_the_given_interpreter(mock_run: MagicMock) -> None:
+    """Installs into the interpreter it is handed, via --python."""
     mock_run.return_value = _make_completed(0)
-    monkeypatch.setattr("sys.platform", "linux")
 
-    # Create the EXTERNALLY-MANAGED marker at sys.prefix
-    marker = tmp_path / "EXTERNALLY-MANAGED"
-    marker.write_text("This installation is externally managed")
-    monkeypatch.setattr("sys.prefix", str(tmp_path))
-
-    needs: list[tuple[str, str | None, str]] = [("requests", None, "1.0.0")]
-
-    _run_pip_install(needs)
+    _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python")
 
     cmd = mock_run.call_args[0][0]
-    assert "--break-system-packages" in cmd
+    assert "--python" in cmd
+    assert cmd[cmd.index("--python") + 1] == "/proj/.venv/bin/python"
 
 
 @pytest.mark.os_agnostic
 @patch("subprocess.run")
-def test_run_pip_install_no_break_system_packages_without_marker(
-    mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Does not add --break-system-packages when no EXTERNALLY-MANAGED marker on Linux."""
+def test_run_pip_install_never_targets_the_ambient_interpreter(mock_run: MagicMock) -> None:
+    """Never installs into sys.executable.
+
+    Regression guard for the defect this replaced: the helper runs in-process, so
+    sys.executable is whatever launched bmk (a shared editor venv, or a system
+    Python). Installing there let any project inflate an environment it did not
+    own. No input may put sys.executable in the argv.
+    """
     mock_run.return_value = _make_completed(0)
-    monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr("sys.prefix", str(tmp_path))
 
-    # Also mock the lib path to avoid finding it there
-    monkeypatch.setattr("sys.version_info", type("vi", (), {"major": 3, "minor": 99})())
-
-    needs: list[tuple[str, str | None, str]] = [("requests", None, "1.0.0")]
-
-    _run_pip_install(needs)
+    _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python")
 
     cmd = mock_run.call_args[0][0]
-    assert "--break-system-packages" not in cmd
+    assert sys.executable not in cmd
+    assert "-m" not in cmd, "must not shell out to `<python> -m pip`"
+
+
+@pytest.mark.os_agnostic
+@patch("subprocess.run")
+def test_run_pip_install_never_breaks_system_packages(mock_run: MagicMock) -> None:
+    """Never passes --break-system-packages.
+
+    With an explicit venv target there is no externally-managed environment to
+    override, and the flag exists only to force-write a system interpreter.
+    """
+    mock_run.return_value = _make_completed(0)
+
+    _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python")
+
+    assert "--break-system-packages" not in mock_run.call_args[0][0]
+
+
+@pytest.mark.os_agnostic
+@patch("subprocess.run")
+def test_run_pip_install_reports_failure(mock_run: MagicMock) -> None:
+    """Propagates a non-zero install exit code."""
+    mock_run.return_value = _make_completed(1)
+
+    assert _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python") == 1
+
+
+@pytest.mark.os_agnostic
+@patch("subprocess.run", side_effect=OSError("uv not found"))
+def test_run_pip_install_handles_missing_uv(_mock_run: MagicMock) -> None:
+    """Returns non-zero rather than raising when uv is absent from PATH."""
+    assert _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -995,65 +1052,145 @@ def test_run_pip_install_no_break_system_packages_without_marker(
 
 
 @pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies._installed_versions", return_value={})
 @patch("bmk.adapters.stagerunner.helpers._dependencies._run_pip_install")
 @patch("bmk.adapters.stagerunner.helpers._dependencies._find_packages_needing_install")
 def test_sync_installed_packages_dry_run(
-    mock_find: MagicMock, mock_pip: MagicMock, capsys: pytest.CaptureFixture[str]
+    mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Dry run shows what would be installed but does not run pip."""
+    """Dry run shows what would be installed but does not install."""
     mock_find.return_value = [("requests", None, "2.31.0")]
 
-    result = sync_installed_packages([], dry_run=True)
+    count, code = sync_installed_packages([], python="/p/bin/python", dry_run=True)
 
-    assert result == 1
+    assert (count, code) == (1, 0)
     mock_pip.assert_not_called()
     captured = capsys.readouterr()
     assert "[DRY RUN]" in captured.out
 
 
 @pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies._installed_versions", return_value={})
 @patch("bmk.adapters.stagerunner.helpers._dependencies._run_pip_install", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies._find_packages_needing_install")
 def test_sync_installed_packages_actual_run(
-    mock_find: MagicMock, mock_pip: MagicMock, capsys: pytest.CaptureFixture[str]
+    mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Actual run calls pip install and reports success."""
+    """Actual run installs and reports success."""
     mock_find.return_value = [("requests", "1.0.0", "2.31.0")]
 
-    result = sync_installed_packages([])
+    count, code = sync_installed_packages([], python="/p/bin/python")
 
-    assert result == 1
+    assert (count, code) == (1, 0)
     mock_pip.assert_called_once()
     captured = capsys.readouterr()
     assert "Successfully installed/updated" in captured.out
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._run_pip_install", return_value=1)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._installed_versions", return_value={})
+@patch("bmk.adapters.stagerunner.helpers._dependencies._run_pip_install", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies._find_packages_needing_install")
-def test_sync_installed_packages_reports_pip_failure(
-    mock_find: MagicMock, mock_pip: MagicMock, capsys: pytest.CaptureFixture[str]
+def test_sync_installed_packages_targets_the_given_interpreter(
+    mock_find: MagicMock, mock_pip: MagicMock, mock_versions: MagicMock
 ) -> None:
-    """Reports pip failure when exit code is non-zero."""
+    """Both the inspection and the install use the interpreter passed in."""
     mock_find.return_value = [("requests", None, "2.31.0")]
 
-    sync_installed_packages([])
+    sync_installed_packages([], python="/proj/.venv/bin/python")
 
-    captured = capsys.readouterr()
-    assert "pip install failed" in captured.err
+    mock_versions.assert_called_once_with("/proj/.venv/bin/python")
+    assert mock_pip.call_args[0][1] == "/proj/.venv/bin/python"
 
 
 @pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies._installed_versions", return_value={})
+@patch("bmk.adapters.stagerunner.helpers._dependencies._run_pip_install", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies._find_packages_needing_install")
-def test_sync_installed_packages_no_updates_needed(mock_find: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+def test_sync_installed_packages_reports_install_failure(
+    mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Returns and reports a non-zero install exit code."""
+    mock_find.return_value = [("requests", None, "2.31.0")]
+
+    _count, code = sync_installed_packages([], python="/p/bin/python")
+
+    assert code == 1
+    captured = capsys.readouterr()
+    assert "install failed" in captured.err
+
+
+@pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies._installed_versions", return_value={})
+@patch("bmk.adapters.stagerunner.helpers._dependencies._find_packages_needing_install")
+def test_sync_installed_packages_no_updates_needed(
+    mock_find: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Returns 0 when all installed packages match requirements."""
     mock_find.return_value = []
 
-    result = sync_installed_packages([])
-
-    assert result == 0
+    assert sync_installed_packages([], python="/p/bin/python") == (0, 0)
     captured = capsys.readouterr()
     assert "All installed packages match" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# update_dependencies — round-trip fidelity
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_update_dependencies_preserves_comments_and_formatting(tmp_path: Path) -> None:
+    """An update leaves comments, spacing and unrelated entries byte-identical.
+
+    A pin is often accompanied by a comment explaining why it exists; losing that
+    on an automated bump destroys the reason and invites the pin's removal.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        "[project]\n"
+        'name = "demo"\n'
+        "dependencies = [\n"
+        '    "rich-click>=1.9.8",\n'
+        "    # codecov-cli is disabled, not dropped: it requires click<8.3.0,\n"
+        "    # which drags click back to a version with a known CVE.\n"
+        '    # "codecov-cli>=11.3.1",\n'
+        '    "requests>=1.0.0",  # trailing note\n'
+        "]\n"
+    )
+    deps = [
+        _make_dep(
+            name="requests", status="outdated", current_min="1.0.0", latest="2.0.0", original_spec="requests>=1.0.0"
+        )
+    ]
+
+    update_dependencies(deps, pyproject, quiet=True)
+
+    content = pyproject.read_text()
+    assert "requests>=2.0.0" in content
+    assert "# codecov-cli is disabled, not dropped" in content
+    assert '# "codecov-cli>=11.3.1",' in content
+    assert "# trailing note" in content
+    assert '"rich-click>=1.9.8"' in content
+
+
+@pytest.mark.os_agnostic
+def test_update_dependencies_ignores_matching_text_in_comments(tmp_path: Path) -> None:
+    """A spec that appears only inside a comment is not treated as a dependency.
+
+    Structural editing distinguishes a live array entry from the same characters
+    in a comment; text substitution cannot.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\ndependencies = [\n    # "ghost>=1.0.0",\n]\n')
+    deps = [
+        _make_dep(name="ghost", status="outdated", current_min="1.0.0", latest="2.0.0", original_spec="ghost>=1.0.0")
+    ]
+
+    updated = update_dependencies(deps, pyproject, quiet=True)
+
+    assert updated == 0
+    assert '# "ghost>=1.0.0",' in pyproject.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -1177,7 +1314,7 @@ def test_update_dependencies_with_single_quoted_spec(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=0)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1202,7 +1339,7 @@ def test_main_without_update(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=0)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1219,15 +1356,64 @@ def test_main_with_update(
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
-    exit_code = main(update=True, pyproject=pyproject)
+    exit_code = main(update=True, pyproject=pyproject, python="/p/bin/python")
 
     assert exit_code == 0
     mock_update.assert_called_once()
     mock_sync.assert_called_once()
+    assert mock_sync.call_args.kwargs["python"] == "/p/bin/python"
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=0)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=1)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
+def test_main_with_update_skips_sync_without_a_target(
+    mock_check: MagicMock,
+    _mock_report: MagicMock,
+    mock_update: MagicMock,
+    mock_sync: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Without a resolved interpreter, updates pyproject but installs nothing.
+
+    Installing has no safe fallback: defaulting to the ambient interpreter is how
+    a project ended up inflating a shared environment it did not own.
+    """
+    mock_check.return_value = [_make_dep(status="outdated")]
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
+
+    exit_code = main(update=True, pyproject=pyproject, python=None)
+
+    assert exit_code == 0
+    mock_update.assert_called_once()
+    mock_sync.assert_not_called()
+
+
+@pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(1, 1))
+@patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=1)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
+def test_main_with_update_propagates_install_failure(
+    mock_check: MagicMock,
+    _mock_report: MagicMock,
+    _mock_update: MagicMock,
+    _mock_sync: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """A failed install is reported, not swallowed as success."""
+    mock_check.return_value = [_make_dep(status="outdated")]
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
+
+    assert main(update=True, pyproject=pyproject, python="/p/bin/python") == 1
+
+
+@pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=2)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1244,14 +1430,14 @@ def test_main_with_update_re_checks_after_changes(
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
-    main(update=True, pyproject=pyproject)
+    main(update=True, pyproject=pyproject, python="/p/bin/python")
 
     # check_dependencies called twice: initial and re-check
     assert mock_check.call_count == 2
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=0)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=2)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1268,14 +1454,14 @@ def test_main_with_update_dry_run_does_not_recheck(
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
-    main(update=True, dry_run=True, pyproject=pyproject)
+    main(update=True, dry_run=True, pyproject=pyproject, python="/p/bin/python")
 
     # check_dependencies called only once (no re-check in dry run)
     assert mock_check.call_count == 1
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=0)
+@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")

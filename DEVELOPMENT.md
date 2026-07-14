@@ -42,6 +42,8 @@
   - `SKIP_BOOTSTRAP=1` -- skip auto-install of dev tools if missing
   - `TEST_VERBOSE=1` -- echo each command executed by the test harness
   - `BMK_OUTPUT_FORMAT=json|text` (default: `json`) -- output format; JSON mode suppresses tool output on success, auto-accepts Makefile updates, runs dependencies silently, and uses concise pytest flags; `--human` flag overrides to `text` for full verbose output
+  - `UV_PROJECT_ENVIRONMENT` (default: `.venv`) -- project venv path, absolute or relative to the project; set it when one checkout is used from more than one OS, since a single venv cannot serve both
+  - `BMK_NO_VENV_SYNC=1` -- skip creating and syncing the project venv; use the environment as-is
   - Also respects `CODECOV_TOKEN` when uploading to Codecov
 
 - **run**
@@ -171,14 +173,17 @@ This causes tools like pyright and pip-audit to fail if they resolve packages ag
 instead of the project's.
 
 bmk handles this automatically:
-- If the target project has a valid `.venv/` directory (with `pyvenv.cfg`), bmk sets `VIRTUAL_ENV` to point at it
+- Before any pipeline that touches the Python environment, bmk creates the project's venv if it is
+  missing and syncs it to `pyproject.toml`, then points `VIRTUAL_ENV` at it
 - Broken venvs (stale NFS mounts, missing `pyvenv.cfg`) are detected and ignored
-- If no valid `.venv/` exists, bmk unsets `VIRTUAL_ENV` so tools fall back to their own discovery
-  (e.g., pyright reads `[tool.pyright]` from the project's `pyproject.toml`)
+- If no valid venv exists (provisioning skipped or failed), bmk unsets `VIRTUAL_ENV` so tools fall
+  back to their own discovery (e.g., pyright reads `[tool.pyright]` from the project's
+  `pyproject.toml`) and pins pip-audit at bmk's own interpreter
 
-**Requirement:** The target project must have its dependencies installed in `.venv/`
-(the standard convention for uv-managed projects). Run `uv sync` or `pip install -e .`
-in the target project before running `bmk test`.
+The venv path comes from `UV_PROJECT_ENVIRONMENT` (absolute, or relative to the project;
+default `.venv`); `BMK_NO_VENV_SYNC=1` skips provisioning. Because the sync is exact and upgrading,
+packages installed into the venv by hand do not survive it. See `CLAUDE.md` for why both flags are
+needed and how the ordering interacts with the frozen `StageContext`.
 
 ### Private Repository Dependencies
 

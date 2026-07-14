@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 from bmk.adapters.stagerunner.context import build_context, resolve_audit_python
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.domain.enums import ToolOutputFormat
@@ -78,6 +80,26 @@ def test_build_context_pins_venv_when_present(tmp_path: Path) -> None:
     exe.write_text("", encoding="utf-8")
 
     ctx = build_context(tmp_path, (), command_prefix="clean", output_format=ToolOutputFormat.TEXT, show_warnings=True)
+    assert ctx.env["VIRTUAL_ENV"] == str(venv)
+    assert ctx.env["PIPAPI_PYTHON_LOCATION"] == str(exe)
+
+
+def test_build_context_pins_the_uv_project_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tree shared between OSes cannot use one venv path for both: .venv is the
+    # Linux venv, so Windows points UV_PROJECT_ENVIRONMENT at .venv-win. The pin
+    # must follow it, or tools would resolve against the other OS's venv.
+    venv = tmp_path / ".venv-win"
+    bindir = venv / ("Scripts" if sys.platform == "win32" else "bin")
+    bindir.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    exe = bindir / ("python.exe" if sys.platform == "win32" else "python")
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", ".venv-win")
+
+    ctx = build_context(tmp_path, (), command_prefix="clean", output_format=ToolOutputFormat.JSON, show_warnings=True)
+
     assert ctx.env["VIRTUAL_ENV"] == str(venv)
     assert ctx.env["PIPAPI_PYTHON_LOCATION"] == str(exe)
 

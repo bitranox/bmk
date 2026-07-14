@@ -6,6 +6,49 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.2.0] 2026-07-14 13:58:00
+
+### Added
+- bmk now provisions and syncs the target project's own venv before running any
+  pipeline that reads or writes the Python environment (`test`, `cov`,
+  `test_integration`, `push`, `deps`, `deps_update`, `bld`). An existing venv is
+  updated in place. The sync both removes packages the manifest no longer asks for
+  and re-resolves the ones it does, so a venv that has drifted from
+  `pyproject.toml` - including a stale unconstrained transitive sitting on a
+  vulnerable release - is brought back into line rather than silently believed.
+- `UV_PROJECT_ENVIRONMENT` selects the venv path (absolute, or relative to the
+  project; default `.venv`), so a tree shared between operating systems can keep a
+  separate venv per OS (e.g. `.venv-win`) instead of rebuilding one over the other.
+- `BMK_NO_VENV_SYNC=1` skips provisioning entirely.
+
+### Fixed
+- `deps update` installed into whatever interpreter launched bmk instead of the
+  project's venv. bmk's helpers run in-process, so on a machine where bmk was
+  started from a shared editor venv, every project's dependencies were installed
+  into that shared environment - a project with a large dependency tree could add
+  gigabytes to an environment it did not own. Installs now target the project venv
+  via `uv pip install --python`, and a project with no venv skips the install
+  rather than falling back to the ambient interpreter.
+- A stale project venv made the gates report on packages the project does not
+  actually resolve: pip-audit reported CVEs from packages left behind in the venv,
+  while the project's real dependency resolution was masked. The venv is now synced
+  to `pyproject.toml` before the gates read it.
+- `deps update` rewrote `pyproject.toml` by regular-expression substitution on the
+  file's raw text, which could not distinguish a dependency from the same
+  characters in a comment. Updates now edit the parsed document, so comments,
+  formatting and unrelated entries survive.
+- `deps update` reported success even when the install failed. The install's exit
+  code is now propagated.
+- `deps update` dropped extras when installing (`pyright[nodejs]` was installed as
+  `pyright`), so an extra's dependencies were silently missing.
+- `deps update` could pass `--break-system-packages` and install into a system
+  interpreter. Removed: with an explicit venv target there is nothing to override.
+- `bmk codecov` failed the run when `codecov-cli` was not installed but a
+  `CODECOV_TOKEN` was configured, turning `make test` red for a missing optional
+  uploader that says nothing about the code under test. A missing uploader is now
+  skipped with a warning, the same way a missing token already was; only a real
+  upload attempt that fails is still an error.
+
 ## [3.1.7] 2026-07-10 10:52:43
 
 ### Fixed

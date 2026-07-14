@@ -1283,6 +1283,27 @@ def test_main_returns_one_when_upload_fails(tmp_path: Path, monkeypatch: pytest.
 
 
 @pytest.mark.os_agnostic
+def test_main_returns_zero_when_codecovcli_is_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A missing uploader skips the upload instead of failing the run.
+
+    codecov-cli is optional: CI uploads via the codecov GitHub action, and a
+    developer machine may have a token configured without the CLI installed.
+    Treating its absence as a failure turned `make test` red for a condition that
+    says nothing about the code under test.
+    """
+    (tmp_path / "coverage.xml").write_text("<coverage/>")
+    monkeypatch.setenv("CODECOV_TOKEN", "token123")
+
+    with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value=None):
+        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+
+    assert result == 0
+    assert "not installed" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
 def test_main_returns_zero_when_no_token_for_upload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

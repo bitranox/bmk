@@ -23,6 +23,7 @@ additional dependencies.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx2
 import orjson
+import tomlkit
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
@@ -519,18 +521,66 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
     return updated
 
 
-def _get_installed_version(package_name: str) -> str | None:
-    """Get the installed version of a package, or None if not installed."""
-    from importlib.metadata import PackageNotFoundError, version
+def _installed_versions(python: str) -> dict[str, str]:
+    """Map of normalized package name -> installed version in ``python``'s env.
 
+    Queries the *target* interpreter rather than importing metadata in-process:
+    bmk runs from its own tool venv (or whatever venv launched it), so
+    ``importlib.metadata`` here would answer for the wrong environment entirely.
+
+    Returns an empty map when the environment cannot be read, which makes every
+    dependency look "not installed"; the caller then targets that same
+    interpreter, so a wrong answer cannot leak into a different environment.
+    """
+    argv = ["uv", "pip", "list", "--python", python, "--format", "json"]
     try:
-        return version(_normalize_name(package_name))
-    except (PackageNotFoundError, ValueError):
-        return None
+        # argv is built from literals and a resolved path; no shell.
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    except OSError:
+        return {}
+    if result.returncode != 0:
+        return {}
+    try:
+        parsed: object = orjson.loads(result.stdout)
+    except orjson.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, list):
+        return {}
+
+    versions: dict[str, str] = {}
+    for entry in cast("list[object]", parsed):
+        if not isinstance(entry, dict):
+            continue
+        fields = cast("dict[str, object]", entry)
+        name = fields.get("name")
+        version = fields.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            versions[_normalize_name(name)] = version
+    return versions
 
 
-def _find_packages_needing_install(deps: list[DependencyInfo]) -> list[tuple[str, str | None, str]]:
+def _extras_of(spec: str) -> str:
+    """The ``[extra,extra]`` suffix of a dependency spec, or an empty string.
+
+    Extras change what gets installed (``pyright[nodejs]`` pulls a bundled Node),
+    so an install spec rebuilt from the bare name silently installs the wrong
+    thing.
+    """
+    open_idx = spec.find("[")
+    if open_idx == -1:
+        return ""
+    close_idx = spec.find("]", open_idx)
+    return "" if close_idx == -1 else spec[open_idx : close_idx + 1]
+
+
+def _find_packages_needing_install(
+    deps: list[DependencyInfo], installed_versions: dict[str, str]
+) -> list[tuple[str, str | None, str]]:
     """Find packages that need installation or update.
+
+    Args:
+        deps: Dependencies parsed from pyproject.toml.
+        installed_versions: Normalized name -> version, from the target env.
 
     Returns:
         List of (name, installed_version, required_version) tuples.
@@ -542,12 +592,13 @@ def _find_packages_needing_install(deps: list[DependencyInfo]) -> list[tuple[str
         if not dep.current_min:
             continue
 
-        installed = _get_installed_version(dep.name)
+        installed = installed_versions.get(_normalize_name(dep.name))
+        name_with_extras = f"{dep.name}{_extras_of(dep.original_spec)}"
 
         if installed is None:
-            needs_install.append((dep.name, None, dep.current_min))
+            needs_install.append((name_with_extras, None, dep.current_min))
         elif compare_versions(installed, dep.current_min) == "outdated":
-            needs_install.append((dep.name, installed, dep.current_min))
+            needs_install.append((name_with_extras, installed, dep.current_min))
 
     return needs_install
 
@@ -561,59 +612,61 @@ def _print_install_report(needs_install: list[tuple[str, str | None, str]], *, d
         print(f"  {name}: {status} -> >={required}")
 
 
-def _run_pip_install(needs_install: list[tuple[str, str | None, str]]) -> int:
-    """Run pip install for packages needing update.
+def _run_pip_install(needs_install: list[tuple[str, str | None, str]], python: str) -> int:
+    """Install packages into ``python``'s environment.
+
+    Installs into the *explicitly passed* interpreter (the project's venv), never
+    into ``sys.executable``. bmk's helpers run in-process, so ``sys.executable``
+    is whatever launched bmk - a shared editor venv, or even a system Python -
+    and installing there lets any project silently inflate an environment it does
+    not own.
+
+    Uses ``uv pip install --python``, matching how bmk targets every other
+    interpreter (see ``tools.ensure_audit_pip_argv``). Because the target is an
+    explicit venv, no PEP 668 override is needed or wanted.
 
     Returns:
-        pip exit code
+        uv exit code
     """
-    import subprocess
+    argv = ["uv", "pip", "install", "--python", python, "--upgrade"]
+    argv.extend(f"{name}>={required}" for name, _, required in needs_install)
 
-    pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade"]
-
-    if sys.platform.startswith("linux"):
-        # Only needed on PEP 668 externally-managed installations
-        marker = Path(sys.prefix) / "EXTERNALLY-MANAGED"
-        if not marker.exists():
-            marker = (
-                Path(sys.prefix)
-                / "lib"
-                / f"python{sys.version_info.major}.{sys.version_info.minor}"
-                / "EXTERNALLY-MANAGED"
-            )
-        if marker.exists():
-            pip_cmd.append("--break-system-packages")
-
-    pip_cmd.extend(f"{name}>={required}" for name, _, required in needs_install)
-
-    return subprocess.run(pip_cmd, check=False).returncode
+    try:
+        return subprocess.run(argv, check=False).returncode
+    except OSError:
+        print("uv not found on PATH; cannot install dependencies", file=sys.stderr)
+        return 1
 
 
 def sync_installed_packages(
     deps: list[DependencyInfo],
     *,
+    python: str,
     dry_run: bool = False,
     quiet: bool = False,
-) -> int:
-    """Ensure installed packages match pyproject.toml requirements.
+) -> tuple[int, int]:
+    """Ensure packages installed in ``python``'s env match pyproject.toml.
 
-    Checks each dependency's required minimum version against the locally
-    installed version and runs pip install if updates are needed.
+    Compares each dependency's required minimum against the version installed in
+    the *target* environment and installs there if updates are needed.
 
     Args:
         deps: List of dependency info objects from check_dependencies
-        dry_run: If True, only show what would be installed without running pip
+        python: Interpreter whose environment is inspected and installed into
+        dry_run: If True, only show what would be installed without installing
         quiet: Suppress informational output
 
     Returns:
-        Number of packages that needed updating
+        (number of packages that needed updating, exit code of the install).
+        The exit code is reported rather than swallowed so a failed install
+        cannot be mistaken for a successful sync.
     """
-    needs_install = _find_packages_needing_install(deps)
+    needs_install = _find_packages_needing_install(deps, _installed_versions(python))
 
     if not needs_install:
         if not quiet:
             print("\nAll installed packages match pyproject.toml requirements!")
-        return 0
+        return 0, 0
 
     if not quiet:
         _print_install_report(needs_install, dry_run=dry_run)
@@ -621,19 +674,49 @@ def sync_installed_packages(
     if dry_run:
         if not quiet:
             print(f"\n[DRY RUN] Would install/update {len(needs_install)} packages")
-        return len(needs_install)
+        return len(needs_install), 0
 
     if not quiet:
         print("\nInstalling/updating packages...")
-    exit_code = _run_pip_install(needs_install)
+    exit_code = _run_pip_install(needs_install, python)
 
     if exit_code == 0:
         if not quiet:
             print(f"\nSuccessfully installed/updated {len(needs_install)} packages")
     else:
-        print(f"\npip install failed with exit code {exit_code}", file=sys.stderr)
+        print(f"\ninstall failed with exit code {exit_code}", file=sys.stderr)
 
-    return len(needs_install)
+    return len(needs_install), exit_code
+
+
+def _replace_spec(node: Any, original: str, new: str) -> bool:
+    """Replace the first array item equal to ``original`` with ``new``, in place.
+
+    Walks the parsed document structurally instead of rewriting the file's text.
+    A regex over the raw source cannot tell a dependency spec from the same
+    characters inside a comment or an unrelated value, and rewriting text risks
+    the surrounding formatting; tomlkit edits the value and leaves every byte it
+    did not touch alone, so comments explaining a pin survive an update.
+
+    Stops at the first match, so a spec repeated across sections (for example in
+    both ``dependencies`` and an extra) is updated once per dependency entry.
+
+    Returns:
+        True if a replacement was made.
+    """
+    if isinstance(node, dict):
+        values = list(cast("dict[str, Any]", node).values())
+        return any(_replace_spec(value, original, new) for value in values)
+    if isinstance(node, list):
+        items = cast("list[Any]", node)
+        for index, item in enumerate(items):
+            if isinstance(item, str):
+                if item == original:
+                    items[index] = new
+                    return True
+            elif isinstance(item, (dict, list)) and _replace_spec(item, original, new):
+                return True
+    return False
 
 
 def update_dependencies(
@@ -660,8 +743,7 @@ def update_dependencies(
             print("All dependencies are up-to-date!")
         return 0
 
-    # Read the file content
-    content = pyproject.read_text(encoding="utf-8")
+    document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
     updated_count = 0
 
     if not quiet:
@@ -675,28 +757,7 @@ def update_dependencies(
         if new_spec == dep.original_spec:
             continue
 
-        # Escape special regex characters in the original spec
-        escaped_original = re.escape(dep.original_spec)
-
-        # Try to find and replace the dependency in the file
-        # We need to be careful to match the exact string in quotes
-        patterns = [
-            # Double-quoted string
-            rf'"{escaped_original}"',
-            # Single-quoted string
-            rf"'{escaped_original}'",
-        ]
-
-        replaced = False
-        for pattern in patterns:
-            if re.search(pattern, content):
-                quote = pattern[0]
-                replacement = f"{quote}{new_spec}{quote}"
-                content = re.sub(pattern, replacement, content, count=1)
-                replaced = True
-                break
-
-        if replaced:
+        if _replace_spec(document, dep.original_spec, new_spec):
             if not quiet:
                 print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")
             updated_count += 1
@@ -708,7 +769,7 @@ def update_dependencies(
             if not quiet:
                 print(f"\n[DRY RUN] Would update {updated_count} dependencies")
         else:
-            pyproject.write_text(content, encoding="utf-8")
+            pyproject.write_text(tomlkit.dumps(document), encoding="utf-8")
             if not quiet:
                 print(f"\nUpdated {updated_count} dependencies in {pyproject}")
     elif not quiet:
@@ -724,6 +785,7 @@ def main(
     dry_run: bool = False,
     quiet: bool = False,
     pyproject: Path = Path("pyproject.toml"),
+    python: str | None = None,
 ) -> int:
     """Main entry point for dependency checking.
 
@@ -733,9 +795,13 @@ def main(
         dry_run: Show what would be updated without making changes
         quiet: Suppress informational output (JSON mode)
         pyproject: Path to pyproject.toml
+        python: Interpreter to inspect and install into. Required for ``update``;
+            without it there is no environment bmk may safely write to, so the
+            sync is skipped rather than defaulting to the ambient interpreter.
 
     Returns:
-        Exit code (0 if all up-to-date or update successful, 1 if any outdated)
+        Exit code (0 if all up-to-date or the update succeeded, non-zero if any
+        dependency is outdated or an install failed)
     """
     if not quiet:
         print(f"Checking dependencies in {pyproject}...")
@@ -753,9 +819,16 @@ def main(
         if updated > 0 and not dry_run:
             deps = check_dependencies(pyproject)
 
+        if python is None:
+            print(
+                "No project environment resolved; skipping install sync.",
+                file=sys.stderr,
+            )
+            return 0
+
         # Sync installed packages with pyproject.toml requirements
-        sync_installed_packages(deps, dry_run=dry_run, quiet=quiet)
-        return 0
+        _, install_code = sync_installed_packages(deps, python=python, dry_run=dry_run, quiet=quiet)
+        return install_code
 
     return exit_code
 
@@ -771,7 +844,23 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument(
         "--project-dir", type=Path, default=Path.cwd(), help="Project directory containing pyproject.toml"
     )
+    from bmk.adapters.stagerunner.venv import is_venv, resolve_project_venv, venv_python
+
     args, _unknown = parser.parse_known_args()
     pyproject = args.project_dir / "pyproject.toml"
     quiet = os.environ.get("BMK_OUTPUT_FORMAT", "json") != "text"
-    sys.exit(main(verbose=args.verbose, update=args.update, dry_run=args.dry_run, quiet=quiet, pyproject=pyproject))
+
+    # Same rule as the stage path: install only into the project's own venv.
+    project_venv = resolve_project_venv(args.project_dir, os.environ)
+    target = str(venv_python(project_venv)) if is_venv(project_venv) else None
+
+    sys.exit(
+        main(
+            verbose=args.verbose,
+            update=args.update,
+            dry_run=args.dry_run,
+            quiet=quiet,
+            pyproject=pyproject,
+            python=target,
+        )
+    )

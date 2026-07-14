@@ -18,6 +18,7 @@ from .context import resolve_audit_python
 from .helpers import _clean, _dependencies
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
+from .venv import is_venv, resolve_project_venv, venv_python
 
 
 def clean_action(ctx: StageContext) -> int:
@@ -28,6 +29,23 @@ def clean_action(ctx: StageContext) -> int:
         verbose=False,
         quiet=ctx.output_format is not ToolOutputFormat.TEXT,
     )
+
+
+def _project_python(ctx: StageContext) -> str | None:
+    """Interpreter ``deps update`` may install into, or None if there is none.
+
+    Deliberately *not* ``resolve_audit_python``: that falls back to bmk's own
+    interpreter when the project venv is missing, which is right for auditing
+    (read-only) but would make an install write into whatever environment
+    launched bmk - a shared editor venv, or a system Python. Installing has no
+    safe fallback, so the absence of a project venv must yield None and skip the
+    sync rather than silently retarget it.
+    """
+    venv = resolve_project_venv(ctx.project_dir, ctx.env)
+    if not is_venv(venv):
+        return None
+    interpreter = venv_python(venv)
+    return str(interpreter) if interpreter.exists() else None
 
 
 def deps_action(ctx: StageContext) -> int:
@@ -44,6 +62,7 @@ def deps_update_action(ctx: StageContext) -> int:
         update=True,
         pyproject=ctx.project_dir / "pyproject.toml",
         quiet=ctx.output_format is not ToolOutputFormat.TEXT,
+        python=_project_python(ctx),
     )
 
 

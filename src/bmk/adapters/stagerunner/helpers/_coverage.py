@@ -696,6 +696,17 @@ def main(
                 )
             return 0
 
+        # An absent uploader is a missing optional tool, not a coverage failure:
+        # skip it the same way a missing token is skipped. Only a real upload
+        # attempt that fails is worth failing the run over.
+        if shutil.which("codecovcli") is None:
+            if not quiet:
+                print(
+                    "\033[33m[codecov] warning: 'codecovcli' not installed; skipping upload\033[0m",
+                    file=sys.stderr,
+                )
+            return 0
+
         if not quiet:
             print(f"[codecov] Uploading coverage from {project_dir}...")
         success = upload_coverage_report(project_dir=project_dir, codecov_token=token)

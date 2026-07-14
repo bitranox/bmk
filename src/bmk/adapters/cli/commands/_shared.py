@@ -17,6 +17,11 @@ from bmk.domain.stages import normalize_returncode
 
 from ..exit_codes import ExitCode
 
+# Pipelines whose stages read or write the project's Python environment, and so
+# need it provisioned and synced first. Everything else (clean, bump, commit,
+# release, run) must not pay for building a venv it never looks at.
+VENV_PIPELINES: frozenset[str] = frozenset({"test", "cov", "test_integration", "push", "deps", "deps_update", "bld"})
+
 
 def run_command(
     cwd: Path,
@@ -44,9 +49,12 @@ def run_command(
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the prefix.
     """
+    import os
+
     from bmk.adapters.stagerunner.context import build_context
     from bmk.adapters.stagerunner.engine import run_pipeline
     from bmk.adapters.stagerunner.registry import resolve_python_pipeline
+    from bmk.adapters.stagerunner.venv import ensure_project_venv
 
     if output_format is None:
         output_format = resolve_output_format(human=False)
@@ -59,6 +67,12 @@ def run_command(
             err=True,
         )
         raise SystemExit(ExitCode.FILE_NOT_FOUND)
+
+    # Provision before build_context: it pins VIRTUAL_ENV / PIPAPI_PYTHON_LOCATION
+    # once and StageContext is frozen, so a venv created later could not repair the
+    # pins for the stages that follow.
+    if command_prefix in VENV_PIPELINES and os.environ.get("BMK_NO_VENV_SYNC") != "1":
+        ensure_project_venv(cwd, os.environ, quiet=output_format is not ToolOutputFormat.TEXT)
 
     ctx = build_context(
         cwd,

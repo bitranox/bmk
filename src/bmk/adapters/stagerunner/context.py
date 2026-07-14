@@ -14,6 +14,7 @@ from pathlib import Path
 from bmk.domain.enums import ToolOutputFormat
 
 from .model import StageContext
+from .venv import is_venv, resolve_project_venv, venv_python
 
 
 def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
@@ -25,12 +26,16 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
     active in the caller's shell it audits the wrong environment; pin it to the
     target interpreter via ``PIPAPI_PYTHON_LOCATION``.
 
+    The venv path comes from ``resolve_project_venv`` (``UV_PROJECT_ENVIRONMENT``
+    when set, else ``.venv``), the same resolver ``ensure_project_venv`` provisions
+    against, so the pin and the provisioned venv cannot disagree.
+
     Two layouts:
 
-    * The project has a ``.venv`` (its dependencies live there): pin at
-      ``.venv``'s interpreter.
-    * No ``.venv`` (the ``uv tool install --with .`` layout, including bmk
-      auditing itself): pin at bmk's own interpreter (``sys.executable``). Its
+    * The project has a venv (its dependencies live there): pin at that venv's
+      interpreter. Normally ``run_command`` has already created and synced it.
+    * No venv (the ``uv tool install --with .`` layout, or provisioning was
+      skipped or failed): pin at bmk's own interpreter (``sys.executable``). Its
       tool venv holds bmk plus the project's full dependency tree, so pip-audit
       audits *that*, not whatever ``pip-audit`` sits first on PATH (e.g. an
       editor's venv full of unrelated packages).
@@ -41,12 +46,12 @@ def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:
     resolved interpreter (a uv-created ``.venv`` ships no pip) via
     ``tools.ensure_audit_pip_argv``.
     """
-    project_venv = cwd / ".venv"
-    if project_venv.is_dir() and (project_venv / "pyvenv.cfg").is_file():
+    project_venv = resolve_project_venv(cwd, env)
+    if is_venv(project_venv):
         env["VIRTUAL_ENV"] = str(project_venv)
-        venv_python = project_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if venv_python.exists():
-            env["PIPAPI_PYTHON_LOCATION"] = str(venv_python)
+        interpreter = venv_python(project_venv)
+        if interpreter.exists():
+            env["PIPAPI_PYTHON_LOCATION"] = str(interpreter)
         else:
             env.pop("PIPAPI_PYTHON_LOCATION", None)
     else:
