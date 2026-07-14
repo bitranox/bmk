@@ -1,4 +1,4 @@
-# BMK MAKEFILE 3.3.0
+# BMK MAKEFILE 3.3.1
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper using `uv tool install` for persistent bmk
@@ -29,14 +29,31 @@ ARGS ?=
 # ──────────────────────────────────────────────────────────────
 # Ensure bmk + project deps are installed as a persistent uv tool
 # ──────────────────────────────────────────────────────────────
-# --reinstall re-resolves deps on every call (fast when cached).
-# Prefer the project's [dev] extra so test-only deps (test-import libraries,
-# fakes, property-test helpers) land in bmk's tool venv and `make test` matches
-# CI; fall back to base deps when the project has no [dev] extra, and to a plain
-# install on first run where --reinstall would fail.
+# --reinstall re-resolves deps on every call (fast when cached), so the tool env
+# always matches the project's pyproject.
+#
+# Both attempts are IDENTICAL on purpose, and each rule below is load-bearing:
+#
+#   * `.[dev]` on BOTH. A project with no [dev] extra does not fail here - uv
+#     warns and installs the base deps - so there is nothing to fall back to. The
+#     old `|| --with .` fallback was written for a failure that cannot happen, and
+#     it silently produced a tool env WITHOUT the test deps: `make test` then died
+#     with a baffling ModuleNotFoundError (hypothesis, starlette.testclient) long
+#     after the install had reported success.
+#   * `--reinstall` on BOTH. `uv tool install` without it NO-OPS when the tool is
+#     already present, so the old fallback quietly kept a stale env: bmk stayed
+#     pinned at an old version across every `make` call, running old pipeline code
+#     against new sources.
+#   * No `2>/dev/null`. Suppressing the error is what turned a transient failure
+#     into an invisible one. A real failure must reach the terminal.
+#   * The retry exists because `--reinstall` removes the old env first, and that
+#     removal can lose a race against a concurrent process writing __pycache__
+#     ("Directory not empty (os error 39)"). It is transient; the same command
+#     succeeds on a second run. If BOTH attempts fail, make fails loudly - which is
+#     correct, because there is no safe degraded state to continue from.
 .PHONY: _ensure_bmk
 _ensure_bmk:
-	@uv tool install --reinstall bmk --with ".[dev]" 2>/dev/null || uv tool install --reinstall bmk --with . 2>/dev/null || uv tool install bmk --with .
+	@uv tool install --reinstall bmk --with ".[dev]" || uv tool install --reinstall bmk --with ".[dev]"
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS

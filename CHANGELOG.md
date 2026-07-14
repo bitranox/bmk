@@ -6,6 +6,35 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.3.1] 2026-07-14 16:20:00
+
+### Fixed
+- `_ensure_bmk` (the target that runs before EVERY make invocation) could silently leave the
+  tool env wrong, in two ways that compounded. Its fallback chain dropped the project's
+  `[dev]` extra, producing an env without the test dependencies - `make test` then died with a
+  ModuleNotFoundError (`hypothesis`, `starlette.testclient`) far from the cause. And the last
+  fallback omitted `--reinstall`, which makes `uv tool install` NO-OP when the tool is already
+  present, so the env could stay pinned at an old bmk version indefinitely, running old
+  pipeline code against new sources while still reporting pass. `2>/dev/null` hid both.
+  Now both attempts are identical and complete (`--reinstall` + `.[dev]`, unsuppressed), with
+  one retry for the transient `__pycache__` removal race ("Directory not empty", os error 39);
+  if both fail, make fails loudly, because a degraded env is not a safe state to continue from.
+  The old `.[dev]` -> `.` fallback existed for a failure that cannot occur: a project without a
+  `[dev]` extra does not fail, uv warns and installs the base deps.
+- The same defect in bmk's own development `Makefile`, where it had pinned the local tool env
+  at 3.1.7 while the source was at 3.3.0.
+
+### Added
+- `tests/test_makefile_template_integrity.py` guards the bundled template: its header matches
+  `[project].version` (so a release cannot ship a template labelled with the wrong version),
+  and `_ensure_bmk` cannot regress to suppressing errors, dropping `[dev]`, omitting
+  `--reinstall`, or losing its retry.
+
+### Changed
+- The Makefile-regeneration tests plant a distinctive stale-body marker instead of the string
+  `"old"`, which is a substring of ordinary English and made the assertion fail whenever the
+  template's own prose used the word.
+
 ## [3.3.0] 2026-07-14 14:45:00
 
 ### Added

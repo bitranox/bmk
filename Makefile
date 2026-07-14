@@ -24,12 +24,21 @@ ARGS ?=
 # ──────────────────────────────────────────────────────────────
 # Ensure bmk is installed from local source + project deps
 # ──────────────────────────────────────────────────────────────
-# --reinstall re-resolves on every call (fast when cached).
-# --from ./ installs bmk from the local source tree (not PyPI).
-# Fallback handles first-time install where --reinstall would fail.
+# --from ./ installs bmk from the local source tree (not PyPI), so `make` here
+# always exercises the working copy. bmk declares its tooling as runtime deps and
+# ships no [dev] extra, hence `--with .` rather than the template's `.[dev]`.
+#
+# Both attempts are IDENTICAL, and --reinstall is on BOTH, on purpose: plain
+# `uv tool install` NO-OPS when the tool is already present, so the old
+# `2>/dev/null || <no --reinstall>` fallback silently kept a STALE tool env. That
+# is not hypothetical - it pinned this repo's bmk at 3.1.7 while the source was at
+# 3.3.0, so every `make test` ran old pipeline code against new sources and still
+# reported pass. The retry covers the transient __pycache__ removal race
+# ("Directory not empty (os error 39)"); if both fail, make fails loudly, because a
+# stale env is not a safe state to continue from.
 .PHONY: _ensure_bmk
 _ensure_bmk:
-	@uv tool install --reinstall --from ./ bmk --with . 2>/dev/null || uv tool install --from ./ bmk --with .
+	@uv tool install --reinstall --from ./ bmk --with . || uv tool install --reinstall --from ./ bmk --with .
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS

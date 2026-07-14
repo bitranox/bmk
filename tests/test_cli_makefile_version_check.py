@@ -14,6 +14,14 @@ from click.testing import CliRunner, Result
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands.install_cmd import _extract_version
 
+# Body of the stale Makefile these tests plant, and the string they assert is gone
+# once it has been regenerated. It must be one that CANNOT occur in a real
+# template: the marker used to be "old", which is a substring of ordinary English
+# ("threshold", "golden") and of any comment that happens to use the word, so
+# `assert "old" not in updated` failed the moment the template's prose said "old" -
+# a green test turning red for a reason unrelated to the behaviour under test.
+_STALE_MARKER = "STALE-MAKEFILE-BODY-DO-NOT-KEEP"
+
 # =============================================================================
 # _extract_version unit tests
 # =============================================================================
@@ -115,7 +123,7 @@ def test_outdated_user_accepts(
     """Outdated Makefile + user accepts → file updated, subcommand continues."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setenv("BMK_OUTPUT_FORMAT", "text")
-    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\nold\n", encoding="utf-8")
+    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\n" + _STALE_MARKER + "\n", encoding="utf-8")
 
     result: Result = cli_runner.invoke(
         cli_mod.cli,
@@ -128,7 +136,7 @@ def test_outdated_user_accepts(
     assert "Makefile updated to" in result.output
     updated = (tmp_path / "Makefile").read_text(encoding="utf-8")
     assert updated.startswith("# BMK MAKEFILE")
-    assert "old" not in updated
+    assert _STALE_MARKER not in updated
 
 
 @pytest.mark.os_agnostic
@@ -141,7 +149,7 @@ def test_outdated_user_declines(
     """Outdated Makefile + user declines → original preserved, subcommand runs."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setenv("BMK_OUTPUT_FORMAT", "text")
-    original = "# BMK MAKEFILE 0.0.1\nold\n"
+    original = "# BMK MAKEFILE 0.0.1\n" + _STALE_MARKER + "\n"
     (tmp_path / "Makefile").write_text(original, encoding="utf-8")
 
     result: Result = cli_runner.invoke(
@@ -165,7 +173,7 @@ def test_outdated_auto_accepts_in_json_mode(
     """Outdated Makefile in JSON mode → auto-updated without prompt."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setenv("BMK_OUTPUT_FORMAT", "json")
-    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\nold\n", encoding="utf-8")
+    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\n" + _STALE_MARKER + "\n", encoding="utf-8")
 
     result: Result = cli_runner.invoke(
         cli_mod.cli,
@@ -176,7 +184,7 @@ def test_outdated_auto_accepts_in_json_mode(
     assert result.exit_code == 0
     updated = (tmp_path / "Makefile").read_text(encoding="utf-8")
     assert updated.startswith("# BMK MAKEFILE")
-    assert "old" not in updated
+    assert _STALE_MARKER not in updated
 
 
 # =============================================================================
@@ -193,7 +201,7 @@ def test_install_command_skips_check(
 ) -> None:
     """'bmk install' never triggers the version check prompt."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\nold\n", encoding="utf-8")
+    (tmp_path / "Makefile").write_text("# BMK MAKEFILE 0.0.1\n" + _STALE_MARKER + "\n", encoding="utf-8")
 
     result: Result = cli_runner.invoke(cli_mod.cli, ["install"], obj=production_factory)
 
