@@ -50,12 +50,9 @@ never a bare `bmk` from PATH. This matters because the env carries the project's
 machine-wide env cannot serve two projects, so whichever ran `make` last would win and the other
 would silently get the wrong dependency tree.
 
-- The install is **skipped unless `pyproject.toml` changed** (make compares it against a stamp
-  inside `.venv-bmk`), so `make` does not pay a reinstall every time.
-- bmk **keeps itself current**: after a successful run it checks PyPI at most once a day and,
-  when a newer release exists, arranges for the next `make` to install it (it cannot rewrite
-  its own running env, so it invalidates the stamp and lets make rebuild). `make bmk-upgrade`
-  forces it now; `BMK_NO_UPGRADE_CHECK=1` disables the check.
+- The install runs on **every** `make`: `uv tool install --reinstall bmk` re-resolves the
+  unpinned spec against PyPI, so a new bmk release and any dependency change are picked up
+  automatically, before bmk starts. It costs a couple of seconds per invocation.
 - `.venv-bmk` is disposable: delete it and the next `make` rebuilds it. It is kept out of git
   automatically.
 
@@ -117,7 +114,6 @@ forwarded (e.g. `make push fix login bug`). Most have short aliases.
 | `make clean` \| `cl`                    | Remove build artifacts and caches                                              |
 | `make dependencies` \| `deps` `[-u]`    | Check (or `--update`) project dependencies                                     |
 | `make ensure`                           | Install missing external tools for this OS (see section 5)                     |
-| `make bmk-upgrade`                      | Rebuild this project's `.venv-bmk` (picks up a newer bmk)                      |
 | `make custom <name> [args...]`          | Run a user-defined pipeline (section 6)                                        |
 | `make help`                             | List available targets                                                         |
 
@@ -190,9 +186,9 @@ helpers) are present and `make test` matches CI.
 | A stage fails: `<tool>` not found                                                   | Install it with `make ensure` (section 5).                                                                                                                                                    |
 | `make: command not found` (Windows)                                                 | Install a `make` (`choco install make` / GnuWin32). bmk itself needs no shell.                                                                                                                |
 | `bmk: command not found` after install                                              | Only the bootstrap bmk is on PATH: ensure `~/.local/bin` is on it and re-run `uv tool install bmk`. Inside a project, use `make <target>` - it runs `./.venv-bmk/bin/bmk` and needs no PATH.  |
-| Tools resolve the wrong deps / import errors                                        | Rebuild this project's bmk env: `make bmk-upgrade` (or `rm -rf .venv-bmk && make test`).                                                                                                      |
+| Tools resolve the wrong deps / import errors                                        | Rebuild this project's bmk env: `rm -rf .venv-bmk && make test`.                                                                                                                              |
 | `make test` runs host-mutating `local_only` tests you want only on a throwaway host | Tag those tests `mutating` and set `[tool.scripts.test].exclude-markers = "mutating"` (section 6). `make test` running `local_only` is by design - do NOT exclude `local_only` to "match CI". |
-| `make test` fails on a `[dev]`-only import                                          | bmk runs pytest in this project's `.venv-bmk`; it is installed with the `[dev]` extra. Rebuild it with `make bmk-upgrade`.                                                                    |
+| `make test` fails on a `[dev]`-only import                                          | bmk runs pytest in this project's `.venv-bmk`, installed with the `[dev]` extra. Rebuild it: `rm -rf .venv-bmk && make test`.                                                                 |
 | Private GitHub deps fail to resolve                                                 | `git config --global url."https://<TOKEN>@github.com/<ORG>/".insteadOf ...` before install.                                                                                                   |
 
 ## Further reading

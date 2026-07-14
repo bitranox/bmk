@@ -12,12 +12,10 @@ from those repos. Four invariants are guarded:
    way it can go wrong - dropping the `[dev]` extra, no-opping on a stale env,
    swallowing the error - produces a working-looking env that fails much later,
    somewhere unrelated.
-3. The env belongs to this project alone (`.venv-bmk` inside the repo), which is what
-   makes 4 safe.
-4. The install is skipped unless `pyproject.toml` changed. Skipping is only correct
-   because of 3: with a machine-wide env, "nothing changed in MY repo" would not mean
-   "the env is still right", since another repo's `make` could have replaced its
-   contents in between.
+3. The env belongs to this project alone (`.venv-bmk` inside the repo), so two repos
+   cannot overwrite each other's dependencies.
+4. The install runs before every target, so a new bmk release and any dependency
+   change are picked up without anyone remembering to do anything.
 """
 
 from __future__ import annotations
@@ -37,13 +35,9 @@ def _template_text() -> str:
 
 
 def _install_recipe(text: str) -> str:
-    """The recipe that installs bmk (the stamp rule's tab-indented lines).
-
-    The install hangs off the stamp target rather than `_ensure_bmk` so make can
-    skip it by mtime; these guards follow it there.
-    """
-    match = re.search(r"^\$\(BMK_STAMP\):[^\n]*\n((?:\t.*\n)+)", text, re.M)
-    assert match, "the template must build $(BMK_STAMP) with a recipe"
+    """The tab-indented recipe lines of the _ensure_bmk target."""
+    match = re.search(r"^_ensure_bmk:\n((?:\t.*\n)+)", text, re.M)
+    assert match, "the template must define an _ensure_bmk recipe"
     return match.group(1)
 
 
@@ -180,19 +174,20 @@ def test_tool_dir_is_inside_the_project() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_install_is_skipped_unless_pyproject_changed() -> None:
-    """The stamp is a real file gated on pyproject.toml, so make skips by mtime.
+def test_install_runs_before_every_target() -> None:
+    """_ensure_bmk is .PHONY and carries the install, so it runs every time.
 
-    This is what removes a multi-second reinstall from every single make
-    invocation, and with it the window in which two concurrent runs could corrupt
-    the env mid-teardown. A .PHONY target would run every time and lose both.
+    That is what keeps bmk and the dependency tree current: `uv tool install
+    --reinstall bmk` re-resolves the unpinned spec against PyPI on each make, before
+    bmk starts. Gating it behind a stamp file would make make skip the install, and
+    uv would then never see a new release - the env would silently pin itself.
     """
     text = _template_text()
 
-    assert re.search(r"^\$\(BMK_STAMP\): pyproject\.toml", text, re.M), "the stamp must depend on pyproject.toml"
-    assert re.search(r"^\.PHONY: _ensure_bmk\n_ensure_bmk: \$\(BMK_STAMP\)$", text, re.M)
-    # The recipe must record that it ran, or the next make would rebuild forever.
-    assert "touch $@" in _install_recipe(text)
+    assert re.search(r"^\.PHONY: _ensure_bmk\n_ensure_bmk:\n\t", text, re.M), (
+        "_ensure_bmk must be .PHONY and own the recipe, so it is never skipped"
+    )
+    assert "BMK_STAMP" not in text, "a stamp would stop uv from ever seeing a new bmk release"
 
 
 @pytest.mark.os_agnostic

@@ -9,9 +9,7 @@
 #   make custom deploy --dry-run
 #
 # bmk is installed from the local source tree into this project's own tool env
-# (.venv-bmk), and reinstalled whenever pyproject.toml or any src/**/*.py changes,
-# so code changes are picked up immediately without paying for a reinstall on every
-# single make invocation.
+# (.venv-bmk) on every invocation, editable, so code changes are always live.
 #
 # Arguments after the target name are forwarded automatically.
 # You can also use ARGS="..." explicitly if preferred.
@@ -30,41 +28,30 @@ endif
 # carries the project's dependencies, so one shared env cannot serve two projects.
 BMK_TOOL_DIR := $(CURDIR)/.venv-bmk
 BMK := $(BMK_TOOL_DIR)/bin/bmk$(BMK_EXE)
-BMK_STAMP := $(BMK_TOOL_DIR)/.bmk-installed
 ARGS ?=
 
 # ──────────────────────────────────────────────────────────────
 # Ensure bmk is installed from local source into this project's tool env
 # ──────────────────────────────────────────────────────────────
-# `--editable ./` installs bmk from the local source tree, so `make` here always
-# runs the working copy: the env imports bmk straight out of src/, and a source edit
-# is live with no reinstall. That is why the stamp gates on pyproject.toml alone -
-# only the DEPENDENCIES can go stale, and they change only when pyproject.toml does.
-# A non-editable `--from ./` would install a SNAPSHOT, and `make` would keep running
-# the previous build of the very thing under development while reporting pass, which
-# is the worst way to be wrong.
+# `--editable ./` installs bmk from the local source tree, so `make` here always runs
+# the working copy: the env imports bmk straight out of src/, and a source edit is live
+# with no reinstall. A non-editable `--from ./` would install a SNAPSHOT, and `make`
+# would keep running the previous build of the very thing under development while
+# reporting pass, which is the worst way to be wrong.
 #
-# No `--with .` here: bmk IS this project, so installing it brings its dependencies,
-# and bmk ships no [dev] extra (its tooling is declared as runtime deps).
+# No `--with .`: bmk IS this project, so installing it brings its dependencies, and bmk
+# ships no [dev] extra (its tooling is declared as runtime deps).
 #
 # --reinstall is on BOTH attempts: plain `uv tool install` NO-OPS when the tool is
 # already present, keeping a stale env. The retry covers the transient __pycache__
 # removal race ("Directory not empty", os error 39); if both fail, make fails loudly,
 # because a stale env is not a safe state to continue from.
-$(BMK_STAMP): pyproject.toml
+.PHONY: _ensure_bmk
+_ensure_bmk:
 	@UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
 	  uv tool install --reinstall --force --editable ./ \
 	  || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
 	  uv tool install --reinstall --force --editable ./
-	@touch $@
-
-.PHONY: _ensure_bmk
-_ensure_bmk: $(BMK_STAMP)
-
-.PHONY: bmk-upgrade
-bmk-upgrade:  ## Force-reinstall bmk from local source
-	@rm -f $(BMK_STAMP)
-	@$(MAKE) --no-print-directory _ensure_bmk
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS
