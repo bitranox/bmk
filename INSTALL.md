@@ -30,30 +30,30 @@ project's dependencies. This ensures tools like pyright, pytest and
 pip-audit can resolve the full dependency tree.
 
 ```bash
-# Install bmk + current project deps into a persistent venv
-uv tool install bmk --with .
-
-# Upgrade bmk (re-resolves all deps including project deps)
-uv tool upgrade bmk
+# Drop the Makefile in; it builds the project's own .venv-bmk on first use
+# and re-resolves bmk and the project deps on every make.
+uvx bmk install
+make test
 
 # Reinstall to pick up changed project deps (e.g. after editing pyproject.toml)
 uv tool install --reinstall bmk --with .
 ```
 
-The persistent venv lives at `~/.local/share/uv/tools/bmk/` on the local
-filesystem. No `.venv` in the project directory is needed — works on network
-shares that do not support symlinks.
+`make` builds two directories in the project: `.venv-bmk` (bmk plus this project's
+dependencies, the env bmk's tools run in) and `.venv` (the project's own venv, which
+bmk syncs to pyproject.toml). Both belong to this repo alone, so projects cannot
+overwrite each other's dependencies, and both are gitignored and disposable.
 
 ### Via the Makefile (automatic)
 
 The bundled Makefile handles installation automatically on every target.
-No manual `uv tool install` is needed after the initial setup:
+Nothing needs installing by hand, before or after:
 
 ```bash
-# One-time: bootstrap bmk and install the Makefile
-uv tool install bmk --with . && bmk install
+# One-time: install the Makefile (installs nothing permanently)
+uvx bmk install
 
-# From now on, just use make — bmk + deps are kept in sync
+# From now on, just use make - bmk + deps are re-resolved every time
 make test
 ```
 
@@ -69,7 +69,7 @@ before installing:
 
 ```bash
 git config --global url."https://<TOKEN>@github.com/<ORG>/".insteadOf "https://github.com/<ORG>/"
-uv tool install bmk --with .
+make test   # the Makefile installs bmk + the project deps into .venv-bmk
 ```
 
 PEP 440 direct references in `[project.dependencies]` are resolved through

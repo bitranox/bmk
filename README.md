@@ -116,31 +116,30 @@ project's dependencies. The bundled Makefile handles this automatically
 on every invocation  -  no manual setup required.
 
 ```bash
-# One-time: install the Makefile into your project
-uv tool install bmk && bmk install
+# One-time: install the Makefile into your project (installs nothing permanently)
+uvx bmk install
 
 # From now on, just use make  -  bmk + project deps are kept in sync:
 make test
 make build
 ```
 
-Behind the scenes, the Makefile runs on every target:
+Behind the scenes, the Makefile runs this on every target, in the project's own
+`.venv-bmk`:
 ```bash
-uv tool install --reinstall bmk --with .
+uv tool install --reinstall --force "bmk>=$(BMK_MIN)" --with-editable ".[dev]"
 ```
-This reads `./pyproject.toml`, installs bmk and all project dependencies into
-a persistent venv at `~/.local/share/uv/tools/bmk/`. Tools like pyright,
-pytest and pip-audit resolve the full dependency tree without needing a
-local `.venv`  -  works on network shares that do not support symlinks.
+It reads `./pyproject.toml` and installs bmk plus all project dependencies, so
+pyright, pytest and pip-audit resolve the full dependency tree. Re-resolving every
+time is what keeps bmk and the dependencies current; the `bmk>=` floor stops a
+project dependency from silently dragging bmk back to an old release.
 
 ### Manual install (without Makefile)
 
 ```bash
-# install bmk + current project deps
-uv tool install bmk --with .
-
-# upgrade bmk (re-resolves all deps)
-uv tool upgrade bmk
+# Run bmk against the current project without a Makefile.
+# Note this does NOT give you the per-project env `make` builds.
+uvx bmk --help
 
 # or reinstall to pick up changed project deps
 uv tool install --reinstall bmk --with .
@@ -153,7 +152,7 @@ before installing:
 
 ```bash
 git config --global url."https://<TOKEN>@github.com/<ORG>/".insteadOf "https://github.com/<ORG>/"
-uv tool install bmk --with .
+make test   # the Makefile installs bmk + the project deps into .venv-bmk
 ```
 
 The PEP 440 direct references in `[project.dependencies]` are resolved
@@ -173,11 +172,9 @@ See [CONFIG.md](CONFIG.md) for detailed documentation on the layered configurati
 ## Quick Start
 
 ```bash
-# Install bmk + project deps (in your project directory)
-uv tool install bmk --with .
-
-# Verify
-bmk --version
+# In your project directory - the Makefile builds .venv-bmk on first use
+uvx bmk install
+make version-current
 
 # Install the Makefile
 bmk install
