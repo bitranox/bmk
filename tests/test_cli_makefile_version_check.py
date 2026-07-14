@@ -15,11 +15,10 @@ from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands.install_cmd import _extract_version
 
 # Body of the stale Makefile these tests plant, and the string they assert is gone
-# once it has been regenerated. It must be one that CANNOT occur in a real
-# template: the marker used to be "old", which is a substring of ordinary English
-# ("threshold", "golden") and of any comment that happens to use the word, so
-# `assert "old" not in updated` failed the moment the template's prose said "old" -
-# a green test turning red for a reason unrelated to the behaviour under test.
+# once it has been regenerated. It must be a marker that CANNOT occur in a real
+# template. A short English word will not do: the template is mostly prose, so
+# something like "old" also matches "threshold" or any comment using the word, and
+# the assertion then fails for a reason unrelated to the behaviour under test.
 _STALE_MARKER = "STALE-MAKEFILE-BODY-DO-NOT-KEEP"
 
 # =============================================================================

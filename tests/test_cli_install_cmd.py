@@ -149,18 +149,23 @@ def test_cli_install_errors_when_bundled_missing(
 
 
 @pytest.mark.os_agnostic
-def test_bundled_makefile_provisions_dev_extra() -> None:
-    """The bundled Makefile installs bmk's tool venv WITH the project's [dev] extra.
+def test_bundled_makefile_provisions_dev_extra_editable() -> None:
+    """The SHIPPED Makefile installs the project editable, with its [dev] extra.
 
-    Test-only deps declared in [dev] (test-import libraries, fakes, property-test
-    helpers) must land in the venv bmk runs pytest in, otherwise `make test`
-    diverges from CI. The base-deps install is kept as a fallback for projects
-    that have no [dev] extra.
+    This reads the template as it ships inside the package, so it also catches a
+    package that bundles something other than the source template. The source file
+    itself is guarded in test_makefile_template_integrity.py.
+
+    Test-only deps declared in [dev] must land in the env bmk runs pytest in, or
+    `make test` diverges from CI. Editable matters because the env's copy of the
+    project is then the working tree, which is what lets the install be skipped
+    unless pyproject.toml changed.
     """
     import bmk
 
     bundled_makefile = Path(bmk.__file__).parent / "makefile" / "Makefile"
     content = bundled_makefile.read_text(encoding="utf-8")
 
-    assert '--with ".[dev]"' in content
-    assert "--with ." in content  # base-deps fallback preserved
+    assert '--with-editable ".[dev]"' in content
+    # A dev-less fallback would silently build an env without the test deps.
+    assert '--with ".[dev]"' not in content, "non-editable install would snapshot the source"

@@ -16,8 +16,8 @@
 It runs a cross-OS Python stage runner that groups a command's stages by order number  -  stages run sequentially (fail-fast), 
 stages sharing the same order run in parallel. It runs natively on Linux, macOS, and Windows (pure Python, no shell scripts). Pipelines are customizable per project, and `bmk custom <name>` runs a user-defined pipeline.
 
-Every project gets a thin `Makefile` that delegates to `uvx bmk@latest`, giving you a standard, expandable set of everyday development targets 
-(`make test`, `make push`, `make bump-patch`, ...) without installing anything locally. 
+Every project gets a thin `Makefile` that installs bmk into the project's own `.venv-bmk` and delegates to it, giving you a standard, expandable set of everyday development targets 
+(`make test`, `make push`, `make bump-patch`, ...). The env belongs to that one repo, is rebuilt only when `pyproject.toml` changes, and keeps itself current automatically. 
 Add project-specific targets or override existing ones  -  the Makefile is the single entry point for both interactive use and CI pipelines.
 
 | Command                           | Options / Subcommands                                                        | Description                                          |
@@ -29,7 +29,7 @@ Add project-specific targets or override existing ones  -  the Makefile is the s
 | `make codecov\|coverage\|cov`     |                                                                              | Upload coverage report to Codecov                    |
 | `make build\|bld`                 |                                                                              | Build wheel and sdist artifacts                      |
 | `make clean\|cln\|cl`             |                                                                              | Remove build artifacts and caches                    |
-| `make run`                        |                                                                              | Run the project CLI via uvx                          |
+| `make run`                        |                                                                              | Run the project CLI                                  |
 | `make bump-patch`                 |                                                                              | Bump patch version X.Y.(Z+1)                         |
 | `make bump-minor`                 |                                                                              | Bump minor version X.(Y+1).0                         |
 | `make bump-major`                 |                                                                              | Bump major version (X+1).0.0                         |
@@ -47,6 +47,7 @@ Add project-specific targets or override existing ones  -  the Makefile is the s
 | `make custom`                     | `<name> [args...]`                                                           | Run a user-defined pipeline                          |
 | `bmk install`                     |                                                                              | Install or update the bmk Makefile in cwd            |
 | `make ensure`                     | `[--dry-run]` `[--strict]`                                                   | Install missing external tools for this OS           |
+| `make bmk-upgrade`                |                                                                              | Rebuild this project's `.venv-bmk` (newer bmk now)   |
 | `make info`                       |                                                                              | Print resolved package metadata                      |
 | `make version-current`            |                                                                              | Print current version                                |
 | `make dev`                        |                                                                              | Install package with dev extras (editable)           |
@@ -72,7 +73,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 | 060   | sequential   | `shellcheck`                                                                                                     |
 
 - **JSON-by-default output**  -  in JSON mode (the default), the stage runner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags  -  use `make test-human` or `make th` instead.
-- **Dependency isolation**  -  bmk is installed as a persistent `uv tool` together with the current project's dependencies (`uv tool install bmk --with .`), so pyright, pytest, pip-audit and other tools resolve the full dependency tree without `PYTHONPATH` hacks.
+- **Dependency isolation**  -  `make` installs bmk into the project's own `.venv-bmk`, together with the project's dependencies, so pyright, pytest, pip-audit and other tools resolve the full dependency tree without `PYTHONPATH` hacks. The env belongs to one repo, so projects cannot overwrite each other's dependencies. It is rebuilt only when `pyproject.toml` changes. bmk also keeps itself current: after a successful run it checks PyPI at most once a day and lets the next `make` install a newer release (`make bmk-upgrade` forces it, `BMK_NO_UPGRADE_CHECK=1` disables it). `.venv-bmk` is disposable and gitignored.
 - **Project venv, synced before every gate**  -  bmk creates the project's venv if absent and syncs it to `pyproject.toml` before any command that touches the Python environment. Installs and gates target that venv only  -  never bmk's own, never the venv active in your shell  -  so no project can install its dependencies into a shared environment it does not own. The sync removes packages the manifest dropped and re-resolves the rest, so a drifted venv cannot make pip-audit report CVEs the project does not actually resolve. Set `UV_PROJECT_ENVIRONMENT` to use a different path (e.g. `.venv-win` when one checkout is shared between operating systems), or `BMK_NO_VENV_SYNC=1` to skip provisioning. Packages installed into the venv by hand do not survive a sync. `clean` does not remove the venv  -  delete it by hand when you want it gone.
 - **The venv stays out of git**  -  bmk gitignores the venv it creates (respecting any rule you already have) and, if git is tracking a venv, drops it from the index while leaving the files on disk. A tracked venv would otherwise show thousands of modified files after every sync.
 - **Built-in commands**  -  `test`, `build`, `clean`, `run`, `push`, `release`, `bump`, `coverage`, and more.

@@ -23,6 +23,20 @@ from ..exit_codes import ExitCode
 VENV_PIPELINES: frozenset[str] = frozenset({"test", "cov", "test_integration", "push", "deps", "deps_update", "bld"})
 
 
+def _announce_upgrade(newer: str | None) -> None:
+    """Tell the user a newer bmk will be installed by the next make.
+
+    Printed even in JSON mode: the next `make` rebuilds the tool env, and an
+    unexplained multi-second install looks like a hang.
+    """
+    if newer is None:
+        return
+    click.echo(
+        f"[bmk] version {newer} is available; the next `make` installs it into this project.",
+        err=True,
+    )
+
+
 def run_command(
     cwd: Path,
     extra_args: tuple[str, ...],
@@ -54,6 +68,7 @@ def run_command(
     from bmk.adapters.stagerunner.context import build_context
     from bmk.adapters.stagerunner.engine import run_pipeline
     from bmk.adapters.stagerunner.registry import resolve_python_pipeline
+    from bmk.adapters.stagerunner.selfupgrade import check_for_upgrade
     from bmk.adapters.stagerunner.venv import ensure_project_venv
 
     if output_format is None:
@@ -82,7 +97,13 @@ def run_command(
         show_warnings=show_warnings,
         package_name=package_name,
     )
-    return run_pipeline(stages, ctx)
+    exit_code = run_pipeline(stages, ctx)
+
+    # Only after a green run: a failing build is not the moment to announce an
+    # upgrade, and the check must never be mistaken for the cause of a failure.
+    if exit_code == 0:
+        _announce_upgrade(check_for_upgrade(cwd))
+    return exit_code
 
 
 def resolve_output_format(*, human: bool) -> ToolOutputFormat:

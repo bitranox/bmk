@@ -258,10 +258,10 @@ def test_ensure_venv_ignored_adds_missing_entries(tmp_path: Path) -> None:
 def test_ensure_venv_ignored_is_idempotent(tmp_path: Path) -> None:
     """Repeated runs must not append the same entry again.
 
-    Regression: entries are written as `dir/`, and a `dir/` rule only matches a
-    path git KNOWS is a directory - which it cannot for one that does not exist
-    yet. Querying `.venv-win` instead of `.venv-win/` made an existing rule look
-    absent, so every run appended it again and .gitignore grew without bound.
+    Entries are written as `dir/`, and a `dir/` rule only matches a path git KNOWS
+    is a directory - which it cannot for one that does not exist yet. So the check
+    must ask about `.venv-win/`, not `.venv-win`; asking about the bare name makes
+    an existing rule look absent and .gitignore grows without bound.
     """
     if not _git_repo(tmp_path):
         pytest.skip("git unavailable")

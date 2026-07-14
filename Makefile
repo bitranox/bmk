@@ -8,8 +8,10 @@
 #   make custom deploy                # run custom command
 #   make custom deploy --dry-run
 #
-# On every invocation, bmk is (re-)installed from the local source tree
-# so that code changes are picked up immediately.
+# bmk is installed from the local source tree into this project's own tool env
+# (.venv-bmk), and reinstalled whenever pyproject.toml or any src/**/*.py changes,
+# so code changes are picked up immediately without paying for a reinstall on every
+# single make invocation.
 #
 # Arguments after the target name are forwarded automatically.
 # You can also use ARGS="..." explicitly if preferred.
@@ -17,28 +19,52 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-# Use absolute path to the uv tool binary so active virtualenvs cannot shadow it.
-BMK := $(HOME)/.local/bin/bmk
+# uv names the executable bmk.exe on Windows.
+ifeq ($(OS),Windows_NT)
+  BMK_EXE := .exe
+else
+  BMK_EXE :=
+endif
+
+# bmk lives in THIS project's own tool env, never a machine-wide one: the env
+# carries the project's dependencies, so one shared env cannot serve two projects.
+BMK_TOOL_DIR := $(CURDIR)/.venv-bmk
+BMK := $(BMK_TOOL_DIR)/bin/bmk$(BMK_EXE)
+BMK_STAMP := $(BMK_TOOL_DIR)/.bmk-installed
 ARGS ?=
 
 # ──────────────────────────────────────────────────────────────
-# Ensure bmk is installed from local source + project deps
+# Ensure bmk is installed from local source into this project's tool env
 # ──────────────────────────────────────────────────────────────
-# --from ./ installs bmk from the local source tree (not PyPI), so `make` here
-# always exercises the working copy. bmk declares its tooling as runtime deps and
-# ships no [dev] extra, hence `--with .` rather than the template's `.[dev]`.
+# `--editable ./` installs bmk from the local source tree, so `make` here always
+# runs the working copy: the env imports bmk straight out of src/, and a source edit
+# is live with no reinstall. That is why the stamp gates on pyproject.toml alone -
+# only the DEPENDENCIES can go stale, and they change only when pyproject.toml does.
+# A non-editable `--from ./` would install a SNAPSHOT, and `make` would keep running
+# the previous build of the very thing under development while reporting pass, which
+# is the worst way to be wrong.
 #
-# Both attempts are IDENTICAL, and --reinstall is on BOTH, on purpose: plain
-# `uv tool install` NO-OPS when the tool is already present, so the old
-# `2>/dev/null || <no --reinstall>` fallback silently kept a STALE tool env. That
-# is not hypothetical - it pinned this repo's bmk at 3.1.7 while the source was at
-# 3.3.0, so every `make test` ran old pipeline code against new sources and still
-# reported pass. The retry covers the transient __pycache__ removal race
-# ("Directory not empty (os error 39)"); if both fail, make fails loudly, because a
-# stale env is not a safe state to continue from.
+# No `--with .` here: bmk IS this project, so installing it brings its dependencies,
+# and bmk ships no [dev] extra (its tooling is declared as runtime deps).
+#
+# --reinstall is on BOTH attempts: plain `uv tool install` NO-OPS when the tool is
+# already present, keeping a stale env. The retry covers the transient __pycache__
+# removal race ("Directory not empty", os error 39); if both fail, make fails loudly,
+# because a stale env is not a safe state to continue from.
+$(BMK_STAMP): pyproject.toml
+	@UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
+	  uv tool install --reinstall --force --editable ./ \
+	  || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
+	  uv tool install --reinstall --force --editable ./
+	@touch $@
+
 .PHONY: _ensure_bmk
-_ensure_bmk:
-	@uv tool install --reinstall --from ./ bmk --with . || uv tool install --reinstall --from ./ bmk --with .
+_ensure_bmk: $(BMK_STAMP)
+
+.PHONY: bmk-upgrade
+bmk-upgrade:  ## Force-reinstall bmk from local source
+	@rm -f $(BMK_STAMP)
+	@$(MAKE) --no-print-directory _ensure_bmk
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS

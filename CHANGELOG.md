@@ -6,6 +6,44 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.4.0] 2026-07-14 16:55:00
+
+### Changed
+- **bmk now lives in a per-project tool env (`.venv-bmk`) instead of one machine-wide env.**
+  The env carries the project's own dependencies, so a single shared env could
+  never serve two projects: whichever ran `make` last won, and the other silently got the wrong
+  dependency tree. Measured, not theoretical - a project depending on `six` and one depending on
+  `chardet` were shown to overwrite each other. Per-project means "is the env correct" is a
+  question about one repo alone. The Makefile invokes `./.venv-bmk/bin/bmk` directly rather than
+  a bare `bmk` from PATH, so no machine-wide install can shadow it. uv writes a `.gitignore`
+  inside the env, and bmk also declares `.venv-bmk` in the project's `.gitignore` and untracks
+  it if git ever held it. Delete `.venv-bmk` at any time; the next `make` rebuilds it.
+- **The install is skipped unless `pyproject.toml` changed.** The stamp is a real file with
+  `pyproject.toml` as its prerequisite, so make decides by mtime - no shell, no hashing, no
+  Python, identical on every OS. This removes a multi-second reinstall from every single `make`
+  invocation, and with it the window in which two concurrent runs could corrupt the env while
+  `--reinstall` had it torn down.
+- **The project is installed editable** (`--with-editable ".[dev]"`; `--editable ./` in bmk's own
+  development Makefile). This is what makes gating on `pyproject.toml` alone correct: the
+  project's code in the env IS the working tree, so only its dependencies can go stale, and those
+  change only when `pyproject.toml` does. A non-editable install put a snapshot of the source in
+  the env; that happened to work because tools run with `cwd=<project>`, whose source shadows the
+  snapshot on `sys.path`, but it is an accident of import order and would serve stale code to
+  anything running from another directory. As a side effect, editing bmk's own source is now live
+  immediately instead of costing a reinstall.
+
+### Added
+- **bmk keeps itself current, automatically.** After a successful run, at most once a day, bmk
+  asks PyPI for the latest version; if it is newer it deletes the install stamp and says so. The
+  next `make` then installs it in `_ensure_bmk` - before any bmk process starts - and runs the
+  new version, so the user does nothing but run their next command. bmk deletes the stamp rather
+  than installing the upgrade itself because that would rewrite the env it is executing from,
+  which Windows forbids. The check never fails a build: no network, no `.venv-bmk`, a malformed response - it returns quietly. Set
+  `BMK_NO_UPGRADE_CHECK=1` to never contact PyPI.
+- `make bmk-upgrade` - force a reinstall of bmk in this project now.
+- Template guards: the env and entry points are redirected into the project, the stamp gates on
+  `pyproject.toml`, and the Windows `.exe` suffix is handled.
+
 ## [3.3.1] 2026-07-14 16:20:00
 
 ### Fixed

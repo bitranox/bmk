@@ -106,13 +106,17 @@ def _untrack(cwd: Path, name: str) -> bool:
 
 
 def _ignore_entries(cwd: Path, venv: Path) -> list[str]:
-    """Names that should be gitignored: the managed venv plus the usual pair.
+    """Names that should be gitignored: the managed venv plus the usual set.
 
     ``.venv-win`` earns its place even on Linux: one checkout reached from two
     operating systems needs a venv each, and the sibling's directory is
     otherwise permanently untracked noise in `git status`.
+
+    ``.venv-bmk`` is the per-project environment the Makefile installs bmk into.
+    bmk does not create it (the Makefile does, before bmk exists), so listing it
+    here is the only place that can keep it out of git.
     """
-    names = [".venv", ".venv-win"]
+    names = [".venv", ".venv-win", ".venv-bmk"]
     try:
         relative = venv.resolve().relative_to(cwd.resolve())
     except ValueError:

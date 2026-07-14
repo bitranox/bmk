@@ -1,4 +1,4 @@
-# BMK MAKEFILE 3.3.1
+# BMK MAKEFILE 3.4.0
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper using `uv tool install` for persistent bmk
@@ -11,10 +11,13 @@
 #   make custom deploy                # run custom command
 #   make custom deploy --dry-run
 #
-# On every invocation, bmk is (re-)installed as a persistent uv tool
-# together with the current project's dependencies (read from ./pyproject.toml).
-# This ensures pyright, pytest, pip-audit etc. can resolve the full
-# dependency tree without PYTHONPATH hacks or a local .venv.
+# bmk is installed into THIS PROJECT's own tool env (.venv-bmk) together with the
+# project's dependencies (read from ./pyproject.toml), so pyright, pytest,
+# pip-audit etc. resolve the full dependency tree without PYTHONPATH hacks. The
+# env belongs to this repo alone: projects cannot overwrite each other's
+# dependencies, and the install is skipped unless pyproject.toml has changed.
+#
+# .venv-bmk is disposable - delete it and the next make rebuilds it.
 #
 # Arguments after the target name are forwarded automatically.
 # You can also use ARGS="..." explicitly if preferred.
@@ -22,38 +25,76 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-# Use absolute path to the uv tool binary so active virtualenvs cannot shadow it.
-BMK := $(HOME)/.local/bin/bmk
+# uv names the executable bmk.exe on Windows.
+ifeq ($(OS),Windows_NT)
+  BMK_EXE := .exe
+else
+  BMK_EXE :=
+endif
+
+# bmk lives in a venv OF THIS PROJECT, not in a machine-wide one. The tool env
+# holds bmk's toolchain PLUS this project's dependencies, so a single
+# shared env cannot serve two projects: whichever ran `make` last wins, and the
+# other silently gets the wrong dependency tree. Per-project is the only layout
+# where "the env is correct" is a question about THIS repo alone.
+BMK_TOOL_DIR := $(CURDIR)/.venv-bmk
+BMK := $(BMK_TOOL_DIR)/bin/bmk$(BMK_EXE)
+BMK_STAMP := $(BMK_TOOL_DIR)/.bmk-installed
 ARGS ?=
 
 # ──────────────────────────────────────────────────────────────
-# Ensure bmk + project deps are installed as a persistent uv tool
+# Ensure bmk + project deps are installed in this project's tool env
 # ──────────────────────────────────────────────────────────────
-# --reinstall re-resolves deps on every call (fast when cached), so the tool env
-# always matches the project's pyproject.
+# The stamp is a REAL file with pyproject.toml as its prerequisite, so make decides
+# by mtime whether to reinstall. That needs no shell, no hashing and no Python, so it
+# behaves the same on every OS. Keep _ensure_bmk a .PHONY alias that DEPENDS on the
+# stamp; moving the recipe onto _ensure_bmk would reinstall on every invocation,
+# costing seconds each time and widening the window in which two concurrent `make`
+# runs can corrupt the env while `--reinstall` has it torn down.
 #
-# Both attempts are IDENTICAL on purpose, and each rule below is load-bearing:
+# Every part of the recipe is load-bearing. Do not:
 #
-#   * `.[dev]` on BOTH. A project with no [dev] extra does not fail here - uv
-#     warns and installs the base deps - so there is nothing to fall back to. The
-#     old `|| --with .` fallback was written for a failure that cannot happen, and
-#     it silently produced a tool env WITHOUT the test deps: `make test` then died
-#     with a baffling ModuleNotFoundError (hypothesis, starlette.testclient) long
-#     after the install had reported success.
-#   * `--reinstall` on BOTH. `uv tool install` without it NO-OPS when the tool is
-#     already present, so the old fallback quietly kept a stale env: bmk stayed
-#     pinned at an old version across every `make` call, running old pipeline code
-#     against new sources.
-#   * No `2>/dev/null`. Suppressing the error is what turned a transient failure
-#     into an invisible one. A real failure must reach the terminal.
-#   * The retry exists because `--reinstall` removes the old env first, and that
-#     removal can lose a race against a concurrent process writing __pycache__
-#     ("Directory not empty (os error 39)"). It is transient; the same command
-#     succeeds on a second run. If BOTH attempts fail, make fails loudly - which is
+#   * drop `.[dev]` from either attempt, or add a `|| --with .` fallback. A project
+#     with no [dev] extra does not fail here - uv warns and installs the base deps -
+#     so such a fallback can only ever produce an env WITHOUT the test deps, which
+#     surfaces as a ModuleNotFoundError (hypothesis, starlette.testclient) far from
+#     the install that caused it.
+#   * change `--with-editable` to `--with`. Editable is what makes gating the stamp
+#     on pyproject.toml alone CORRECT: the project's code in the env IS the working
+#     tree, so only its DEPENDENCIES can go stale, and those change only when
+#     pyproject.toml does. A non-editable `--with .` installs a SNAPSHOT of the
+#     source; it happens to work today because tools run with cwd=<project>, whose
+#     source shadows the snapshot on sys.path - but that is a coincidence of the
+#     import order, not a guarantee, and it would silently serve stale code the
+#     moment anything ran from another directory.
+#   * drop `--reinstall` from either attempt. `uv tool install` without it NO-OPS
+#     when the tool is already present, ignoring `--with` entirely, and keeps a stale
+#     env.
+#   * drop `--force`. The entry points exist in this project's bin dir on every
+#     rebuild.
+#   * add `2>/dev/null`. A real failure must reach the terminal; a suppressed one
+#     surfaces later, somewhere unrelated.
+#   * collapse the retry. It covers the transient __pycache__ removal race
+#     ("Directory not empty", os error 39). If BOTH attempts fail, make fails loudly -
 #     correct, because there is no safe degraded state to continue from.
+#
+# The env is rebuilt when pyproject.toml changes. bmk also keeps ITSELF current: after a
+# successful run it checks PyPI at most once a day and, when a newer release exists, deletes
+# this stamp so the next make installs it. `make bmk-upgrade` forces that now.
+$(BMK_STAMP): pyproject.toml
+	@UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
+	  uv tool install --reinstall --force bmk --with-editable ".[dev]" \
+	  || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
+	  uv tool install --reinstall --force bmk --with-editable ".[dev]"
+	@touch $@
+
 .PHONY: _ensure_bmk
-_ensure_bmk:
-	@uv tool install --reinstall bmk --with ".[dev]" || uv tool install --reinstall bmk --with ".[dev]"
+_ensure_bmk: $(BMK_STAMP)
+
+.PHONY: bmk-upgrade
+bmk-upgrade:  ## Reinstall bmk in this project (picks up a newer bmk release)
+	@rm -f $(BMK_STAMP)
+	@$(MAKE) --no-print-directory _ensure_bmk
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS
