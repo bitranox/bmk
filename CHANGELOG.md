@@ -6,6 +6,31 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.3.0] 2026-07-14 14:45:00
+
+### Added
+- bmk keeps the venv it creates out of git. After provisioning it drops the venv from the index
+  if git tracks it (`git rm --cached`, so the files stay on disk) and appends the venv names to
+  `.gitignore` when nothing already ignores them - the managed venv's own name plus `.venv` and
+  `.venv-win`, so a checkout used from two operating systems does not leave the other's venv as
+  untracked noise. A tracked venv is not cosmetic: the sync rewrites its contents on every run,
+  so git would report thousands of modified files each time and a commit would sweep them in.
+  `git check-ignore` decides what is already covered, so an existing rule (including a wildcard,
+  a nested `.gitignore`, or a global excludesFile) is respected rather than duplicated. The
+  untrack always prints, even in JSON mode, because it stages deletions and `push` commits
+  automatically. Skipped outside a git work tree, and never fatal.
+
+### Fixed
+- `clean` no longer removes the project venv. Since 3.2.0 bmk provisions and syncs that venv,
+  and `push` cleans at order 30 right after `test`, so cleaning it deleted the venv bmk had
+  just built and forced a full re-resolve on the next command - gigabytes of re-download per
+  push on a project with a heavy dependency tree, and pointless besides, since the sync already
+  removes whatever the manifest no longer asks for. Removed from the built-in fallback patterns
+  and from bmk's own `[tool.clean].patterns`. The warning bmk prints for a project with no
+  `[tool.clean]` section is generated from those fallback patterns, so it no longer suggests
+  adding the venv either. A project that lists a venv in its own `[tool.clean].patterns` keeps
+  the old behaviour; remove it there to opt in. Delete a venv by hand when you want it gone.
+
 ## [3.2.0] 2026-07-14 13:58:00
 
 ### Added

@@ -24,6 +24,21 @@ def test_get_clean_patterns_returns_fallback_when_no_pyproject(tmp_path: Path) -
 
 
 @pytest.mark.os_agnostic
+def test_get_clean_patterns_never_cleans_the_project_venv(tmp_path: Path) -> None:
+    """The built-in patterns must not remove the project venv.
+
+    bmk provisions and syncs the venv, and `push` cleans at order 30 right after
+    `test`, so cleaning it would delete the venv bmk just built and force a full
+    re-resolve next command - gigabytes on a heavy dependency tree, for nothing:
+    the sync already drops whatever the manifest no longer asks for.
+    """
+    patterns = get_clean_patterns(tmp_path / "nonexistent.toml")
+
+    assert ".venv" not in patterns
+    assert not any("venv" in p for p in patterns)
+
+
+@pytest.mark.os_agnostic
 def test_get_clean_patterns_returns_fallback_when_no_clean_section(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.2.0"
+version = "3.3.0"
 description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -152,6 +152,9 @@ convention = "google"
 "src/bmk/adapters/stagerunner/*.py" = ["PLR0913"]
 # git_ops runs git (partial path, on PATH) and prints user-facing commit/push output
 "src/bmk/adapters/stagerunner/git_ops.py" = ["PLR0913", "T201", "S603", "S607"]
+# venv runs uv and git (partial paths, on PATH) and prints user-facing provisioning output;
+# the untrack notice in particular must reach the user, since it stages index deletions
+"src/bmk/adapters/stagerunner/venv.py" = ["PLR0913", "T201", "S603", "S607"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
@@ -200,7 +203,10 @@ output = "coverage.json"
 pretty_print = true
 
 [tool.clean]
-# Patterns to remove when running `make clean`
+# Patterns to remove when running `make clean`.
+# Not the project venv: bmk provisions and syncs it, and `push` cleans right after
+# `test`, so listing it would delete the venv bmk just built and force a full
+# re-resolve next command. Delete a venv by hand when you want it gone.
 patterns = [
   "**/__pycache__",
   ".hypothesis",
@@ -221,7 +227,6 @@ patterns = [
   "codecov.sh",
   ".cache",
   "result",
-  ".venv",
   ".data_arch_violations.json",
 ]
 

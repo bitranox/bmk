@@ -61,13 +61,118 @@ def _run(argv: list[str], cwd: Path, *, quiet: bool) -> int:
     try:
         # argv is built from literals and a resolved path, never from user
         # input, and runs without a shell.
-        return subprocess.run(  # noqa: S603
-            argv, cwd=cwd, stdout=output, stderr=output, check=False
-        ).returncode
+        return subprocess.run(argv, cwd=cwd, stdout=output, stderr=output, check=False).returncode
     except OSError:
         # uv missing from PATH. Degrade to the caller's fallback rather than
         # breaking a run that may not have needed the venv at all.
         return 1
+
+
+def _git(argv: list[str], cwd: Path) -> tuple[int, str]:
+    """Run a git command in ``cwd``, returning (exit code, stdout)."""
+    try:
+        result = subprocess.run(["git", *argv], cwd=cwd, capture_output=True, text=True, check=False)
+    except OSError:
+        return 1, ""
+    return result.returncode, result.stdout
+
+
+def _is_git_worktree(cwd: Path) -> bool:
+    """Whether ``cwd`` sits inside a git work tree."""
+    code, out = _git(["rev-parse", "--is-inside-work-tree"], cwd)
+    return code == 0 and out.strip() == "true"
+
+
+def _untrack(cwd: Path, name: str) -> bool:
+    """Drop ``name`` from the index if git tracks it, keeping it on disk.
+
+    A tracked venv is not a cosmetic problem: the sync rewrites its contents on
+    every run, so git would see thousands of modified files each time and any
+    commit would sweep them in.
+
+    Returns:
+        True if something was untracked.
+    """
+    code, out = _git(["ls-files", "--", name], cwd)
+    if code != 0 or not out.strip():
+        return False
+    count = len(out.strip().splitlines())
+    if _git(["rm", "-r", "--cached", "--quiet", "--", name], cwd)[0] != 0:
+        return False
+    # Announce unconditionally, never gated on quiet: this stages deletions in
+    # the user's index, and `push` commits automatically.
+    print(f"[bmk] untracked {count} file(s) under '{name}' (kept on disk; the deletion is staged)")
+    return True
+
+
+def _ignore_entries(cwd: Path, venv: Path) -> list[str]:
+    """Names that should be gitignored: the managed venv plus the usual pair.
+
+    ``.venv-win`` earns its place even on Linux: one checkout reached from two
+    operating systems needs a venv each, and the sibling's directory is
+    otherwise permanently untracked noise in `git status`.
+    """
+    names = [".venv", ".venv-win"]
+    try:
+        relative = venv.resolve().relative_to(cwd.resolve())
+    except ValueError:
+        return names  # venv lives outside the repo; nothing to ignore for it
+    managed = relative.parts[0]
+    return names if managed in names else [managed, *names]
+
+
+def _is_declared(cwd: Path, name: str) -> bool:
+    """Whether the REPOSITORY's own rules ignore ``name``.
+
+    Not simply "is this path ignored": ``uv venv`` drops a ``.gitignore``
+    containing ``*`` INSIDE every venv it creates, so a uv-made venv reports as
+    ignored by its own nested file. That is uv hiding its artifact, not the repo
+    declaring the name, and treating it as declared would leave ``.venv``
+    undeclared while its ``.venv-win`` sibling got written - the names applied
+    inconsistently across repos.
+
+    ``check-ignore -v`` reports ``<source>:<line>:<pattern>\\t<path>``, so the
+    source file tells the two apart.
+
+    Queried with a trailing slash: a ``dir/`` rule only matches a path git knows
+    is a directory, which it cannot for one that does not exist yet.
+    """
+    code, out = _git(["check-ignore", "-v", "--", f"{name}/"], cwd)
+    if code != 0 or not out.strip():
+        return False
+    source = out.split(":", 1)[0]
+    return not source.startswith(f"{name}/")
+
+
+def _append_to_gitignore(cwd: Path, missing: list[str]) -> None:
+    """Append ``missing`` entries to .gitignore under a labelled section."""
+    gitignore = cwd / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    block = "\n# Python virtual environments (managed by bmk)\n" + "".join(f"{n}/\n" for n in missing)
+    gitignore.write_text(existing + prefix + block, encoding="utf-8")
+    print(f"[bmk] added to .gitignore: {', '.join(missing)}")
+
+
+def ensure_venv_ignored(cwd: Path, venv: Path) -> None:
+    """Keep the venv out of git: untrack it if tracked, gitignore it if not ignored.
+
+    bmk creates this directory, so bmk is responsible for it not polluting the
+    repository. Never raises: a git problem must not fail a build.
+    """
+    if not _is_git_worktree(cwd):
+        return
+
+    entries = _ignore_entries(cwd, venv)
+    for name in entries:
+        _untrack(cwd, name)
+
+    # git decides what is already covered, so an existing rule - a wildcard, a
+    # nested .gitignore, a global excludesFile - is respected rather than
+    # duplicated. A text search over .gitignore would see none of those.
+    missing = [n for n in entries if not _is_declared(cwd, n)]
+    if missing:
+        _append_to_gitignore(cwd, missing)
 
 
 def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True) -> Path | None:
@@ -95,6 +200,9 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
     ``pip_audit`` stage bootstraps a current pip into the resolved interpreter
     before every audit, so that repairs itself.
 
+    Because bmk creates this directory, it also keeps it out of git
+    (``ensure_venv_ignored``).
+
     Returns:
         The venv path, or ``None`` if it could not be provisioned. Never raises:
         a provisioning failure must degrade to bmk's previous behaviour (gates
@@ -108,6 +216,8 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
         return None
     if not is_venv(venv):
         return None
+
+    ensure_venv_ignored(cwd, venv)
 
     python = venv_python(venv)
     for target in _INSTALL_TARGETS:

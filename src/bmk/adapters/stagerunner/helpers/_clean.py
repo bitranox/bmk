@@ -26,6 +26,13 @@ from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
+# The project venv is deliberately absent: bmk provisions and syncs it (see
+# ``stagerunner/venv.py``), and the ``push`` pipeline cleans at order 30, right
+# after ``test`` - so cleaning it would delete the venv bmk had just built and
+# force a full re-resolve on the next command. On a project with a heavy
+# dependency tree that is gigabytes of re-download per push, and it buys nothing:
+# the sync already removes whatever the manifest no longer asks for. Remove a
+# venv by hand when you actually want it gone.
 _FALLBACK_PATTERNS: tuple[str, ...] = (
     "**/__pycache__",
     ".hypothesis",
@@ -46,7 +53,6 @@ _FALLBACK_PATTERNS: tuple[str, ...] = (
     "codecov.sh",
     ".cache",
     "result",
-    ".venv",
     ".data_arch_violations.json",
 )
 

@@ -12,6 +12,7 @@ import pytest
 
 from bmk.adapters.stagerunner.venv import (
     ensure_project_venv,
+    ensure_venv_ignored,
     is_venv,
     resolve_project_venv,
     venv_python,
@@ -207,6 +208,173 @@ def test_ensure_project_venv_creates_at_the_override_path(mock_run: MagicMock, t
     create = mock_run.call_args_list[0].args[0]
     assert create[:2] == ["uv", "venv"]
     assert create[2] == str(tmp_path / ".venv-win")
+
+
+# ---------------------------------------------------------------------------
+# ensure_venv_ignored - keep the venv bmk creates out of git
+# ---------------------------------------------------------------------------
+
+
+def _git_repo(path: Path) -> bool:
+    """Init a throwaway git repo at ``path``; False if git is unavailable."""
+    if _run_git(path, "init", "-q") != 0:
+        return False
+    _run_git(path, "config", "user.email", "t@example.invalid")
+    _run_git(path, "config", "user.name", "t")
+    return True
+
+
+def _run_git(cwd: Path, *args: str) -> int:
+    try:
+        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, check=False).returncode
+    except OSError:
+        return 1
+
+
+@pytest.mark.os_agnostic
+def test_ensure_venv_ignored_is_a_noop_outside_a_git_repo(tmp_path: Path) -> None:
+    """A non-git directory gets no .gitignore invented for it."""
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+
+    assert not (tmp_path / ".gitignore").exists()
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_adds_missing_entries(tmp_path: Path) -> None:
+    """Adds the managed venv plus the standard pair when nothing ignores them."""
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+
+    content = (tmp_path / ".gitignore").read_text()
+    assert ".venv/" in content
+    assert ".venv-win/" in content
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_is_idempotent(tmp_path: Path) -> None:
+    """Repeated runs must not append the same entry again.
+
+    Regression: entries are written as `dir/`, and a `dir/` rule only matches a
+    path git KNOWS is a directory - which it cannot for one that does not exist
+    yet. Querying `.venv-win` instead of `.venv-win/` made an existing rule look
+    absent, so every run appended it again and .gitignore grew without bound.
+    """
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+
+    for _ in range(3):
+        ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+
+    content = (tmp_path / ".gitignore").read_text()
+    assert content.count(".venv-win/") == 1
+    assert content.count(".venv/") == 1
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_declares_a_name_uv_only_self_ignores(tmp_path: Path) -> None:
+    """uv's own nested .gitignore does not count as the repo declaring the name.
+
+    `uv venv` writes a .gitignore containing `*` INSIDE every venv it creates, so
+    the venv reports as ignored by its own file. That is uv hiding its artifact,
+    not the repo declaring the name - and taking it as declared would leave
+    `.venv` undeclared while its `.venv-win` sibling got written.
+    """
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    (venv / ".gitignore").write_text("*\n")  # what `uv venv` does
+
+    ensure_venv_ignored(tmp_path, venv)
+
+    content = (tmp_path / ".gitignore").read_text()
+    assert ".venv/" in content, "the repo must declare the name, not lean on uv's self-ignore"
+    assert ".venv-win/" in content
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_respects_an_existing_rule(tmp_path: Path) -> None:
+    """An already-ignored name is not appended again.
+
+    git check-ignore is the authority, so a rule that covers the name by wildcard
+    counts - a text search for the exact string would not see it.
+    """
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+    (tmp_path / ".gitignore").write_text(".venv*\n")
+
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+
+    assert (tmp_path / ".gitignore").read_text() == ".venv*\n"
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_adds_a_custom_venv_name(tmp_path: Path) -> None:
+    """A venv at a non-default path is ignored under its own name."""
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv-custom")
+
+    assert ".venv-custom/" in (tmp_path / ".gitignore").read_text()
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_untracks_a_tracked_venv(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A tracked venv is dropped from the index but kept on disk.
+
+    With an exact sync rewriting its contents every run, a tracked venv would
+    show thousands of modified files on every command and any commit would sweep
+    them in.
+    """
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+    venv = tmp_path / ".venv"
+    (venv / "lib").mkdir(parents=True)
+    (venv / "lib" / "thing.py").write_text("x = 1\n")
+    assert _run_git(tmp_path, "add", "-f", ".venv") == 0
+    assert _run_git(tmp_path, "commit", "-q", "-m", "track a venv") == 0
+
+    ensure_venv_ignored(tmp_path, venv)
+
+    result = subprocess.run(
+        ["git", "-C", str(tmp_path), "ls-files", ".venv"], capture_output=True, text=True, check=False
+    )
+    assert result.stdout.strip() == "", "the venv must no longer be tracked"
+    assert (venv / "lib" / "thing.py").exists(), "the files must stay on disk"
+    assert "untracked" in capsys.readouterr().out
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_announces_the_untrack_even_when_quiet(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The untrack is never silent.
+
+    It stages deletions in the user's index and `push` commits automatically, so
+    this must be visible regardless of the JSON/quiet output mode.
+    """
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    (venv / "f.txt").write_text("x")
+    _run_git(tmp_path, "add", "-f", ".venv")
+    _run_git(tmp_path, "commit", "-q", "-m", "t")
+
+    ensure_project_venv(tmp_path, {}, quiet=True)  # no pyproject -> returns early
+    ensure_venv_ignored(tmp_path, venv)
+
+    assert "[bmk] untracked" in capsys.readouterr().out
 
 
 @pytest.mark.os_agnostic
