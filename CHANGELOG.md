@@ -6,6 +6,26 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.6.0] 2026-07-14 20:28:03
+
+### Fixed
+- **bmk keeps its own venvs out of the project's pyright run, so a type-check cannot spin
+  forever.** pyright's `exclude` REPLACES its built-in defaults (`**/node_modules`,
+  `**/__pycache__`, `**/.*`) rather than extending them, so any project listing an exclude of its
+  own - `exclude = ["scripts/menu.py"]`, the bitranox template's default - silently loses `**/.*`,
+  the only rule keeping dot-directories out. That was harmless until 3.2.0 began provisioning
+  `.venv` and 3.4.0 put bmk in `.venv-bmk`: pyright then walked thousands of site-packages files in
+  strict mode and never returned. Measured, not theoretical - one such run spun for **6h20m at 78%
+  CPU** and produced nothing, with no error saying why, and 21 repos were affected.
+  `ensure_venv_typecheck_excluded` now appends the venv directories bmk creates to
+  `[tool.pyright].exclude`, mirroring `ensure_venv_ignored`. On a real repo this took pyright from
+  *never finishing* to **15s** (6260 files analyzed -> 35).
+
+  It deliberately touches nothing when the project has no `exclude` key (pyright's `**/.*` default
+  already covers the venvs, and writing a list would REPLACE those defaults - causing the very bug)
+  or when an `include` list already narrows the scope. Existing coverage in any spelling
+  (`**/.*`, `.venv`, `**/.venv/**`, `.venv/`) is recognised, so the list cannot grow on repeat runs.
+
 ## [3.5.0] 2026-07-14 18:40:00
 
 ### Fixed

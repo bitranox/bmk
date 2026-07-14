@@ -31,8 +31,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx2
 import orjson
-import tomlkit
 
+from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 if TYPE_CHECKING:
@@ -743,7 +743,7 @@ def update_dependencies(
             print("All dependencies are up-to-date!")
         return 0
 
-    document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
+    document = _typed_tomlkit.parse(pyproject.read_text(encoding="utf-8"))
     updated_count = 0
 
     if not quiet:
@@ -769,7 +769,7 @@ def update_dependencies(
             if not quiet:
                 print(f"\n[DRY RUN] Would update {updated_count} dependencies")
         else:
-            pyproject.write_text(tomlkit.dumps(document), encoding="utf-8")
+            pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
             if not quiet:
                 print(f"\nUpdated {updated_count} dependencies in {pyproject}")
     elif not quiet:

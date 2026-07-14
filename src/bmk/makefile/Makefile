@@ -1,4 +1,4 @@
-# BMK MAKEFILE 3.5.0
+# BMK MAKEFILE 3.6.0
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper using `uv tool install` for persistent bmk
@@ -81,7 +81,7 @@ ARGS ?=
 #     error at all. The floor turns that into an unsatisfiable-requirements error that names
 #     the offending package. If it fires, remove the capping dependency - do not lower the
 #     floor, or you are back to a silently ancient bmk.
-BMK_MIN := 3.5.0
+BMK_MIN := 3.6.0
 
 .PHONY: _ensure_bmk
 _ensure_bmk:

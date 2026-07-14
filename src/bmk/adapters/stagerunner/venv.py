@@ -14,10 +14,14 @@ that follow it in the same run.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
+
+from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 
 # Sync targets, tried in order: a project with no ``[dev]`` extra (bmk itself is
 # one - all its tooling is a runtime dependency by design) must still sync.
@@ -179,6 +183,90 @@ def ensure_venv_ignored(cwd: Path, venv: Path) -> None:
         _append_to_gitignore(cwd, missing)
 
 
+def _pyright_covers(name: str, patterns: list[str]) -> bool:
+    """Whether any of pyright's ``exclude`` ``patterns`` already keeps ``name`` out.
+
+    pyright accepts several spellings for the same directory (``.venv``,
+    ``.venv/``, ``**/.venv``, ``**/.venv/**``) and one wildcard - ``**/.*``, its
+    own default - that covers every dot-directory at once. All of them must count
+    as covered, or the exclude list grows by a duplicate entry on every run.
+    """
+    for raw in patterns:
+        # Only a trailing "/**" or "/" is noise ("**/.venv/**" and ".venv/" both
+        # mean the directory). Stripping "*" generally would maul "**/.*" into
+        # "**/." and miss pyright's own default.
+        pattern = raw[:-3] if raw.endswith("/**") else raw
+        pattern = pattern.rstrip("/")
+        if pattern in (name, f"**/{name}"):
+            return True
+        # fnmatch has no concept of "**", so a leading "**/" is matched by
+        # comparing the bare name against the remainder: "**/.*" -> ".*".
+        bare = pattern[3:] if pattern.startswith("**/") else pattern
+        if fnmatch.fnmatch(name, bare):
+            return True
+    return False
+
+
+def ensure_venv_typecheck_excluded(cwd: Path, venv: Path) -> None:
+    """Keep bmk's venvs out of the project's pyright run.
+
+    pyright's ``exclude`` REPLACES its built-in defaults (``**/node_modules``,
+    ``**/__pycache__``, ``**/.*``) instead of extending them. So any project that
+    lists an exclude of its own silently loses ``**/.*``, the rule that kept
+    dot-directories out. That cost nothing until bmk started creating ``.venv``
+    and ``.venv-bmk`` inside the project; now pyright walks thousands of
+    site-packages files in strict mode and effectively never returns - a run
+    measured at 6h20m of spin with no output and no error explaining it.
+
+    bmk creates the directories, so bmk excludes them, exactly as it gitignores
+    them (:func:`ensure_venv_ignored`).
+
+    Two cases are deliberately left untouched:
+
+    * **No ``exclude`` key.** pyright's defaults are in force and ``**/.*``
+      already covers every venv here. Writing an exclude list would REPLACE those
+      defaults - it would cause the very bug it is meant to prevent.
+    * **An ``include`` list.** pyright then only walks those paths, so a venv
+      outside them is never reached.
+
+    Never raises: a malformed or unreadable pyproject.toml must not fail a build
+    that may not even use the type-checker.
+    """
+    pyproject = cwd / "pyproject.toml"
+    if not pyproject.is_file():
+        return
+    try:
+        document = _typed_tomlkit.parse(pyproject.read_text(encoding="utf-8"))
+    except (OSError, ValueError, _typed_tomlkit.TOMLKitError):
+        return
+
+    tool: Mapping[str, Any] = document.get("tool", {})
+    pyright: Mapping[str, Any] | None = tool.get("pyright")
+    if pyright is None or "exclude" not in pyright or pyright.get("include"):
+        return
+
+    if not isinstance(pyright["exclude"], list):
+        return  # not a list; not ours to interpret
+    # Cast, never copy: this must stay the tomlkit array that belongs to the
+    # document, or appending would mutate a throwaway and write back the original.
+    excludes = cast("list[Any]", pyright["exclude"])
+    current = [str(item) for item in excludes]
+
+    missing = [name for name in _ignore_entries(cwd, venv) if not _pyright_covers(name, current)]
+    if not missing:
+        return
+
+    for name in missing:
+        excludes.append(name)
+    try:
+        pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
+    except OSError:
+        return
+    # Announce unconditionally: this edits the user's pyproject.toml, and `push`
+    # commits automatically.
+    print(f"[bmk] excluded from pyright: {', '.join(missing)} (its 'exclude' replaces the **/.* default)")
+
+
 def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True) -> Path | None:
     """Create the project venv if absent, then sync it to ``pyproject.toml``.
 
@@ -222,6 +310,7 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
         return None
 
     ensure_venv_ignored(cwd, venv)
+    ensure_venv_typecheck_excluded(cwd, venv)
 
     python = venv_python(venv)
     for target in _INSTALL_TARGETS:
