@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 
 import pytest
-import tomllib
+import rtoml  # not stdlib tomllib: it does not exist on Python 3.10, this project's floor
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE = PROJECT_DIR / "src" / "bmk" / "makefile" / "Makefile"
@@ -46,7 +46,7 @@ def test_template_header_matches_package_version() -> None:
     with the sync unrun, so target repos would compare against a wrong version when
     deciding whether to regenerate their Makefile.
     """
-    version = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    version = rtoml.load(PROJECT_DIR / "pyproject.toml")["project"]["version"]
     header = _template_text().splitlines()[0]
 
     assert header == f"# BMK MAKEFILE {version}", (
