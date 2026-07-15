@@ -9,72 +9,73 @@ Complete (v1.1.2+)
 ## Related Files
 
 ### Domain Layer
-- `src/bmk/domain/behaviors.py` — Pure domain functions (greeting)
-- `src/bmk/domain/enums.py` — Type-safe enums (OutputFormat, DeployTarget)
+- `src/bmk/domain/enums.py`  -  Type-safe enums (OutputFormat, DeployTarget)
+- `src/bmk/domain/errors.py`  -  Error types
+- `src/bmk/domain/stages.py`  -  Stage/pipeline domain types
 
 ### Application Layer
-- `src/bmk/application/ports.py` — Callable Protocol definitions for adapter functions
+- `src/bmk/application/ports.py`  -  Callable Protocol definitions for adapter functions
 
 ### Adapters Layer
-- `src/bmk/adapters/config/loader.py` — Configuration loading with LRU caching
-- `src/bmk/adapters/config/deploy.py` — Configuration deployment
-- `src/bmk/adapters/config/display.py` — Configuration display (TOML/JSON output, redaction)
-- `src/bmk/adapters/config/overrides.py` — CLI `--set` override parsing and deep-merge
-- `src/bmk/adapters/email/sender.py` — SMTP email with EmailConfig (Pydantic)
-- `src/bmk/adapters/email/validation.py` — Email recipient validation
-- `src/bmk/adapters/logging/setup.py` — lib_log_rich initialization
-- `src/bmk/adapters/cli/` — CLI adapter package:
-  - `__init__.py` — Public facade
-  - `constants.py` — Shared constants
-  - `exit_codes.py` — POSIX exit codes (ExitCode IntEnum)
-  - `traceback.py` — Traceback state management
-  - `context.py` — Click context helpers
-  - `root.py` — Root command group
-  - `main.py` — Entry point
-  - `commands/info.py` — info, hello, fail commands
-  - `commands/config.py` — config, config-deploy, config-generate-examples commands
-  - `commands/_shared.py` — Script resolution, execution with BMK env vars, VIRTUAL_ENV isolation
-  - `commands/testsuite_cmd.py` — test, t commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
-  - `commands/test_integration_cmd.py` — testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
-  - `commands/email/` — send-email, send-notification commands (subpackage)
-  - `commands/logging.py` — logdemo command
-  - `commands/install_cmd.py` — install command (deploy the bundled Makefile) + prerequisite check
-  - `commands/_prerequisites.py` — per-OS external-tool detection and install hints
-  - `commands/ensure_cmd.py` / `commands/_ensure.py` — ensure command (install missing external tools per-OS)
-  - `commands/ship_cmd.py` — ship command (CI-gated push + release; gh run lookup parsed with orjson)
+- `src/bmk/adapters/config/loader.py`  -  Configuration loading with LRU caching
+- `src/bmk/adapters/config/deploy.py`  -  Configuration deployment
+- `src/bmk/adapters/config/display.py`  -  Configuration display (TOML/JSON output, redaction)
+- `src/bmk/adapters/config/overrides.py`  -  CLI `--set` override parsing and deep-merge
+- `src/bmk/adapters/email/sender.py`  -  SMTP email with EmailConfig (Pydantic)
+- `src/bmk/adapters/email/validation.py`  -  Email recipient validation
+- `src/bmk/adapters/logging/setup.py`  -  lib_log_rich initialization
+- `src/bmk/adapters/cli/`  -  CLI adapter package:
+  - `__init__.py`  -  Public facade
+  - `constants.py`  -  Shared constants
+  - `exit_codes.py`  -  POSIX exit codes (ExitCode IntEnum)
+  - `traceback.py`  -  Traceback state management
+  - `context.py`  -  Click context helpers
+  - `root.py`  -  Root command group
+  - `main.py`  -  Entry point
+  - `commands/info.py`  -  info, fail commands
+  - `commands/config.py`  -  config, config-deploy, config-generate-examples commands
+  - `commands/_shared.py`  -  Script resolution, execution with BMK env vars, VIRTUAL_ENV isolation
+  - `commands/testsuite_cmd.py`  -  test, t commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
+  - `commands/test_integration_cmd.py`  -  testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
+  - `commands/email/`  -  send-email, send-notification commands (subpackage)
+  - `commands/logging.py`  -  logdemo command
+  - `commands/install_cmd.py`  -  install command (deploy the bundled Makefile) + prerequisite check
+  - `commands/_prerequisites.py`  -  per-OS external-tool detection and install hints
+  - `commands/ensure_cmd.py` / `commands/_ensure.py`  -  ensure command (install missing external tools per-OS)
+  - `commands/ship_cmd.py`  -  ship command (CI-gated push + release; gh run lookup parsed with orjson)
 
 ### Adapters Layer (In-Memory / Testing)
-- `src/bmk/adapters/memory/__init__.py` — Public facade + Protocol conformance assertions
-- `src/bmk/adapters/memory/config.py` — In-memory config adapters
-- `src/bmk/adapters/memory/email.py` — In-memory email adapters
-- `src/bmk/adapters/memory/logging.py` — In-memory logging (no-op)
+- `src/bmk/adapters/memory/__init__.py`  -  Public facade + Protocol conformance assertions
+- `src/bmk/adapters/memory/config.py`  -  In-memory config adapters
+- `src/bmk/adapters/memory/email.py`  -  In-memory email adapters
+- `src/bmk/adapters/memory/logging.py`  -  In-memory logging (no-op)
 
 ### Composition Layer
-- `src/bmk/composition/__init__.py` — Wires adapters to ports
+- `src/bmk/composition/__init__.py`  -  Wires adapters to ports
 
 ### Entry Points
-- `src/bmk/__main__.py` — Thin shim for `python -m`
-- `src/bmk/__init__.py` — Public API exports
-- `src/bmk/__init__conf__.py` — Package metadata constants
+- `src/bmk/__main__.py`  -  Thin shim for `python -m`
+- `src/bmk/__init__.py`  -  Public API exports
+- `src/bmk/__init__conf__.py`  -  Package metadata constants
 
 ### Configuration Defaults
-- `src/bmk/adapters/config/defaultconfig.toml` — Base defaults
-- `src/bmk/adapters/config/defaultconfig.d/40-layered-config.toml` — lib_layered_config integration docs
-- `src/bmk/adapters/config/defaultconfig.d/50-mail.toml` — Email defaults
-- `src/bmk/adapters/config/defaultconfig.d/90-logging.toml` — Logging defaults
+- `src/bmk/adapters/config/defaultconfig.toml`  -  Base defaults
+- `src/bmk/adapters/config/defaultconfig.d/40-layered-config.toml`  -  lib_layered_config integration docs
+- `src/bmk/adapters/config/defaultconfig.d/50-mail.toml`  -  Email defaults
+- `src/bmk/adapters/config/defaultconfig.d/90-logging.toml`  -  Logging defaults
 
 ### Tests
-- `tests/test_behaviors.py` — Domain function tests
-- `tests/test_cache_effectiveness.py` — LRU cache behavior tests
-- `tests/test_cli.py` — CLI command tests
-- `tests/test_config_overrides.py` — `--set` parsing tests
-- `tests/test_display.py` — Config display formatting tests
-- `tests/test_exit_codes.py` — ExitCode enum tests
-- `tests/test_mail.py` — Email configuration and sending tests
-- `tests/test_metadata.py` — Package metadata tests
-- `tests/test_module_entry.py` — `python -m` entry tests
-- `tests/test_ports.py` — Protocol conformance tests
-- `tests/test_scripts.py` — Build script tests
+- `tests/test_behaviors.py`  -  Domain function tests
+- `tests/test_cache_effectiveness.py`  -  LRU cache behavior tests
+- `tests/test_cli.py`  -  CLI command tests
+- `tests/test_config_overrides.py`  -  `--set` parsing tests
+- `tests/test_display.py`  -  Config display formatting tests
+- `tests/test_exit_codes.py`  -  ExitCode enum tests
+- `tests/test_mail.py`  -  Email configuration and sending tests
+- `tests/test_metadata.py`  -  Package metadata tests
+- `tests/test_module_entry.py`  -  `python -m` entry tests
+- `tests/test_ports.py`  -  Protocol conformance tests
+- `tests/test_scripts.py`  -  Build script tests
 
 ---
 
@@ -82,16 +83,16 @@ Complete (v1.1.2+)
 
 ### Layer Assignments
 
-| Directory/Module | Layer | Responsibility |
-|------------------|-------|----------------|
-| `domain/` | Domain | Pure logic — no I/O, logging, or frameworks |
-| `application/ports.py` | Application | Protocol definitions for adapters |
-| `adapters/config/` | Adapters | Configuration loading, deployment, display |
-| `adapters/email/` | Adapters | SMTP email sending |
-| `adapters/logging/` | Adapters | lib_log_rich initialization |
-| `adapters/cli/` | Adapters | Click CLI framework integration |
-| `adapters/memory/` | Adapters | In-memory implementations for testing |
-| `composition/` | Composition | Wires adapters to ports |
+| Directory/Module       | Layer       | Responsibility                                |
+|------------------------|-------------|-----------------------------------------------|
+| `domain/`              | Domain      | Pure logic  -  no I/O, logging, or frameworks |
+| `application/ports.py` | Application | Protocol definitions for adapters             |
+| `adapters/config/`     | Adapters    | Configuration loading, deployment, display    |
+| `adapters/email/`      | Adapters    | SMTP email sending                            |
+| `adapters/logging/`    | Adapters    | lib_log_rich initialization                   |
+| `adapters/cli/`        | Adapters    | Click CLI framework integration               |
+| `adapters/memory/`     | Adapters    | In-memory implementations for testing         |
+| `composition/`         | Composition | Wires adapters to ports                       |
 
 ### Import Enforcement
 
@@ -107,19 +108,19 @@ Run `lint-imports` to verify compliance.
 
 POSIX-conventional exit codes defined in `adapters/cli/exit_codes.py`:
 
-| Code | Name | Usage |
-|------|------|-------|
-| 0 | `SUCCESS` | Command completed successfully |
-| 1 | `GENERAL_ERROR` | Unhandled exception, general failure |
-| 2 | `FILE_NOT_FOUND` | Attachment or file not found |
-| 13 | `PERMISSION_DENIED` | Cannot write to target directory |
-| 22 | `INVALID_ARGUMENT` | Invalid CLI argument or section not found |
-| 69 | `SMTP_FAILURE` | SMTP delivery failed |
-| 78 | `CONFIG_ERROR` | Missing required configuration |
-| 110 | `TIMEOUT` | Operation timed out |
-| 130 | `SIGNAL_INT` | Interrupted (SIGINT/Ctrl+C) |
-| 141 | `BROKEN_PIPE` | Output pipe closed |
-| 143 | `SIGNAL_TERM` | Terminated (SIGTERM) |
+| Code | Name                | Usage                                     |
+|------|---------------------|-------------------------------------------|
+| 0    | `SUCCESS`           | Command completed successfully            |
+| 1    | `GENERAL_ERROR`     | Unhandled exception, general failure      |
+| 2    | `FILE_NOT_FOUND`    | Attachment or file not found              |
+| 13   | `PERMISSION_DENIED` | Cannot write to target directory          |
+| 22   | `INVALID_ARGUMENT`  | Invalid CLI argument or section not found |
+| 69   | `SMTP_FAILURE`      | SMTP delivery failed                      |
+| 78   | `CONFIG_ERROR`      | Missing required configuration            |
+| 110  | `TIMEOUT`           | Operation timed out                       |
+| 130  | `SIGNAL_INT`        | Interrupted (SIGINT/Ctrl+C)               |
+| 141  | `BROKEN_PIPE`       | Output pipe closed                        |
+| 143  | `SIGNAL_TERM`       | Terminated (SIGTERM)                      |
 
 ---
 
@@ -129,35 +130,29 @@ POSIX-conventional exit codes defined in `adapters/cli/exit_codes.py`:
 
 **Command:** `bmk`
 
-| Option | Description |
-|--------|-------------|
-| `--version` | Show version and exit |
-| `--traceback / --no-traceback` | Show full Python traceback on errors |
-| `--profile NAME` | Load configuration from a named profile |
-| `--set SECTION.KEY=VALUE` | Override configuration setting (repeatable) |
-| `-h, --help` | Show help and exit |
+| Option                         | Description                                 |
+|--------------------------------|---------------------------------------------|
+| `--version`                    | Show version and exit                       |
+| `--traceback / --no-traceback` | Show full Python traceback on errors        |
+| `--profile NAME`               | Load configuration from a named profile     |
+| `--set SECTION.KEY=VALUE`      | Override configuration setting (repeatable) |
+| `-h, --help`                   | Show help and exit                          |
 
 ### Stage Runner Commands (test, testintegration, build, clean, push, etc.)
 
 Commands that delegate to the stage runner (`test`, `testintegration`, `build`, `clean`,
 `push`, `release`, `dependencies`, etc.) respect `BMK_OUTPUT_FORMAT`:
 
-| Behaviour | JSON mode (default) | Text mode (`--human` / `BMK_OUTPUT_FORMAT=text`) |
-|-----------|---------------------|--------------------------------------------------|
-| Stage runner output | Captured; shown only on stage failure | Shown immediately (verbose) |
-| Makefile version check | Auto-accepts updates | Prompts interactively |
-| Dependency checking | Silent (no report or summary) | Full report displayed |
-| Pytest | `--tb=short -q --no-header`; coverage report suppressed | Default verbose output |
+| Behaviour              | JSON mode (default)                                     | Text mode (`--human` / `BMK_OUTPUT_FORMAT=text`) |
+|------------------------|---------------------------------------------------------|--------------------------------------------------|
+| Stage runner output    | Captured; shown only on stage failure                   | Shown immediately (verbose)                      |
+| Makefile version check | Auto-accepts updates                                    | Prompts interactively                            |
+| Dependency checking    | Silent (no report or summary)                           | Full report displayed                            |
+| Pytest                 | `--tb=short -q --no-header`; coverage report suppressed | Default verbose output                           |
 
 ### info
 
 Print resolved package metadata.
-
-**Exit codes:** 0
-
-### hello
-
-Emit canonical greeting (`"Hello World"`).
 
 **Exit codes:** 0
 
@@ -171,10 +166,10 @@ Trigger intentional `RuntimeError` for testing error handling.
 
 Display merged configuration from all sources.
 
-| Option | Description |
-|--------|-------------|
+| Option                   | Description                    |
+|--------------------------|--------------------------------|
 | `--format [human\|json]` | Output format (default: human) |
-| `--section NAME` | Show only specific section |
+| `--section NAME`         | Show only specific section     |
 
 **Exit codes:** 0, 22 (section not found)
 
@@ -182,11 +177,11 @@ Display merged configuration from all sources.
 
 Deploy default configuration to system or user directories.
 
-| Option | Description |
-|--------|-------------|
-| `--target [app\|host\|user]` | Target layer(s) — required, repeatable |
-| `--force` | Overwrite existing files |
-| `--profile NAME` | Deploy to profile subdirectory |
+| Option                       | Description                              |
+|------------------------------|------------------------------------------|
+| `--target [app\|host\|user]` | Target layer(s)  -  required, repeatable |
+| `--force`                    | Overwrite existing files                 |
+| `--profile NAME`             | Deploy to profile subdirectory           |
 
 **Exit codes:** 0, 1, 13 (permission denied)
 
@@ -194,10 +189,10 @@ Deploy default configuration to system or user directories.
 
 Generate example configuration files.
 
-| Option | Description |
-|--------|-------------|
-| `--destination DIR` | Target directory — required |
-| `--force` | Overwrite existing files |
+| Option              | Description                   |
+|---------------------|-------------------------------|
+| `--destination DIR` | Target directory  -  required |
+| `--force`           | Overwrite existing files      |
 
 **Exit codes:** 0, 1
 
@@ -205,19 +200,19 @@ Generate example configuration files.
 
 Send email using configured SMTP settings.
 
-| Option | Description |
-|--------|-------------|
-| `--to ADDRESS` | Recipient (repeatable) |
-| `--subject TEXT` | Subject line — required |
-| `--body TEXT` | Plain-text body |
-| `--body-html TEXT` | HTML body |
-| `--from ADDRESS` | Override sender |
-| `--attachment PATH` | File to attach (repeatable) |
-| `--smtp-host HOST:PORT` | Override SMTP host (repeatable) |
-| `--smtp-username USER` | Override username |
-| `--smtp-password PASS` | Override password |
-| `--use-starttls / --no-use-starttls` | Override STARTTLS |
-| `--timeout SECONDS` | Override timeout |
+| Option                               | Description                     |
+|--------------------------------------|---------------------------------|
+| `--to ADDRESS`                       | Recipient (repeatable)          |
+| `--subject TEXT`                     | Subject line  -  required       |
+| `--body TEXT`                        | Plain-text body                 |
+| `--body-html TEXT`                   | HTML body                       |
+| `--from ADDRESS`                     | Override sender                 |
+| `--attachment PATH`                  | File to attach (repeatable)     |
+| `--smtp-host HOST:PORT`              | Override SMTP host (repeatable) |
+| `--smtp-username USER`               | Override username               |
+| `--smtp-password PASS`               | Override password               |
+| `--use-starttls / --no-use-starttls` | Override STARTTLS               |
+| `--timeout SECONDS`                  | Override timeout                |
 
 **Exit codes:** 0, 2 (file not found), 22, 69 (SMTP failure), 78 (no SMTP hosts)
 
@@ -225,17 +220,17 @@ Send email using configured SMTP settings.
 
 Send simple plain-text notification email.
 
-| Option | Description |
-|--------|-------------|
-| `--to ADDRESS` | Recipient (repeatable) |
-| `--subject TEXT` | Subject — required |
-| `--message TEXT` | Message — required |
-| `--from ADDRESS` | Override sender |
-| `--smtp-host HOST:PORT` | Override SMTP host (repeatable) |
-| `--smtp-username USER` | Override username |
-| `--smtp-password PASS` | Override password |
-| `--use-starttls / --no-use-starttls` | Override STARTTLS |
-| `--timeout SECONDS` | Override timeout |
+| Option                               | Description                     |
+|--------------------------------------|---------------------------------|
+| `--to ADDRESS`                       | Recipient (repeatable)          |
+| `--subject TEXT`                     | Subject  -  required            |
+| `--message TEXT`                     | Message  -  required            |
+| `--from ADDRESS`                     | Override sender                 |
+| `--smtp-host HOST:PORT`              | Override SMTP host (repeatable) |
+| `--smtp-username USER`               | Override username               |
+| `--smtp-password PASS`               | Override password               |
+| `--use-starttls / --no-use-starttls` | Override STARTTLS               |
+| `--timeout SECONDS`                  | Override timeout                |
 
 **Exit codes:** 0, 22, 69 (SMTP failure), 78 (no SMTP hosts)
 
@@ -243,8 +238,8 @@ Send simple plain-text notification email.
 
 Run logging demonstration.
 
-| Option | Description |
-|--------|-------------|
+| Option         | Description                      |
+|----------------|----------------------------------|
 | `--theme NAME` | Logging theme (default: classic) |
 
 **Exit codes:** 0
@@ -264,22 +259,22 @@ def validate_profile(profile: str, max_length: int | None = None) -> None:
     """Validate profile name using lib_layered_config."""
 ```
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `profile` | `str` | required | Profile name to validate |
-| `max_length` | `int \| None` | 64 | Maximum length (DEFAULT_MAX_PROFILE_LENGTH) |
+| Parameter    | Type          | Default  | Description                                 |
+|--------------|---------------|----------|---------------------------------------------|
+| `profile`    | `str`         | required | Profile name to validate                    |
+| `max_length` | `int \| None` | 64       | Maximum length (DEFAULT_MAX_PROFILE_LENGTH) |
 
 ### Validation Rules
 
-| Rule | Description |
-|------|-------------|
-| Maximum length | 64 characters (configurable via `max_length`) |
-| Character set | ASCII alphanumeric, hyphens (`-`), underscores (`_`) |
-| Start character | Must start with alphanumeric character |
-| Empty string | Rejected |
-| Windows reserved | CON, PRN, AUX, NUL, COM1-9, LPT1-9 rejected |
-| Path traversal | `/`, `\`, `..` rejected |
-| Control chars | Rejected |
+| Rule             | Description                                          |
+|------------------|------------------------------------------------------|
+| Maximum length   | 64 characters (configurable via `max_length`)        |
+| Character set    | ASCII alphanumeric, hyphens (`-`), underscores (`_`) |
+| Start character  | Must start with alphanumeric character               |
+| Empty string     | Rejected                                             |
+| Windows reserved | CON, PRN, AUX, NUL, COM1-9, LPT1-9 rejected          |
+| Path traversal   | `/`, `\`, `..` rejected                              |
+| Control chars    | Rejected                                             |
 
 ### Error Handling
 
@@ -293,29 +288,29 @@ Raises `ValueError` with descriptive message on invalid input.
 
 The `EmailConfig` Pydantic model (`adapters/email/sender.py`) provides validated, immutable email configuration:
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `smtp_hosts` | `list[str]` | `[]` | SMTP servers in `host[:port]` format |
-| `from_address` | `str \| None` | `None` | Default sender address |
-| `recipients` | `list[str]` | `[]` | Default recipient addresses |
-| `smtp_username` | `str \| None` | `None` | SMTP authentication username |
-| `smtp_password` | `str \| None` | `None` | SMTP authentication password |
-| `use_starttls` | `bool` | `True` | Enable STARTTLS negotiation |
-| `timeout` | `float` | `30.0` | Socket timeout in seconds |
-| `raise_on_missing_attachments` | `bool` | `True` | Raise on missing attachment files |
-| `raise_on_invalid_recipient` | `bool` | `True` | Raise on invalid recipient addresses |
+| Field                          | Type          | Default | Description                          |
+|--------------------------------|---------------|---------|--------------------------------------|
+| `smtp_hosts`                   | `list[str]`   | `[]`    | SMTP servers in `host[:port]` format |
+| `from_address`                 | `str \| None` | `None`  | Default sender address               |
+| `recipients`                   | `list[str]`   | `[]`    | Default recipient addresses          |
+| `smtp_username`                | `str \| None` | `None`  | SMTP authentication username         |
+| `smtp_password`                | `str \| None` | `None`  | SMTP authentication password         |
+| `use_starttls`                 | `bool`        | `True`  | Enable STARTTLS negotiation          |
+| `timeout`                      | `float`       | `30.0`  | Socket timeout in seconds            |
+| `raise_on_missing_attachments` | `bool`        | `True`  | Raise on missing attachment files    |
+| `raise_on_invalid_recipient`   | `bool`        | `True`  | Raise on invalid recipient addresses |
 
 ### Attachment Security Fields
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `attachment_allowed_extensions` | `frozenset[str] \| None` | `None` | Whitelist of allowed extensions |
-| `attachment_blocked_extensions` | `frozenset[str] \| None` | `None` | Blacklist of blocked extensions |
-| `attachment_allowed_directories` | `frozenset[Path] \| None` | `None` | Whitelist of allowed source directories |
-| `attachment_blocked_directories` | `frozenset[Path] \| None` | `None` | Blacklist of blocked directories |
-| `attachment_max_size_bytes` | `int \| None` | `26_214_400` | Maximum file size (25 MiB), `None` to disable |
-| `attachment_allow_symlinks` | `bool` | `False` | Whether symlinks are permitted |
-| `attachment_raise_on_security_violation` | `bool` | `True` | Raise or skip on security violation |
+| Field                                    | Type                      | Default      | Description                                   |
+|------------------------------------------|---------------------------|--------------|-----------------------------------------------|
+| `attachment_allowed_extensions`          | `frozenset[str] \| None`  | `None`       | Whitelist of allowed extensions               |
+| `attachment_blocked_extensions`          | `frozenset[str] \| None`  | `None`       | Blacklist of blocked extensions               |
+| `attachment_allowed_directories`         | `frozenset[Path] \| None` | `None`       | Whitelist of allowed source directories       |
+| `attachment_blocked_directories`         | `frozenset[Path] \| None` | `None`       | Blacklist of blocked directories              |
+| `attachment_max_size_bytes`              | `int \| None`             | `26_214_400` | Maximum file size (25 MiB), `None` to disable |
+| `attachment_allow_symlinks`              | `bool`                    | `False`      | Whether symlinks are permitted                |
+| `attachment_raise_on_security_violation` | `bool`                    | `True`       | Raise or skip on security violation           |
 
 **Notes:**
 - `None` values use `btx_lib_mail`'s OS-specific defaults (blocked extensions/directories)
@@ -346,24 +341,24 @@ config = load_email_config_from_dict(config_dict)
 
 The `adapters/memory/` package provides lightweight implementations for testing:
 
-| Module | Protocols Satisfied |
-|--------|---------------------|
-| `memory/config.py` | `GetConfig`, `GetDefaultConfigPath`, `DeployConfiguration`, `DisplayConfig` |
-| `memory/email.py` | `SendEmail`, `SendNotification`, `LoadEmailConfigFromDict` |
-| `memory/logging.py` | `InitLogging` |
+| Module              | Protocols Satisfied                                                         |
+|---------------------|-----------------------------------------------------------------------------|
+| `memory/config.py`  | `GetConfig`, `GetDefaultConfigPath`, `DeployConfiguration`, `DisplayConfig` |
+| `memory/email.py`   | `SendEmail`, `SendNotification`, `LoadEmailConfigFromDict`                  |
+| `memory/logging.py` | `InitLogging`                                                               |
 
 Use `composition.build_testing()` to wire all in-memory adapters.
 
 ### Test Fixtures (conftest.py)
 
-| Fixture | Purpose |
-|---------|---------|
-| `config_factory` | Creates real `Config` instances from test data |
-| `inject_config` | Injects config into CLI path |
-| `cli_runner` | Fresh `CliRunner` per test |
-| `strip_ansi` | Strips ANSI escape codes from output |
-| `clear_config_cache` | Clears LRU cache before tests |
-| `managed_traceback_state` | Resets/restores traceback configuration |
+| Fixture                   | Purpose                                        |
+|---------------------------|------------------------------------------------|
+| `config_factory`          | Creates real `Config` instances from test data |
+| `inject_config`           | Injects config into CLI path                   |
+| `cli_runner`              | Fresh `CliRunner` per test                     |
+| `strip_ansi`              | Strips ANSI escape codes from output           |
+| `clear_config_cache`      | Clears LRU cache before tests                  |
+| `managed_traceback_state` | Resets/restores traceback configuration        |
 
 ---
 

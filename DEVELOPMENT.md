@@ -79,22 +79,6 @@
   - `REMOTE=<name>` (default: `origin`) -- git remote to push to
   - Advanced (via script): `python scripts/release.py --retries 5 --retry-wait 3.0`
 
-## Interactive Menu (Textual)
-
-`make menu` launches a Textual-powered TUI to browse targets, edit parameters, and run them with live output.
-
-Install dev extras if you haven't:
-
-```bash
-pip install -e .
-```
-
-Run the menu:
-
-```bash
-make menu
-```
-
 ### Target Details
 
 - `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`). Tool output defaults to JSON mode, which suppresses all tool output when stages pass (only failures produce output). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header` with coverage report display suppressed. Use `bmk test --human` or `BMK_OUTPUT_FORMAT=text` for full verbose output showing all tool output, prompts, and reports.
@@ -162,7 +146,7 @@ Use `make test-human` or `make th` instead.
 
 **Automation notes**
 
-- `make push` runs the full test suite, checks pip and dependency versions, prompts for a commit message (or takes `MSG="..."`, i.e. the `BMK_COMMIT_MESSAGE` environment variable), and always pushes, creating an empty commit when there are no staged changes. The Textual menu (`make menu -> push`) shows the same behaviour via an input field.
+- `make push` runs the full test suite, checks pip and dependency versions, prompts for a commit message (or takes `MSG="..."`, i.e. the `BMK_COMMIT_MESSAGE` environment variable), and always pushes, creating an empty commit when there are no staged changes.
 
 ### Versioning & Metadata
 

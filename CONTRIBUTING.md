@@ -14,7 +14,7 @@ Thanks for helping improve **bmk**. The sections below summarise the day-to-day 
 
 - Commit messages should be imperative (`Add rich handler`, `Fix CLI exit codes`).
 - The test harness (`make test`) runs the full lint/type/test pipeline but leaves the repository untouched; create commits yourself before pushing or uploading coverage artifacts.
-- `make push` always performs a commit before pushing. It prompts for a message when run interactively, honours `MSG="..."` (or the `BMK_COMMIT_MESSAGE` environment variable) when provided, and creates an empty commit if nothing is staged. The Textual menu (`make menu -> push`) exposes the same behaviour via an input field.
+- `make push` always performs a commit before pushing. It prompts for a message when run interactively, honours `MSG="..."` (or the `BMK_COMMIT_MESSAGE` environment variable) when provided, and creates an empty commit if nothing is staged.
 - **Pass a commit message with `MSG="..."`, not `ARGS="..."`.** `ARGS` is expanded into the recipe and re-parsed by bash, so punctuation is treated as code: `fix(cli): x` is a syntax error, `a; b` runs `b`, and a backtick or `$(...)` executes. A newline in `ARGS` is rejected outright, because make would otherwise commit a truncated subject and run the rest as a command. `MSG` is passed through the environment, so any message survives intact, newlines included:
 
   ```bash
