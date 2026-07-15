@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -294,7 +295,7 @@ def test_run_coverage_tests_returns_zero_on_success(tmp_path: Path, monkeypatch:
     )
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        result = run_coverage_tests(project_dir=tmp_path)
+        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
 
     assert result == 0
 
@@ -306,7 +307,7 @@ def test_run_coverage_tests_returns_nonzero_when_pytest_fails(tmp_path: Path, mo
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(1)):
-        result = run_coverage_tests(project_dir=tmp_path)
+        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
 
     assert result == 1
 
@@ -327,7 +328,7 @@ def test_run_coverage_tests_returns_nonzero_when_report_fails(tmp_path: Path) ->
         return _make_completed(2)  # coverage report fails
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
-        result = run_coverage_tests(project_dir=tmp_path)
+        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
 
     assert result == 2
 
@@ -348,7 +349,7 @@ def test_run_coverage_tests_xml_failure_does_not_fail_run(tmp_path: Path, capsys
         return _make_completed(3)  # xml generation fails
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
-        result = run_coverage_tests(project_dir=tmp_path, generate_xml=True)
+        result = run_coverage_tests(project_dir=tmp_path, generate_xml=True, python=sys.executable)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -369,7 +370,7 @@ def test_run_coverage_tests_skips_xml_when_disabled(tmp_path: Path) -> None:
         return _make_completed(0)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
-        result = run_coverage_tests(project_dir=tmp_path, generate_xml=False)
+        result = run_coverage_tests(project_dir=tmp_path, generate_xml=False, python=sys.executable)
 
     assert result == 0
     assert call_count == 2  # only pytest + report, no xml
@@ -384,7 +385,7 @@ def test_run_coverage_tests_includes_marker_filter_by_default(tmp_path: Path) ->
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)
     ) as mock_run:
-        run_coverage_tests(project_dir=tmp_path)
+        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
 
     first_call_args = mock_run.call_args_list[0][0][0]
     assert "-m" in first_call_args
@@ -402,7 +403,7 @@ def test_run_coverage_tests_omits_marker_filter_for_integration(tmp_path: Path) 
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)
     ) as mock_run:
-        run_coverage_tests(project_dir=tmp_path, include_integration=True)
+        run_coverage_tests(project_dir=tmp_path, include_integration=True, python=sys.executable)
 
     first_call_args = mock_run.call_args_list[0][0][0]
     # Should only have the module -m for pytest, not a marker filter -m
@@ -419,7 +420,7 @@ def test_run_coverage_tests_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        result = run_coverage_tests()
+        result = run_coverage_tests(python=sys.executable)
 
     assert result == 0
 
@@ -431,7 +432,7 @@ def test_run_coverage_tests_prints_commands(tmp_path: Path, capsys: pytest.Captu
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        run_coverage_tests(project_dir=tmp_path)
+        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
 
     captured = capsys.readouterr()
     assert "[coverage] python -m coverage run" in captured.out
@@ -1192,7 +1193,7 @@ def test_main_runs_tests_and_returns_zero_on_success(
     monkeypatch.delenv("CODECOV_TOKEN", raising=False)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=False)
+        result = main(project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1209,7 +1210,7 @@ def test_main_returns_nonzero_when_tests_fail(
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(5)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=False)
+        result = main(project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
 
     assert result == 5
     captured = capsys.readouterr()
@@ -1224,7 +1225,7 @@ def test_main_skips_upload_when_tests_fail(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(1)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=True)
+        result = main(project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
 
     assert result == 1
 
@@ -1422,6 +1423,6 @@ def test_main_runs_tests_then_uploads(tmp_path: Path, monkeypatch: pytest.Monkey
         patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
         patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
-        result = main(project_dir=tmp_path, run_tests=True, upload=True)
+        result = main(project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
 
     assert result == 0

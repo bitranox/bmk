@@ -24,8 +24,18 @@ else
   BMK_EXE :=
 endif
 
-# bmk lives in THIS project's own tool env, never a machine-wide one: the env
-# carries the project's dependencies, so one shared env cannot serve two projects.
+# This env stays PER-PROJECT, and here that is deliberate - do NOT "unify" it with the
+# shipped template, which now installs the released bmk into uv's shared tool dir.
+#
+# The difference is what gets installed. The template installs bmk FROM PyPI, so one
+# shared env serves every repo. This Makefile installs bmk from LOCAL SOURCE
+# (`--editable ./`), because bmk is the project under development here. Putting that into
+# uv's shared tool dir would replace the released bmk for EVERY other repo on this
+# machine: every project's `make` would silently start running bmk straight out of this
+# working tree, mid-edit. The isolation is the whole point.
+#
+# The shared/per-project question and the co-resolution question are separate: this env
+# holds bmk alone too (bmk IS the project, so `--editable ./` brings only its own deps).
 BMK_TOOL_DIR := $(CURDIR)/.venv-bmk
 BMK := $(BMK_TOOL_DIR)/bin/bmk$(BMK_EXE)
 ARGS ?=

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from bmk.domain.enums import ToolOutputFormat
 
+from .context import resolve_test_python
 from .model import StageContext
 from .project import derive_package_name, pip_audit_ignore_flags
 
@@ -91,15 +92,33 @@ def pyright_argv(ctx: StageContext) -> list[str]:
 # --- makescripts .py helper subprocesses ------------------------------------
 
 
+def _test_python_flags(ctx: StageContext) -> list[str]:
+    """``--python <project venv>`` for the helper, or nothing.
+
+    The helper script itself runs under bmk's interpreter (it is stdlib-only), but the
+    pytest it spawns must run in the PROJECT's venv - the environment the project
+    declares. Passing the interpreter explicitly keeps that decision here, next to the
+    other stage wiring, rather than buried in the helper's ``sys.executable``.
+
+    Omitted when no project venv resolves; the helper then reports the problem itself,
+    naming the fix. It must never quietly fall back to bmk's interpreter: that is the
+    defect (tests running against a tree the project never declared).
+    """
+    python = resolve_test_python(ctx)
+    return ["--python", python] if python else []
+
+
 def pytest_cov_argv(ctx: StageContext) -> list[str]:
     argv = [ctx.python_cmd, _helper("_coverage.py"), "--run", "--project-dir", str(ctx.project_dir)]
+    argv += _test_python_flags(ctx)
     if _is_json(ctx):
         argv += ["--output-format", "json"]
     return argv
 
 
 def coverage_run_argv(ctx: StageContext) -> list[str]:
-    return [ctx.python_cmd, _helper("_coverage.py"), "--run", "--project-dir", str(ctx.project_dir)]
+    argv = [ctx.python_cmd, _helper("_coverage.py"), "--run", "--project-dir", str(ctx.project_dir)]
+    return argv + _test_python_flags(ctx)
 
 
 def shellcheck_argv(ctx: StageContext) -> list[str]:
@@ -117,7 +136,17 @@ def psscriptanalyzer_argv(ctx: StageContext) -> list[str]:
 
 
 def integration_pytest_argv(ctx: StageContext) -> list[str]:
-    return ["pytest", "-m", "integration", "--tb=short", "-q", *ctx.args]
+    """Integration pytest, run from the PROJECT's venv like every other test stage.
+
+    A bare ``pytest`` would resolve off PATH to bmk's own env (see
+    ``context._prepend_tool_bin_to_path``), i.e. the wrong dependency tree - the same
+    defect as the unit-test stage. Fall back to the bare name only when no project venv
+    resolves, so the failure looks the way it always did rather than a confusing
+    FileNotFoundError.
+    """
+    python = resolve_test_python(ctx)
+    head = [python, "-m", "pytest"] if python else ["pytest"]
+    return [*head, "-m", "integration", "--tb=short", "-q", *ctx.args]
 
 
 # --- build / version / release / run -----------------------------------------

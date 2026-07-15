@@ -75,6 +75,34 @@ def resolve_audit_python(ctx: StageContext) -> str:
     return ctx.python_cmd
 
 
+def resolve_test_python(ctx: StageContext) -> str | None:
+    """Interpreter the tests must run under: the PROJECT's venv, or None.
+
+    The tests have to run in the environment the project DECLARES, which is the venv
+    ``ensure_project_venv`` syncs from its ``pyproject.toml`` - not bmk's own tool env.
+    Those are two independently resolved dependency trees, and they demonstrably differ:
+    the project venv gets every extra (``[full]``, ``[journald]``, ...), bmk's env only
+    ever got ``[dev]``. Testing in bmk's env therefore exercised a tree nobody ships,
+    while pyright and pip-audit inspected the real one - a test suite and an audit
+    describing different environments.
+
+    Resolved when the stage runs, like ``resolve_audit_python``, so a ``clean`` that
+    removed the ``.venv`` earlier in the same pipeline cannot strand a path pinned at
+    context-build time.
+
+    Returns None when there is no usable project venv. Unlike the audit resolver this
+    does NOT fall back to bmk's interpreter: silently testing in the wrong environment is
+    the exact defect this function exists to remove, so the caller must fail loudly
+    instead (see ``tools.pytest_cov_argv``).
+    """
+    pinned = ctx.env.get("PIPAPI_PYTHON_LOCATION")
+    if pinned and pinned != sys.executable and Path(pinned).exists():
+        return pinned
+    project_venv = resolve_project_venv(ctx.project_dir, ctx.env)
+    interpreter = venv_python(project_venv)
+    return str(interpreter) if is_venv(project_venv) and interpreter.exists() else None
+
+
 def _prepend_src_to_pythonpath(env: dict[str, str], cwd: Path) -> None:
     """Put the project's ``src/`` on PYTHONPATH so tools can import the package.
 

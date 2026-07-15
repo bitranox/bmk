@@ -9,11 +9,13 @@ from those repos. Five invariants are guarded:
    without running the sync, and the published package carries a template labelled
    with the wrong version.
 2. The install cannot silently degrade. It runs before every make invocation, and each
-   way it can go wrong - dropping the `[dev]` extra, no-opping on a stale env,
-   swallowing the error - produces a working-looking env that fails much later,
-   somewhere unrelated.
-3. The env belongs to this project alone (`.venv-bmk` inside the repo), so two repos
-   cannot overwrite each other's dependencies.
+   way it can go wrong - no-opping on a stale env, swallowing the error - produces a
+   working-looking env that fails much later, somewhere unrelated.
+3. bmk's env holds bmk ALONE, and is therefore shared by every repo. The project's
+   dependencies live in the project's own `.venv`. This is the load-bearing one: while
+   the two resolved together, a project dependency could silently backtrack bmk to an
+   ancient release, a yanked transitive dependency could make bmk uninstallable
+   fleet-wide, and the tests ran in an env neither pyright nor pip-audit inspected.
 4. The install runs before every target, so a new bmk release and any dependency
    change are picked up without anyone remembering to do anything.
 5. A commit message stays DATA. make expands $(ARGS) into the recipe and hands the
@@ -92,37 +94,27 @@ def test_ensure_bmk_never_suppresses_errors() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_ensure_bmk_always_keeps_the_dev_extra() -> None:
-    """Every install attempt carries `.[dev]`.
+def test_ensure_bmk_installs_bmk_alone() -> None:
+    """The project is NOT installed into bmk's env - bmk is installed by itself.
 
-    A project with no [dev] extra does not fail - uv warns and installs the base
-    deps - so a fallback that drops it is never needed and only ever produces a
-    tool env missing the test deps, which surfaces as a baffling
-    ModuleNotFoundError far from the cause.
+    This is the invariant the whole design now rests on, and its absence caused every
+    co-resolution bug: with the project's dependencies in bmk's env the two resolved
+    TOGETHER, so a project dependency capping one of bmk's silently backtracked bmk to an
+    ancient release (codecov-cli's click<8.3.0 pinned bmk at 3.1.7, no error), and a
+    yanked transitive dependency made bmk itself uninstallable, bricking `make` fleet-wide.
+    It also forced one ~300MB env per repo.
+
+    A `--with` / `--with-editable` reappearing here reinstates all of it.
     """
     recipe = _install_recipe(_template_text())
     installs = re.findall(r"uv tool install[^|]*", recipe)
 
     assert installs, "the recipe must run `uv tool install`"
     for install in installs:
-        assert '".[dev]"' in install, f"install attempt drops the [dev] extra: {install.strip()!r}"
-
-
-@pytest.mark.os_agnostic
-def test_project_is_installed_editable() -> None:
-    """The project goes in editable, so its code in the env IS the working tree.
-
-    This is what makes gating the stamp on pyproject.toml alone correct: only the
-    project's DEPENDENCIES can go stale, and they change only when pyproject.toml
-    does. A non-editable `--with .` installs a snapshot; it happens to work because
-    tools run with cwd=<project>, whose source shadows the snapshot on sys.path, but
-    that is an accident of import order and would serve stale code to anything
-    running from another directory.
-    """
-    recipe = _install_recipe(_template_text())
-
-    for attempt in re.findall(r"uv tool install[^|]*", recipe):
-        assert "--with-editable" in attempt, f"project must be installed editable: {attempt.strip()!r}"
+        assert "--with" not in install, (
+            f"bmk's env must hold bmk ALONE; --with/--with-editable makes bmk and the "
+            f"project resolve together: {install.strip()!r}"
+        )
 
 
 @pytest.mark.os_agnostic
@@ -154,39 +146,47 @@ def test_ensure_bmk_retries_once() -> None:
     assert "||" in recipe
 
 
-# --- the env is this project's alone ----------------------------------------
+# --- ONE env per machine, not one per project -------------------------------
 
 
 @pytest.mark.os_agnostic
-def test_tool_env_is_per_project() -> None:
-    """Both the env AND the entry points are redirected into the project.
+def test_tool_env_is_shared_not_per_project() -> None:
+    """The install does NOT redirect uv's tool dir into the project.
 
-    The tool env carries the project's own dependencies, so a
-    machine-wide env cannot serve two projects: whichever ran make last wins and
-    the other silently gets the wrong dependency tree - measured, not theoretical.
-    Redirecting UV_TOOL_DIR alone is not enough: uv still writes the entry points
-    to the shared bin dir and fails with "Executables already exist".
+    A per-project env was only ever necessary because the env also carried the PROJECT's
+    dependencies, so two projects fought over one env (measured: a `six` project and a
+    `chardet` project overwrote each other). bmk's env now holds bmk alone, so it is
+    identical for every repo and there is nothing to collide - and one shared env stops
+    ~300MB, mostly pyright's bundled Node, from being copied into all ~46 repos.
+
+    `--force` is still required: the entry point already exists in uv's bin dir.
     """
     recipe = _install_recipe(_template_text())
 
     for attempt in re.findall(r"uv tool install[^|]*", recipe):
-        assert "--force" in attempt, "rebuilding over existing entry points needs --force"
-    assert 'UV_TOOL_DIR="$(BMK_TOOL_DIR)"' in recipe
-    assert 'UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin"' in recipe
+        assert "--force" in attempt, "rebuilding over an existing entry point needs --force"
+    assert "UV_TOOL_DIR" not in recipe, "the env must be uv's shared default, not per-project"
+    assert "UV_TOOL_BIN_DIR" not in recipe, "the env must be uv's shared default, not per-project"
 
 
 @pytest.mark.os_agnostic
-def test_tool_dir_is_inside_the_project() -> None:
-    """BMK_TOOL_DIR resolves under the project, and bmk is run from it.
+def test_bmk_is_resolved_from_uvs_own_bin_dir() -> None:
+    """bmk is invoked via the path uv reports, not a bare name and not a guessed one.
 
-    Invoking a bare `bmk` from PATH would reach whatever machine-wide install
-    happens to exist, defeating the isolation.
+    `uv tool install` only WARNS when its bin dir is not on PATH - the default state on a
+    fresh machine - so a bare `bmk` would fail with "command not found" from a Makefile
+    that had just installed it. Hardcoding `$(HOME)/.local/bin` instead would be wrong on
+    Windows. Asking uv is the only answer that holds on both.
     """
     text = _template_text()
 
-    assert re.search(r"^BMK_TOOL_DIR := \$\(CURDIR\)/\.venv-bmk$", text, re.M)
-    assert re.search(r"^BMK := \$\(BMK_TOOL_DIR\)/bin/bmk\$\(BMK_EXE\)$", text, re.M)
-    assert "$(HOME)/.local/bin/bmk" not in text, "must not fall back to the machine-wide bmk"
+    assert re.search(r"^BMK_BIN_DIR := \$\(shell uv tool dir --bin", text, re.M), (
+        "the bin dir must come from `uv tool dir --bin`"
+    )
+    assert re.search(r"^BMK := \$\(if \$\(BMK_BIN_DIR\)", text, re.M), (
+        "BMK must use the resolved bin dir, with a bare-name fallback"
+    )
+    assert "BMK_TOOL_DIR" not in text, "the per-project tool dir is gone"
 
 
 @pytest.mark.os_agnostic
@@ -354,6 +354,27 @@ def test_root_makefile_supports_msg() -> None:
 
     assert re.search(r"^export BMK_COMMIT_MESSAGE := \$\(value MSG\)$", text, re.M), (
         "root Makefile must export MSG as BMK_COMMIT_MESSAGE via $(value MSG), like the template"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_root_makefile_keeps_its_own_env_unlike_the_template() -> None:
+    """bmk's own Makefile must NOT share uv's tool dir, even though the template now does.
+
+    The two install different things. The template installs the RELEASED bmk from PyPI, so
+    one shared env serves every repo. This Makefile installs bmk from LOCAL SOURCE
+    (`--editable ./`) because bmk is the project under development. Sharing that would
+    replace the released bmk for every other repo on the machine - each one's `make` would
+    silently run bmk out of this working tree, mid-edit.
+
+    So this asymmetry is intentional, and "unifying" the two files would be the bug.
+    """
+    recipe = _install_recipe(_root_makefile_text())
+
+    assert "--editable ./" in recipe, "bmk's own Makefile installs bmk from local source"
+    assert "UV_TOOL_DIR" in recipe, (
+        "bmk's own dev env must stay per-project; sharing it would push bmk-from-source "
+        "into every other repo's toolchain"
     )
 
 

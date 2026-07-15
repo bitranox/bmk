@@ -93,7 +93,7 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 | 060   | sequential   | `shellcheck`                                                                                                     |
 
 - **JSON-by-default output**  -  in JSON mode (the default), the stage runner captures all tool output and only displays it when a stage fails. On success, it emits a single JSON summary line (`{"result":"pass","stages":N,"scripts":N}`). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header`. Use `--human` on `test`/`testintegration` commands for full verbose output, or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags  -  use `make test-human` or `make th` instead.
-- **Dependency isolation**  -  `make` installs bmk into the project's own `.venv-bmk`, together with the project's dependencies, so pyright, pytest, pip-audit and other tools resolve the full dependency tree without `PYTHONPATH` hacks. The env belongs to one repo, so projects cannot overwrite each other's dependencies. It is re-resolved on every `make`, so a new bmk release and any dependency change are picked up automatically. `.venv-bmk` is disposable and gitignored.
+- **Dependency isolation**  -  bmk and your project never share a dependency tree. bmk is installed once per machine, in uv's own tool dir, holding bmk's toolchain and nothing of yours. Your dependencies live in the project's own `.venv`, which bmk provisions and syncs from your `pyproject.toml`, and that is the environment your tests, pyright and pip-audit all run against. Because bmk's env contains none of your packages, one project's dependencies can never resolve against another's - or against bmk's. bmk is re-resolved on every `make`, so a new release is picked up automatically; both directories are disposable and gitignored.
 - **Project venv, synced before every gate**  -  bmk creates the project's venv if absent and syncs it to `pyproject.toml` before any command that touches the Python environment. Installs and gates target that venv only  -  never bmk's own, never the venv active in your shell  -  so no project can install its dependencies into a shared environment it does not own. The sync removes packages the manifest dropped and re-resolves the rest, so a drifted venv cannot make pip-audit report CVEs the project does not actually resolve. Set `UV_PROJECT_ENVIRONMENT` to use a different path (e.g. `.venv-win` when one checkout is shared between operating systems), or `BMK_NO_VENV_SYNC=1` to skip provisioning. Packages installed into the venv by hand do not survive a sync. `clean` does not remove the venv  -  delete it by hand when you want it gone.
 - **The venv stays out of git**  -  bmk gitignores the venv it creates (respecting any rule you already have) and, if git is tracking a venv, drops it from the index while leaving the files on disk. A tracked venv would otherwise show thousands of modified files after every sync.
 - **The venv stays out of the type-check**  -  pyright's `exclude` REPLACES its defaults (`**/node_modules`, `**/__pycache__`, `**/.*`) rather than extending them, so a project that excludes anything of its own loses the rule that kept dot-directories out - and would then type-check bmk's venvs, thousands of files, in strict mode. bmk appends the venv names to `[tool.pyright].exclude` when they are missing, and leaves the config alone when there is no `exclude` key (the defaults already cover it) or an `include` list narrows the scope.
@@ -151,10 +151,14 @@ Behind the scenes, the Makefile runs this on every target, in the project's own
 ```bash
 uv tool install --reinstall --force "bmk>=$(BMK_MIN)" --with-editable ".[dev]"
 ```
-It reads `./pyproject.toml` and installs bmk plus all project dependencies, so
-pyright, pytest and pip-audit resolve the full dependency tree. Re-resolving every
-time is what keeps bmk and the dependencies current; the `bmk>=` floor stops a
-project dependency from silently dragging bmk back to an old release.
+It installs bmk on its own - your project is deliberately not part of that install.
+bmk then provisions the project's `.venv` from `./pyproject.toml`, and pytest,
+pyright and pip-audit all run against that one environment. Re-resolving every time
+is what keeps bmk current.
+
+Keeping the two apart is not cosmetic: while bmk and the project resolved together,
+one of your dependencies capping one of bmk's would silently drag bmk back to an old
+release, and a yanked transitive dependency could stop bmk installing at all.
 
 ### Manual install (without Makefile)
 

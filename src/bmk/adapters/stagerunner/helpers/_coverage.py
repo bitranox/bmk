@@ -174,6 +174,36 @@ def _build_env(project_dir: Path, src_path: str) -> dict[str, str]:
     return os.environ.copy() | {"PYTHONPATH": pythonpath}
 
 
+def _resolve_test_interpreter(python: str | None) -> tuple[str | None, str]:
+    """Validate the interpreter the tests will run under. Returns (interpreter, error).
+
+    The interpreter must be the PROJECT's venv python, which ``ensure_project_venv``
+    syncs from the project's own ``pyproject.toml`` (including its ``[dev]`` extra, so
+    pytest and coverage are there).
+
+    This refuses to fall back to ``sys.executable`` (bmk's own interpreter). bmk's env
+    and the project's venv are two independently resolved trees - bmk's only ever
+    received ``[dev]``, the project's receives every extra - so running the suite in
+    bmk's env exercises an environment the project does not declare, while pyright and
+    pip-audit inspect the real one. A silent fallback would reinstate exactly that.
+
+    Deliberately checks only that the interpreter EXISTS; it does not probe it for
+    coverage/pytest. A probe would add a subprocess to every run to pre-empt a case
+    ``ensure_project_venv`` already prevents, and a missing module reports itself
+    perfectly well ("No module named coverage") from the command that needs it.
+    """
+    if not python:
+        return None, (
+            "no project virtualenv found, so there is no environment to run the tests in.\n"
+            "bmk runs the suite in the project's own venv (the one it syncs from pyproject.toml),\n"
+            "never in its own tool env. Create it with `uv venv` (bmk normally provisions it\n"
+            "automatically), or unset BMK_NO_VENV_SYNC=1 if you set it."
+        )
+    if not Path(python).exists():
+        return None, f"the project's interpreter does not exist: {python}"
+    return python, ""
+
+
 def run_coverage_tests(
     *,
     project_dir: Path | None = None,
@@ -181,6 +211,7 @@ def run_coverage_tests(
     generate_xml: bool = True,
     include_integration: bool = False,
     quiet: bool = False,
+    python: str | None = None,
 ) -> int:
     """Run pytest under coverage and generate reports.
 
@@ -190,12 +221,20 @@ def run_coverage_tests(
         generate_xml: Generate XML coverage report for Codecov.
         include_integration: Include integration tests (excluded by default).
         quiet: Minimize output (short tracebacks, no per-test lines).
+        python: Interpreter to run the suite under - the PROJECT's venv python. Required;
+            this script itself runs under bmk's interpreter (it is stdlib-only), but the
+            tests must not.
 
     Returns:
         Exit code (0 for success, non-zero for failure).
     """
     if project_dir is None:
         project_dir = Path.cwd()
+
+    test_python, error = _resolve_test_interpreter(python)
+    if test_python is None:
+        print(f"Cannot run tests: {error}", file=sys.stderr)
+        return 1
 
     config = CoverageConfig.from_pyproject(project_dir)
     coverage_source = ",".join(config.coverage_source)
@@ -210,9 +249,13 @@ def run_coverage_tests(
         coverage_file = Path(tmpdir) / ".coverage"
         env = base_env | {"COVERAGE_FILE": str(coverage_file)}
 
-        # Run pytest under coverage
+        # Run pytest under coverage, in the PROJECT's interpreter - NOT sys.executable.
+        # sys.executable is bmk's own tool env, whose dependency tree is not the one the
+        # project declares (bmk's got only `[dev]`; the project's venv gets every extra),
+        # so testing there exercised an environment nobody ships while pyright/pip-audit
+        # inspected the real one.
         coverage_cmd = [
-            sys.executable,
+            test_python,
             "-m",
             "coverage",
             "run",
@@ -250,9 +293,11 @@ def run_coverage_tests(
         if result.returncode != 0:
             return result.returncode
 
-        # Generate terminal report (skip in quiet mode — summary adds noise)
+        # Generate terminal report (skip in quiet mode — summary adds noise).
+        # Same interpreter as the run above, necessarily: the data file was written by
+        # THAT coverage, and a different coverage version may refuse to read it.
         report_cmd = [
-            sys.executable,
+            test_python,
             "-m",
             "coverage",
             "report",
@@ -273,10 +318,10 @@ def run_coverage_tests(
         if report_result.returncode != 0:
             return report_result.returncode
 
-        # Generate XML report for Codecov
+        # Generate XML report for Codecov (same interpreter as the run, see above)
         if generate_xml:
             xml_cmd = [
-                sys.executable,
+                test_python,
                 "-m",
                 "coverage",
                 "xml",
@@ -651,6 +696,7 @@ def main(
     verbose: bool = False,
     include_integration: bool = False,
     quiet: bool = False,
+    python: str | None = None,
 ) -> int:
     """Main entry point for coverage operations.
 
@@ -661,6 +707,7 @@ def main(
         verbose: Enable verbose output.
         include_integration: Include integration tests (excluded by default).
         quiet: Minimize output (short tracebacks, no per-test lines).
+        python: Interpreter to run the suite under - the project's own venv python.
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -677,6 +724,7 @@ def main(
             verbose=verbose,
             include_integration=include_integration,
             quiet=quiet,
+            python=python,
         )
         if exit_code != 0:
             print(f"[coverage] Tests failed (exit {exit_code})", file=sys.stderr)
@@ -747,6 +795,15 @@ Examples:
         help="Run pytest with coverage before uploading",
     )
     parser.add_argument(
+        "--python",
+        default=None,
+        help=(
+            "Interpreter to run the suite under - the project's own venv python. "
+            "This script runs under bmk's interpreter, but the tests must not: bmk's "
+            "tool env is a different dependency tree from the one the project declares."
+        ),
+    )
+    parser.add_argument(
         "--integration",
         action="store_true",
         help="Include integration tests (excluded by default)",
@@ -777,5 +834,6 @@ Examples:
             verbose=args.verbose,
             include_integration=args.integration,
             quiet=args.output_format == "json",
+            python=args.python,
         )
     )

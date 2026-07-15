@@ -6,6 +6,58 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.8.0] 2026-07-15 18:09:41
+
+### Changed
+- **bmk's environment now holds bmk alone, and is shared by every repo.** The Makefile no
+  longer installs your project into it (`--with-editable ".[dev]"` is gone) and no longer
+  builds a `.venv-bmk` per project - bmk goes once into uv's own tool dir. Your
+  dependencies live in the project's `.venv`, which bmk already provisions from your
+  `pyproject.toml`. See `docs/adr/0002-bmk-env-holds-bmk-alone.md`.
+
+  `--with` made uv resolve bmk and your project as ONE dependency problem, and every
+  release since 2.9.0 patched a consequence of that rather than the cause: 3.1.7 test deps
+  missing; 3.3.1 the install degrading silently; 3.4.0 two projects overwriting each other;
+  3.5.0 `codecov-cli` capping `click<8.3.0` **silently backtracking bmk itself to 3.1.7**;
+  3.6.0 pyright walking the co-resolved site-packages for **6h20m across 21 repos**; 3.6.1
+  a **yanked** transitive floor making bmk uninstallable and bricking `make` fleet-wide.
+  With none of your packages in bmk's env, that entire class is gone: nothing of yours can
+  cap, backtrack or break bmk's install. `BMK_MIN` is kept as inert insurance.
+
+  It also removes an undocumented **cycle**: bmk depends on `lib_cli_exit_tools`,
+  `lib_log_rich`, `lib_layered_config` and `btx_lib_mail`, which are themselves bmk-managed
+  repos - so their `make` resolved bmk against the very library being developed. bmk
+  requires `lib_layered_config>=5.6.0` and the working copy is 5.6.0: one floor bump above
+  the dev version and that repo could not `make test` at all.
+
+  And it stops ~300MB (mostly pyright's bundled Node) being duplicated into every repo: one
+  shared env instead of ~46. `pyright[nodejs]` therefore stays - paid once, and bmk's
+  toolchain needs no system Node.
+
+  **Migration is automatic** (the Makefile regenerates itself), with one requirement your
+  project almost certainly already meets: declare `pytest` and `pytest-cov` in its `[dev]`
+  extra, since the suite now runs in your venv. A leftover `.venv-bmk` is disposable and
+  gitignored - delete it.
+
+  bmk's own development Makefile deliberately keeps a per-project env: it installs bmk from
+  local source, and sharing that would make every other repo run bmk out of a working tree.
+
+### Fixed
+- **The tests ran in the wrong environment, and no gate could see it.** `python_cmd` was
+  always `sys.executable`, so pytest ran in bmk's env while pyright (`VIRTUAL_ENV`) and
+  pip-audit (`PIPAPI_PYTHON_LOCATION`) inspected the project's `.venv` - two independently
+  resolved trees, so the suite and the audit described different environments. They differ
+  in practice: the project venv gets every extra, bmk's env only ever got `[dev]`. A real
+  bug hid in exactly that gap - a project's `[full]` extra was present in `.venv` and absent
+  from bmk's env, so 16 tests took a different branch depending on which env ran them,
+  invisible to both `make test` and CI.
+
+  `resolve_test_python` (mirroring the existing `resolve_audit_python`) now resolves the
+  project's interpreter when the stage runs, and `_coverage.py` takes it as `--python`
+  instead of using `sys.executable`; the integration stage no longer runs a bare `pytest`
+  off PATH. It deliberately never falls back to bmk's interpreter - a silent fallback is
+  the defect itself - so with no project venv it fails and names the fix.
+
 ## [3.7.1] 2026-07-15 15:19:16
 
 ### Fixed

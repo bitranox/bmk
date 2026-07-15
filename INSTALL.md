@@ -23,26 +23,33 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-## Recommended: persistent tool install with project deps
+## Recommended: persistent tool install
 
-bmk is installed as a persistent `uv tool` together with the current
-project's dependencies. This ensures tools like pyright, pytest and
-pip-audit can resolve the full dependency tree.
+bmk is installed once per machine as a persistent `uv tool`, on its own. Your project
+is deliberately not part of that install: your dependencies live in the project's own
+`.venv`, and that is where pytest, pyright and pip-audit run.
 
 ```bash
-# Drop the Makefile in; it builds the project's own .venv-bmk on first use
-# and re-resolves bmk and the project deps on every make.
+# Drop the Makefile in; it installs bmk (once per machine) and builds the
+# project's own .venv, re-resolving bmk on every make.
 uvx bmk install
 make test
 
-# Reinstall to pick up changed project deps (e.g. after editing pyproject.toml)
-uv tool install --reinstall bmk --with .
+# Reinstall by hand to pick up a new bmk release (make already does this)
+uv tool install --reinstall bmk
 ```
 
-`make` builds two directories in the project: `.venv-bmk` (bmk plus this project's
-dependencies, the env bmk's tools run in) and `.venv` (the project's own venv, which
-bmk syncs to pyproject.toml). Both belong to this repo alone, so projects cannot
-overwrite each other's dependencies, and both are gitignored and disposable.
+`make` builds ONE directory in the project: `.venv`, the project's own venv, which bmk
+syncs to `pyproject.toml`. It is gitignored and disposable. bmk itself lives outside the
+project, in uv's tool dir (`uv tool dir`), shared by every repo - it can be shared
+precisely because it holds none of your packages.
+
+Do not add `--with .` / `--with-editable ".[dev]"` to that install. It is what made bmk
+and your project resolve TOGETHER, and every consequence was a bug: one of your
+dependencies capping one of bmk's silently backtracked bmk to an ancient release; a
+yanked transitive dependency made bmk uninstallable outright; and the tests ran in that
+co-resolved env while pyright and pip-audit inspected your real `.venv`, so the suite and
+the audit described different environments.
 
 ### Via the Makefile (automatic)
 
@@ -69,7 +76,7 @@ before installing:
 
 ```bash
 git config --global url."https://<TOKEN>@github.com/<ORG>/".insteadOf "https://github.com/<ORG>/"
-make test   # the Makefile installs bmk + the project deps into .venv-bmk
+make test   # the Makefile syncs the project's deps into its own .venv
 ```
 
 PEP 440 direct references in `[project.dependencies]` are resolved through
