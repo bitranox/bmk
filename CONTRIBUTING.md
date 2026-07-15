@@ -34,8 +34,9 @@ Thanks for helping improve **bmk**. The sections below summarise the day-to-day 
 
 ## 4. Tests & Tooling
 
-- `make test` runs Ruff (lint + format check), Pyright, and Pytest with coverage. Tool output defaults to JSON mode, where the stage runner captures all output and only displays it when a stage fails -- on success, a single JSON summary is emitted. Dependencies are checked silently, Makefile version updates are auto-accepted, and pytest uses concise flags (`--tb=short -q --no-header`). For full verbose output, use `make test-human` (alias `make th`) or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags. Coverage is `on` by default; override with `COVERAGE=off` if you explicitly need a no-coverage run.
-- The harness auto-installs dev tools with `pip install -e .` when Ruff, Pyright, or Pytest are missing. Skip this by exporting `SKIP_BOOTSTRAP=1`.
+- `make test` runs Ruff (lint + format check), Pyright, import-linter, Bandit, pip-audit, and Pytest with coverage. Tool output defaults to JSON mode, where the stage runner captures all output and only displays it when a stage fails -- on success, a single JSON summary is emitted. Dependencies are checked silently, Makefile version updates are auto-accepted, and pytest uses concise flags (`--tb=short -q --no-header`). For full verbose output, use `make test-human` (alias `make th`) or set `BMK_OUTPUT_FORMAT=text`. Note: `make test --human` does not work because Make intercepts `--` flags.
+- `make test` **writes to your working tree before checking it**: it applies `ruff format` and `ruff --fix`, and updates dependency floors, before the check stages run. So a passing run can still leave your files reformatted and `pyproject.toml` bumped. See DEVELOPMENT.md "Development Workflow" for the stage order.
+- bmk runs the gates in the project's own `.venv`, which it provisions and syncs from `pyproject.toml`; there is no bootstrap to skip and no coverage toggle. The environment variables bmk actually reads are listed in DEVELOPMENT.md "Environment Variables" -- anything not there is not consulted.
 - Codecov uploads require a commit (provided by the automatic commit described above). For private repositories set `CODECOV_TOKEN` in your environment or `.env`.
 - Tests follow a narrative style: prefer names like `test_when_<condition>_<outcome>()`, keep each case laser-focused, and mark tests with the provided markers. OS scope: `os_agnostic`, `os_windows`, `os_macos`, `os_posix`, `os_linux` (label only - pair each with its own `skipif(sys.platform ...)`). Run scope: `local_only` for a test needing a local resource CI lacks (run by `make test` locally, excluded from CI via `-m "not local_only"`) and `integration` for a long-running/external test (excluded from `make test`, run via `make testintegration`). See DEVELOPMENT.md "Test Markers" for the full model.
 - Whenever you add a CLI behaviour or change metadata fallbacks, update the relevant story in `tests/test_cli.py` or `tests/test_metadata.py` so the specification remains complete.
@@ -47,7 +48,9 @@ Before opening a PR, confirm the following:
 - [ ] `make test` passes locally (and you removed the auto-created Codecov commit if you do not want to keep it).
 - [ ] Relevant documentation (`README.md`, `DEVELOPMENT.md`, `docs/systemdesign/*`) is updated.
 - [ ] No generated artefacts or virtual environments are committed.
-- [ ] Version bumps, when required, touch **only** `pyproject.toml` and `CHANGELOG.md`.
+- [ ] Version bumps of the Python package touch `pyproject.toml` and `CHANGELOG.md` (`make bump-patch` / `-minor` / `-major` does both, and syncs `__init__conf__.py`).
+- [ ] A change under `skills/` ALSO bumps `.claude-plugin/plugin.json`. This repo is its own Claude Code marketplace (`.claude-plugin/marketplace.json`, `source: "."`), and an install only re-fetches when that version changes -- without the bump the skill ships to nobody. It versions independently of the Python package.
+- [ ] History stays append-only: `master` is a published marketplace, so never squash or force-push it (an existing install's `/plugin marketplace update` is a `git pull` that cannot fast-forward a rewritten history, so it silently stops updating). Branch protection enforces this.
 
 ## 6. Security & Configuration
 
