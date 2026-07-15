@@ -86,7 +86,24 @@ def pip_audit_argv(ctx: StageContext) -> list[str]:
 
 
 def pyright_argv(ctx: StageContext) -> list[str]:
-    return ["pyright", "--outputjson"] if _is_json(ctx) else ["pyright"]
+    """``pyright``, pinned at the interpreter whose imports it must resolve.
+
+    pyright does NOT honour ``VIRTUAL_ENV`` (verified against pyright 1.1.x): given no
+    ``--pythonpath`` it resolves an interpreter from PATH - and ``_prepend_tool_bin_to_path``
+    puts bmk's OWN tool bin first, so an unpinned pyright type-checks the project against
+    bmk's environment rather than the one the project declares. That is exactly the defect
+    ``_test_python_flags`` guards the pytest stage against.
+
+    It hides well: bmk's env carries bmk's own dependencies (pydantic, rich-click, orjson,
+    ...), which overlap what many projects import, so most repos pass by luck. Only a
+    project depending on something bmk lacks sees the phantom missing import.
+
+    Omitted when no project venv resolves, which leaves pyright's own PATH discovery - no
+    worse than before, and the venv provisioning step reports that problem itself.
+    """
+    python = resolve_test_python(ctx)
+    argv = ["pyright", *(["--pythonpath", python] if python else [])]
+    return [*argv, "--outputjson"] if _is_json(ctx) else argv
 
 
 # --- makescripts .py helper subprocesses ------------------------------------

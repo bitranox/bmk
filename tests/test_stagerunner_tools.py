@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 
 from bmk.adapters.stagerunner import tools
@@ -53,9 +54,46 @@ def test_bandit_argv_derives_package_name(tmp_path: Path) -> None:
     assert tools.bandit_argv(_ctx(tmp_path, ToolOutputFormat.TEXT))[-1] == "src/der_ived"
 
 
+def _with_venv(tmp_path: Path) -> Path:
+    """Give tmp_path a resolvable project venv; returns its interpreter path."""
+    venv = tmp_path / ".venv"
+    bin_dir = venv / ("Scripts" if os.name == "nt" else "bin")
+    bin_dir.mkdir(parents=True)
+    python = bin_dir / ("python.exe" if os.name == "nt" else "python")
+    python.write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    return python
+
+
 def test_pyright_argv_json_flag(tmp_path: Path) -> None:
+    # No project venv resolves here, so there is nothing to pin at.
     assert tools.pyright_argv(_ctx(tmp_path, ToolOutputFormat.JSON)) == ["pyright", "--outputjson"]
     assert tools.pyright_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)) == ["pyright"]
+
+
+def test_pyright_argv_pins_the_project_interpreter(tmp_path: Path) -> None:
+    """pyright must be told which interpreter to analyse against.
+
+    pyright does NOT honour VIRTUAL_ENV (verified against pyright 1.1.x): with no
+    ``--pythonpath`` it resolves an interpreter from PATH, and bmk prepends its OWN
+    tool-bin to PATH, so an unpinned pyright type-checks against bmk's environment
+    instead of the one the project declares. That is the same defect the pytest stage
+    already guards against, and it is invisible whenever bmk's env happens to carry the
+    project's imports - it only surfaces on a dependency bmk lacks.
+    """
+    python = _with_venv(tmp_path)
+
+    argv = tools.pyright_argv(_ctx(tmp_path, ToolOutputFormat.TEXT))
+
+    assert argv == ["pyright", "--pythonpath", str(python)]
+
+
+def test_pyright_argv_pins_the_interpreter_in_json_mode_too(tmp_path: Path) -> None:
+    python = _with_venv(tmp_path)
+
+    argv = tools.pyright_argv(_ctx(tmp_path, ToolOutputFormat.JSON))
+
+    assert argv == ["pyright", "--pythonpath", str(python), "--outputjson"]
 
 
 def test_lint_imports_argv(tmp_path: Path) -> None:

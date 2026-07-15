@@ -6,6 +6,32 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.9.1] 2026-07-16 00:13:38
+
+### Fixed
+- **`pyright` is now pinned at the project's interpreter, like every other gate.** It ran as a
+  bare `pyright`, and pyright does NOT honour `VIRTUAL_ENV` (verified against pyright 1.1.x):
+  with no `--pythonpath` it resolves an interpreter from PATH, and `_prepend_tool_bin_to_path`
+  puts bmk's OWN tool bin first. So `make test` type-checked every project against bmk's
+  environment rather than the one the project declares - the exact defect `_test_python_flags`
+  was written to keep out of the pytest stage, which bmk's own comments call "the defect (tests
+  running against a tree the project never declared)".
+
+  It hid almost perfectly. bmk's env carries bmk's dependencies (pydantic, rich-click, orjson,
+  lib_layered_config, ...), which overlap what most projects import, so repo after repo passed
+  by luck. Only a project importing something bmk lacks sees it, and then not as a missing
+  import but as strict-mode `reportUnknown*` errors, because the package's types are simply not
+  there. Measured on such a repo: **7 phantom errors before the pin, 0 after**, with no change
+  to the code being checked.
+
+  `--pythonpath` is omitted when no project venv resolves, which leaves pyright's own PATH
+  discovery - no worse than before. In CI the resolver returns the CI venv, so the gate keeps
+  checking exactly what CI installs.
+
+  pytest, the integration pytest and pip-audit were already pinned; ruff, bandit and
+  import-linter need no interpreter (they never resolve imports from site-packages). pyright was
+  the only gap.
+
 ## [3.9.0] 2026-07-15 22:27:01
 
 ### Security

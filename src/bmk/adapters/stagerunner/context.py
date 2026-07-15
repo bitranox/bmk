@@ -76,15 +76,20 @@ def resolve_audit_python(ctx: StageContext) -> str:
 
 
 def resolve_test_python(ctx: StageContext) -> str | None:
-    """Interpreter the tests must run under: the PROJECT's venv, or None.
+    """Interpreter a gate must resolve against: the PROJECT's venv, or None.
 
-    The tests have to run in the environment the project DECLARES, which is the venv
-    ``ensure_project_venv`` syncs from its ``pyproject.toml`` - not bmk's own tool env.
-    Those are two independently resolved dependency trees, and they demonstrably differ:
-    the project venv gets every extra (``[full]``, ``[journald]``, ...), bmk's env only
-    ever got ``[dev]``. Testing in bmk's env therefore exercised a tree nobody ships,
-    while pyright and pip-audit inspected the real one - a test suite and an audit
-    describing different environments.
+    Used by every stage that touches the project's dependency tree - the pytest stages
+    and pyright. The work has to happen in the environment the project DECLARES, which is
+    the venv ``ensure_project_venv`` syncs from its ``pyproject.toml``, not bmk's own tool
+    env. Those are two independently resolved trees and they demonstrably differ: the
+    project venv gets every extra (``[full]``, ``[journald]``, ...), bmk's env carries
+    bmk's own dependencies and nothing of the project's.
+
+    pip-audit resolves the same venv by its own route (``PIPAPI_PYTHON_LOCATION``, see
+    ``resolve_audit_python``). pyright needs an explicit ``--pythonpath``: it does NOT
+    honour ``VIRTUAL_ENV``, so before that pin it type-checked against whatever PATH
+    offered - bmk's own env - while the tests ran in the project's. A suite and a type
+    check describing different environments is the defect this resolver exists to remove.
 
     Resolved when the stage runs, like ``resolve_audit_python``, so a ``clean`` that
     removed the ``.venv`` earlier in the same pipeline cannot strand a path pinned at
