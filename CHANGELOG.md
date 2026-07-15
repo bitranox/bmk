@@ -6,6 +6,50 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.7.0] 2026-07-15 14:34:47
+
+### Added
+- **`make push MSG="..."` / `make commit MSG="..."` - a commit-message channel that cannot be
+  mangled.** `MSG` is exported into the environment as `BMK_COMMIT_MESSAGE` rather than placed on
+  a shell command line, so the message is never word-split or re-parsed and arrives byte for byte:
+  punctuation, quotes, `$`, backticks, and **newlines**. A multi-line `MSG` becomes a real commit
+  subject plus body, which was previously impossible from `make` at all.
+
+  ```
+  make push MSG="fix(cli): subject line
+
+  Body with (parens), a ; and a literal $HOME - all safe."
+  ```
+
+  It is `$(value MSG)`, not `$(MSG)`, on purpose: make expands the latter before exporting, which
+  silently turns a literal `$HOME` in a message into `OME`.
+
+### Fixed
+- **A commit message is no longer parsed as shell code.** `commit` and `push` now pass
+  `"$(ARGS)"` quoted. make expands `$(ARGS)` into the recipe and hands the RESULT to bash, which
+  applied its full grammar to prose that was never escaped for it: `fix(cli): x` died with
+  `syntax error near unexpected token '('`, `a; b` ran `b` as a command, `*` globbed against the
+  repo, and a backtick or `$(...)` **executed**. Quoting costs nothing here because both commands
+  take only a message (`nargs=-1`) and bmk re-joins the args with spaces, so a single quoted word
+  round-trips unchanged and an empty `ARGS` still falls through to `BMK_COMMIT_MESSAGE` or the
+  prompt. Flag-taking targets (`test`, `run`, `custom`, ...) deliberately keep `$(ARGS)` unquoted,
+  since quoting would collapse `--human -k foo` into one argv element. `ship` also stays unquoted:
+  unlike commit/push it takes options as well as a message, so it uses `MSG=` instead.
+- **A newline in `ARGS` is now refused instead of silently truncating the commit.** This is the one
+  case quoting cannot fix: make expands `ARGS` into the recipe TEXT, so a newline becomes a recipe
+  LINE BREAK. make then ran line 1 - committing and pushing a truncated subject - and line 2 as a
+  separate shell command. The error surfaced only afterwards, once the wrong message was already
+  public. A `$(error)` now fires at parse time, before anything is staged, and names `MSG=` as the
+  fix. This had already shipped bad commit messages more than once.
+- The template's own usage header advertised `make test --verbose` as the way to forward flags. It
+  never worked: make parses a bare `--verbose` as one of its OWN options and exits with "unknown
+  option". Corrected to `make test ARGS="--verbose"`.
+- Documentation named a `COMMIT_MESSAGE` environment variable (`CONTRIBUTING.md`,
+  `DEVELOPMENT.md`) that the code has never read - it reads `BMK_COMMIT_MESSAGE`, so anyone
+  following the docs got a commit message of `chores`. `DEVELOPMENT.md` also documented `REMOTE=`,
+  where the code reads `BMK_GIT_REMOTE`, and gave `chore: update` as the non-interactive default,
+  where the code uses `chores`.
+
 ## [3.6.1] 2026-07-15 14:00:30
 
 ### Fixed

@@ -2,7 +2,7 @@
 
 The template is shipped inside the package and copied into target repos by
 `bmk install`, so a defect here reaches every bmk-managed repo and cannot be fixed
-from those repos. Four invariants are guarded:
+from those repos. Five invariants are guarded:
 
 1. The header version equals the package version. `_sync_initconf.sync_makefile_version`
    patches it on every bump, so a mismatch means the template was edited and released
@@ -16,6 +16,11 @@ from those repos. Four invariants are guarded:
    cannot overwrite each other's dependencies.
 4. The install runs before every target, so a new bmk release and any dependency
    change are picked up without anyone remembering to do anything.
+5. A commit message stays DATA. make expands $(ARGS) into the recipe and hands the
+   result to bash, so an unquoted message is parsed as code: `fix(cli): x` is a
+   syntax error, `a; b` runs `b`, and a newline commits a truncated subject and then
+   runs the rest as a command. That last one is silent until after the bad message is
+   pushed, and it has happened more than once.
 """
 
 from __future__ import annotations
@@ -224,6 +229,91 @@ def test_bmk_min_matches_the_package_version() -> None:
         f"BMK_MIN {match.group(1)!r} does not match pyproject version {version!r}; "
         "run src/bmk/adapters/stagerunner/helpers/_sync_initconf.py"
     )
+
+
+# --- a commit message is data, never code -----------------------------------
+
+
+def _recipe_lines(text: str, target: str) -> list[str]:
+    """The tab-indented recipe lines of a target.
+
+    The target name must be followed directly by the colon: a looser pattern makes
+    the alias `c` match the `codecov coverage cov:` rule instead.
+    """
+    match = re.search(rf"^{re.escape(target)}:[^\n]*\n((?:\t.*\n)+)", text, re.M)
+    assert match, f"the template must define a {target} recipe"
+    return [line.strip() for line in match.group(1).splitlines()]
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("target", ["commit", "c", "push", "psh p"])
+def test_message_targets_quote_args(target: str) -> None:
+    """commit/push pass "$(ARGS)" quoted, so bash cannot parse the message as code.
+
+    make expands $(ARGS) into the recipe and hands the RESULT to bash, which then
+    applies its full grammar to prose that was never escaped for it. Unquoted, a
+    real commit message breaks or executes: `fix(cli): x` is a syntax error, `a; b`
+    runs `b`, a backtick or $(...) EXECUTES, and `*` globs. Quoting costs nothing
+    here because both CLIs take only a message (nargs=-1) and bmk re-joins the args
+    with spaces, so a single quoted word round-trips unchanged.
+    """
+    for line in _recipe_lines(_template_text(), target):
+        assert '"$(ARGS)"' in line, f"{target!r} must quote ARGS, else bash parses the commit message as code: {line!r}"
+        assert not re.search(r"(?<!\")\$\(ARGS\)(?!\")", line), f"{target!r} has an unquoted $(ARGS): {line!r}"
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("target", ["test", "run", "custom"])
+def test_flag_targets_do_not_quote_args(target: str) -> None:
+    """Flag-taking targets keep ARGS unquoted, so multiple flags stay separate words.
+
+    The mirror image of the rule above: quoting here would collapse
+    `--human -k foo` into ONE argv element and break the target. Only targets whose
+    ARGS is always prose may be quoted.
+    """
+    for line in _recipe_lines(_template_text(), target):
+        assert '"$(ARGS)"' not in line, (
+            f"{target!r} takes flags; quoting ARGS would collapse them into one word: {line!r}"
+        )
+
+
+@pytest.mark.os_agnostic
+def test_msg_is_exported_unexpanded_as_the_commit_message() -> None:
+    """MSG reaches bmk through the environment, and `value` keeps it unexpanded.
+
+    The environment is the only channel that survives a message intact: it is not
+    word-split and never reaches a shell command line, so punctuation and newlines
+    arrive byte for byte. `$(value MSG)` is required over a plain `$(MSG)`: make
+    expands the latter first, so a literal $HOME in a message silently becomes OME.
+    """
+    text = _template_text()
+
+    assert re.search(r"^export BMK_COMMIT_MESSAGE := \$\(value MSG\)$", text, re.M), (
+        "MSG must be exported as BMK_COMMIT_MESSAGE using $(value MSG); "
+        "a plain $(MSG) would make-expand a literal $ in the message"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_a_newline_in_args_is_refused() -> None:
+    """A newline in ARGS is a hard error, raised while parsing, before any recipe runs.
+
+    This is the one case quoting cannot save: make expands ARGS into the recipe
+    TEXT, so a newline becomes a recipe LINE BREAK. make then runs line 1 - which
+    commits a truncated subject - and line 2 as a separate command. The failure is
+    silent where it matters (a wrong commit message is pushed) and loud only
+    afterwards, so it has already shipped bad commits more than once. $(error)
+    fires at parse time, so nothing is staged, committed or pushed.
+    """
+    text = _template_text()
+
+    assert re.search(r"^define _BMK_NEWLINE$", text, re.M), "the newline sentinel must exist"
+    assert re.search(r"^ifneq \(,\$\(findstring \$\(_BMK_NEWLINE\),\$\(ARGS\)\)\)$", text, re.M), (
+        "ARGS must be checked for a newline"
+    )
+    guard = re.search(r"\$\(error ([^)]*)\)", text)
+    assert guard, "the newline check must raise $(error), not merely warn"
+    assert "MSG" in guard.group(1), "the error must name MSG as the way to pass a multi-line message"
 
 
 @pytest.mark.os_agnostic

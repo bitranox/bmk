@@ -63,8 +63,14 @@
   - No parameters
 
 - **push**
-  - `REMOTE=<name>` (default: `origin`) -- git remote to push to
-  - `COMMIT_MESSAGE="..."` -- optional commit message used by the automation; if unset, the target prompts (or uses the default `chore: update` when non-interactive).
+  - `BMK_GIT_REMOTE=<name>` (default: `origin`) -- git remote to push to
+  - `BMK_GIT_BRANCH=<name>` (default: the current branch) -- branch to push
+  - `MSG="..."` -- commit message; the safe channel, passed through the environment, so any
+    punctuation and newlines survive. Equivalent to setting `BMK_COMMIT_MESSAGE` yourself.
+  - Resolution order is: trailing words / `ARGS` -> `BMK_COMMIT_MESSAGE` -> interactive prompt
+    -> `chores` when non-interactive.
+  - Do NOT put a message in `ARGS="..."`: it is re-parsed by bash, so `(`, `;`, `` ` `` and `$`
+    break or execute, and a newline is rejected by a guard in the Makefile.
 
 - **build**
   - No parameters via `make`. Advanced: call the script directly, e.g. `python scripts/build.py --no-conda --no-nix`.
@@ -156,7 +162,7 @@ Use `make test-human` or `make th` instead.
 
 **Automation notes**
 
-- `make push` runs the full test suite (`python -m scripts.test`), checks pip and dependency versions, prompts for a commit message (or reads `COMMIT_MESSAGE="..."`), and always pushes, creating an empty commit when there are no staged changes. The Textual menu (`make menu -> push`) shows the same behaviour via an input field.
+- `make push` runs the full test suite, checks pip and dependency versions, prompts for a commit message (or takes `MSG="..."`, i.e. the `BMK_COMMIT_MESSAGE` environment variable), and always pushes, creating an empty commit when there are no staged changes. The Textual menu (`make menu -> push`) shows the same behaviour via an input field.
 
 ### Versioning & Metadata
 
