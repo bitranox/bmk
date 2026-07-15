@@ -31,6 +31,39 @@ BMK := $(BMK_TOOL_DIR)/bin/bmk$(BMK_EXE)
 ARGS ?=
 
 # ──────────────────────────────────────────────────────────────
+# Commit messages: MSG= is the safe channel, ARGS= is not
+# ──────────────────────────────────────────────────────────────
+# This block MIRRORS src/bmk/makefile/Makefile and must stay in step with it; a test
+# (tests/test_makefile_template_integrity.py) asserts the two agree. This file is NOT
+# generated from that template - it installs bmk from local source instead of from PyPI -
+# so nothing copies fixes across, and it has already drifted once with real consequences:
+# `make push MSG="..."` here silently ignored MSG and committed 909aa14 as "chores",
+# discarding the message, because only the template had been fixed.
+#
+# Why it is needed at all: make expands $(ARGS) into the recipe text and hands the RESULT
+# to the shell, which then parses free-form prose as code - "fix(cli): x" is a syntax
+# error, "a; b" runs b, a backtick or $(...) EXECUTES, and a newline ends the recipe LINE,
+# so make commits a truncated subject and runs the rest as a command. MSG= never touches a
+# command line: make's `export` puts it straight into the child environment, and bmk reads
+# args -> BMK_COMMIT_MESSAGE -> prompt (git_ops.resolve_message).
+#
+# $(value MSG) yields the UNEXPANDED value, so a literal $ survives; plain $(MSG) would
+# make-expand it and turn $HOME into OME.
+ifdef MSG
+export BMK_COMMIT_MESSAGE := $(value MSG)
+endif
+
+# A newline in ARGS cannot be passed safely, so refuse it at parse time - before any
+# recipe runs, so nothing is staged, committed or pushed.
+define _BMK_NEWLINE
+
+
+endef
+ifneq (,$(findstring $(_BMK_NEWLINE),$(ARGS)))
+  $(error ARGS contains a newline, which make cannot pass to a recipe safely. Use MSG="..." for a multi-line commit message)
+endif
+
+# ──────────────────────────────────────────────────────────────
 # Ensure bmk is installed from local source into this project's tool env
 # ──────────────────────────────────────────────────────────────
 # `--editable ./` installs bmk from the local source tree, so `make` here always runs
@@ -162,17 +195,22 @@ bump: bump-patch  ## Bump patch version (default for bump)
 # Git Operations
 # ──────────────────────────────────────────────────────────────
 
+# The "$(ARGS)" quoting is LOAD-BEARING - see the commit-message block at the top, and keep
+# it identical to src/bmk/makefile/Makefile. commit/push take a MESSAGE and nothing else
+# (nargs=-1, no options), so one quoted word costs nothing: bmk re-joins args with spaces,
+# and empty ARGS still yields "" and falls through to BMK_COMMIT_MESSAGE / the prompt.
+# Flag-taking targets (test, run, custom) must stay UNQUOTED.
 .PHONY: commit c
 commit: _ensure_bmk  ## Create a git commit with timestamped message [alias: c]
-	$(BMK) commit $(ARGS)
+	$(BMK) commit "$(ARGS)"
 c: _ensure_bmk
-	$(BMK) commit $(ARGS)
+	$(BMK) commit "$(ARGS)"
 
 .PHONY: push psh p
 push: _ensure_bmk  ## Run tests, commit, and push to remote [aliases: psh, p]
-	$(BMK) push $(ARGS)
+	$(BMK) push "$(ARGS)"
 psh p: _ensure_bmk
-	$(BMK) push $(ARGS)
+	$(BMK) push "$(ARGS)"
 
 .PHONY: release rel r
 release: _ensure_bmk  ## Create a versioned release (tag + GitHub release) [aliases: rel, r]

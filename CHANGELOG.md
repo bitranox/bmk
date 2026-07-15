@@ -6,6 +6,34 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.7.1] 2026-07-15 15:19:16
+
+### Fixed
+- **`make test` works again in projects with platform-specific dependencies.** The dependency
+  sync rebuilt every requirement from its parsed parts as `name>=version`, which DROPPED the
+  PEP 508 environment marker. A dependency declared for one platform was then demanded on
+  every platform - and could not possibly install: `pywin32>=312; sys_platform == 'win32'`
+  became a bare `pywin32>=312`, which on Linux dies with "no wheels with a matching platform
+  tag (e.g. manylinux_2_43_x86_64)" and takes the whole run down at the `update_deps` stage.
+  The package is correctly absent off-platform, so it always reads as NOT INSTALLED and is
+  queued for install on every single run. Any cross-platform project hits this; found in
+  pwshpy, which declares pywin32/wmi for win32 and jeepney/systemd for linux.
+
+  `_marker_of()` now preserves the marker and appends it AFTER the version, so uv receives a
+  valid requirement and evaluates the marker itself, skipping the package cleanly
+  off-platform (verified against real uv: the marked form exits 0 on Linux, the bare form
+  fails to resolve). Order matters: `pkg>=1; sys_platform == 'win32'` is a requirement,
+  `pkg; sys_platform == 'win32'>=1` is not. This is the same bug class as the extras handling
+  beside it, already fixed once for `pyright[nodejs]`: a spec rebuilt from the bare name is
+  not the spec you declared.
+- **bmk's own Makefile no longer discards commit messages.** It is hand-authored rather than
+  generated from the bundled template, so 3.7.0's commit-message hardening never reached it:
+  `make push MSG="..."` here silently ignored `MSG` and committed the non-interactive default
+  `chores`, throwing the message away (it did exactly that to `909aa14`). It now carries the
+  same `MSG` export, `"$(ARGS)"` quoting and newline guard, and
+  `tests/test_makefile_template_integrity.py` asserts the two files agree on those
+  invariants, so the drift cannot recur silently.
+
 ## [3.7.0] 2026-07-15 14:34:47
 
 ### Added

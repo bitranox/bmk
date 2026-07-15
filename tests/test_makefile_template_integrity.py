@@ -34,9 +34,20 @@ import rtoml  # not stdlib tomllib: it does not exist on Python 3.10, this proje
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE = PROJECT_DIR / "src" / "bmk" / "makefile" / "Makefile"
 
+# bmk's OWN Makefile. It is hand-authored, not generated from the template (it installs
+# bmk from local source rather than from PyPI), so nothing propagates a template fix into
+# it. That is not hypothetical drift: the commit-message hardening landed in the template
+# only, and the very next `make push MSG="..."` in this repo silently ignored MSG and
+# committed "chores", throwing the message away.
+ROOT_MAKEFILE = PROJECT_DIR / "Makefile"
+
 
 def _template_text() -> str:
     return TEMPLATE.read_text(encoding="utf-8")
+
+
+def _root_makefile_text() -> str:
+    return ROOT_MAKEFILE.read_text(encoding="utf-8")
 
 
 def _install_recipe(text: str) -> str:
@@ -314,6 +325,47 @@ def test_a_newline_in_args_is_refused() -> None:
     guard = re.search(r"\$\(error ([^)]*)\)", text)
     assert guard, "the newline check must raise $(error), not merely warn"
     assert "MSG" in guard.group(1), "the error must name MSG as the way to pass a multi-line message"
+
+
+# --- bmk's own Makefile must not drift from the template on safety -----------
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("target", ["commit", "c", "push", "psh p"])
+def test_root_makefile_also_quotes_message_targets(target: str) -> None:
+    """bmk's own Makefile quotes the message targets too.
+
+    It is hand-authored and nothing syncs it, so the template's hardening does not
+    reach it on its own. When it lagged, `make push MSG="..."` in this repo committed
+    "chores" and discarded the message - the exact bug, in the tool that ships the fix.
+    """
+    for line in _recipe_lines(_root_makefile_text(), target):
+        assert '"$(ARGS)"' in line, f"root Makefile {target!r} must quote ARGS like the template does: {line!r}"
+
+
+@pytest.mark.os_agnostic
+def test_root_makefile_supports_msg() -> None:
+    """bmk's own Makefile exports MSG as BMK_COMMIT_MESSAGE, unexpanded, like the template.
+
+    Without this block MSG= is not ignored loudly - it is ignored SILENTLY, and the
+    commit falls back to the non-interactive default "chores".
+    """
+    text = _root_makefile_text()
+
+    assert re.search(r"^export BMK_COMMIT_MESSAGE := \$\(value MSG\)$", text, re.M), (
+        "root Makefile must export MSG as BMK_COMMIT_MESSAGE via $(value MSG), like the template"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_root_makefile_refuses_a_newline_in_args() -> None:
+    """bmk's own Makefile carries the newline guard too."""
+    text = _root_makefile_text()
+
+    assert re.search(r"^ifneq \(,\$\(findstring \$\(_BMK_NEWLINE\),\$\(ARGS\)\)\)$", text, re.M), (
+        "root Makefile must refuse a newline in ARGS, like the template"
+    )
+    assert re.search(r"\$\(error [^)]*MSG[^)]*\)", text), "the guard must $(error) and name MSG"
 
 
 @pytest.mark.os_agnostic

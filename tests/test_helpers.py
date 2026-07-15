@@ -977,7 +977,7 @@ class TestPrintInstallReport:
     @pytest.mark.os_agnostic
     def test_shows_not_installed_label(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """_print_install_report shows NOT INSTALLED for missing packages."""
-        deps_module._print_install_report([("mypkg", None, "1.0")], dry_run=False)
+        deps_module._print_install_report([("mypkg", None, "1.0", "")], dry_run=False)
         out = capsys.readouterr().out
 
         assert "NOT INSTALLED" in out
@@ -985,7 +985,7 @@ class TestPrintInstallReport:
     @pytest.mark.os_agnostic
     def test_shows_current_version(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """_print_install_report shows installed version."""
-        deps_module._print_install_report([("mypkg", "0.9", "1.0")], dry_run=False)
+        deps_module._print_install_report([("mypkg", "0.9", "1.0", "")], dry_run=False)
         out = capsys.readouterr().out
 
         assert "0.9" in out
@@ -994,7 +994,7 @@ class TestPrintInstallReport:
     @pytest.mark.os_agnostic
     def test_dry_run_prefix(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """_print_install_report prefixes output with [DRY RUN] in dry run mode."""
-        deps_module._print_install_report([("mypkg", None, "1.0")], dry_run=True)
+        deps_module._print_install_report([("mypkg", None, "1.0", "")], dry_run=True)
         out = capsys.readouterr().out
 
         assert "[DRY RUN]" in out

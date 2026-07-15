@@ -911,7 +911,7 @@ def test_find_packages_needing_install_not_installed() -> None:
     results = _find_packages_needing_install(deps, {})
 
     assert len(results) == 1
-    assert results[0] == ("missing-pkg", None, "1.0.0")
+    assert results[0] == ("missing-pkg", None, "1.0.0", "")
 
 
 @pytest.mark.os_agnostic
@@ -922,7 +922,7 @@ def test_find_packages_needing_install_outdated() -> None:
     results = _find_packages_needing_install(deps, {"old-pkg": "0.9.0"})
 
     assert len(results) == 1
-    assert results[0] == ("old-pkg", "0.9.0", "1.0.0")
+    assert results[0] == ("old-pkg", "0.9.0", "1.0.0", "")
 
 
 @pytest.mark.os_agnostic
@@ -959,6 +959,46 @@ def test_find_packages_needing_install_preserves_extras() -> None:
     assert results[0][0] == "pyright[nodejs]"
 
 
+@pytest.mark.os_agnostic
+def test_find_packages_needing_install_preserves_environment_marker() -> None:
+    """An environment marker survives into the install spec.
+
+    Without it a platform-specific dependency is demanded on EVERY platform, and
+    the install cannot succeed: a win32-only package is never installed on Linux,
+    so it always looks missing, and `uv pip install pywin32>=312` then dies with
+    "no wheels with a matching platform tag" - taking the whole `make test` down
+    in any cross-platform project. Real case: pwshpy on Linux.
+    """
+    deps = [
+        _make_dep(
+            name="pywin32",
+            current_min="312",
+            original_spec="pywin32>=312; sys_platform == 'win32'",
+        )
+    ]
+
+    results = _find_packages_needing_install(deps, {})
+
+    assert results[0] == ("pywin32", None, "312", "; sys_platform == 'win32'")
+
+
+@pytest.mark.os_agnostic
+def test_find_packages_needing_install_keeps_extras_and_marker_together() -> None:
+    """A spec carrying both an extra and a marker keeps both, each in its own field."""
+    deps = [
+        _make_dep(
+            name="lib_registry",
+            current_min="3.1.3",
+            original_spec="lib_registry[fake]>=3.1.3; sys_platform == 'win32'",
+        )
+    ]
+
+    results = _find_packages_needing_install(deps, {})
+
+    assert results[0][0] == "lib_registry[fake]"
+    assert results[0][3] == "; sys_platform == 'win32'"
+
+
 # ---------------------------------------------------------------------------
 # _run_pip_install — install target isolation
 # ---------------------------------------------------------------------------
@@ -970,7 +1010,7 @@ def test_run_pip_install_builds_uv_command(mock_run: MagicMock) -> None:
     """Builds a uv pip install command with --upgrade and package specs."""
     mock_run.return_value = _make_completed(0)
 
-    needs: list[tuple[str, str | None, str]] = [("requests", None, "2.31.0"), ("click", "8.0.0", "8.1.0")]
+    needs: list[tuple[str, str | None, str, str]] = [("requests", None, "2.31.0", ""), ("click", "8.0.0", "8.1.0", "")]
 
     exit_code = _run_pip_install(needs, "/proj/.venv/bin/python")
 
@@ -985,11 +1025,31 @@ def test_run_pip_install_builds_uv_command(mock_run: MagicMock) -> None:
 
 @pytest.mark.os_agnostic
 @patch("subprocess.run")
+def test_run_pip_install_appends_marker_after_the_version(mock_run: MagicMock) -> None:
+    """The marker follows the version, producing a valid PEP 508 requirement.
+
+    Order is not cosmetic: "pywin32>=312; sys_platform == 'win32'" is valid and lets
+    uv skip the package off-platform, while "pywin32; sys_platform == 'win32'>=312"
+    is not a requirement at all. Verified against real uv: the marked form exits 0 on
+    Linux, the bare form fails to resolve.
+    """
+    mock_run.return_value = _make_completed(0)
+
+    needs: list[tuple[str, str | None, str, str]] = [("pywin32", None, "312", "; sys_platform == 'win32'")]
+
+    _run_pip_install(needs, "/proj/.venv/bin/python")
+
+    cmd = mock_run.call_args[0][0]
+    assert "pywin32>=312; sys_platform == 'win32'" in cmd
+
+
+@pytest.mark.os_agnostic
+@patch("subprocess.run")
 def test_run_pip_install_targets_the_given_interpreter(mock_run: MagicMock) -> None:
     """Installs into the interpreter it is handed, via --python."""
     mock_run.return_value = _make_completed(0)
 
-    _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python")
+    _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
 
     cmd = mock_run.call_args[0][0]
     assert "--python" in cmd
@@ -1008,7 +1068,7 @@ def test_run_pip_install_never_targets_the_ambient_interpreter(mock_run: MagicMo
     """
     mock_run.return_value = _make_completed(0)
 
-    _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python")
+    _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
 
     cmd = mock_run.call_args[0][0]
     assert sys.executable not in cmd
@@ -1025,7 +1085,7 @@ def test_run_pip_install_never_breaks_system_packages(mock_run: MagicMock) -> No
     """
     mock_run.return_value = _make_completed(0)
 
-    _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python")
+    _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
 
     assert "--break-system-packages" not in mock_run.call_args[0][0]
 
@@ -1036,14 +1096,14 @@ def test_run_pip_install_reports_failure(mock_run: MagicMock) -> None:
     """Propagates a non-zero install exit code."""
     mock_run.return_value = _make_completed(1)
 
-    assert _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python") == 1
+    assert _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python") == 1
 
 
 @pytest.mark.os_agnostic
 @patch("subprocess.run", side_effect=OSError("uv not found"))
 def test_run_pip_install_handles_missing_uv(_mock_run: MagicMock) -> None:
     """Returns non-zero rather than raising when uv is absent from PATH."""
-    assert _run_pip_install([("requests", None, "1.0.0")], "/proj/.venv/bin/python") == 1
+    assert _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1059,7 +1119,7 @@ def test_sync_installed_packages_dry_run(
     mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Dry run shows what would be installed but does not install."""
-    mock_find.return_value = [("requests", None, "2.31.0")]
+    mock_find.return_value = [("requests", None, "2.31.0", "")]
 
     count, code = sync_installed_packages([], python="/p/bin/python", dry_run=True)
 
@@ -1077,7 +1137,7 @@ def test_sync_installed_packages_actual_run(
     mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Actual run installs and reports success."""
-    mock_find.return_value = [("requests", "1.0.0", "2.31.0")]
+    mock_find.return_value = [("requests", "1.0.0", "2.31.0", "")]
 
     count, code = sync_installed_packages([], python="/p/bin/python")
 
@@ -1095,7 +1155,7 @@ def test_sync_installed_packages_targets_the_given_interpreter(
     mock_find: MagicMock, mock_pip: MagicMock, mock_versions: MagicMock
 ) -> None:
     """Both the inspection and the install use the interpreter passed in."""
-    mock_find.return_value = [("requests", None, "2.31.0")]
+    mock_find.return_value = [("requests", None, "2.31.0", "")]
 
     sync_installed_packages([], python="/proj/.venv/bin/python")
 
@@ -1111,7 +1171,7 @@ def test_sync_installed_packages_reports_install_failure(
     mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Returns and reports a non-zero install exit code."""
-    mock_find.return_value = [("requests", None, "2.31.0")]
+    mock_find.return_value = [("requests", None, "2.31.0", "")]
 
     _count, code = sync_installed_packages([], python="/p/bin/python")
 

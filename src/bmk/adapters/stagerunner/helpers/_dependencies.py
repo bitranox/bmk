@@ -573,9 +573,24 @@ def _extras_of(spec: str) -> str:
     return "" if close_idx == -1 else spec[open_idx : close_idx + 1]
 
 
+def _marker_of(spec: str) -> str:
+    """The ``; <environment marker>`` suffix of a dependency spec, or an empty string.
+
+    The same class of bug as the extras above, with louder consequences. A spec
+    rebuilt from the bare name drops the marker, so a dependency meant for ONE
+    platform is demanded on EVERY platform - and the install then cannot succeed:
+    ``pywin32>=312; sys_platform == 'win32'`` rebuilt as ``pywin32>=312`` fails on
+    Linux with "no wheels with a matching platform tag" and takes the whole run
+    down. Keeping the marker lets uv evaluate it and skip the package on a platform
+    it was never meant for.
+    """
+    marker_idx = spec.find(";")
+    return "" if marker_idx == -1 else spec[marker_idx:]
+
+
 def _find_packages_needing_install(
     deps: list[DependencyInfo], installed_versions: dict[str, str]
-) -> list[tuple[str, str | None, str]]:
+) -> list[tuple[str, str | None, str, str]]:
     """Find packages that need installation or update.
 
     Args:
@@ -583,10 +598,11 @@ def _find_packages_needing_install(
         installed_versions: Normalized name -> version, from the target env.
 
     Returns:
-        List of (name, installed_version, required_version) tuples.
-        installed_version is None if not installed.
+        List of (name, installed_version, required_version, marker) tuples.
+        installed_version is None if not installed; marker is "" when the spec
+        carries no environment marker.
     """
-    needs_install: list[tuple[str, str | None, str]] = []
+    needs_install: list[tuple[str, str | None, str, str]] = []
 
     for dep in deps:
         if not dep.current_min:
@@ -594,25 +610,28 @@ def _find_packages_needing_install(
 
         installed = installed_versions.get(_normalize_name(dep.name))
         name_with_extras = f"{dep.name}{_extras_of(dep.original_spec)}"
+        marker = _marker_of(dep.original_spec)
 
         if installed is None:
-            needs_install.append((name_with_extras, None, dep.current_min))
+            needs_install.append((name_with_extras, None, dep.current_min, marker))
         elif compare_versions(installed, dep.current_min) == "outdated":
-            needs_install.append((name_with_extras, installed, dep.current_min))
+            needs_install.append((name_with_extras, installed, dep.current_min, marker))
 
     return needs_install
 
 
-def _print_install_report(needs_install: list[tuple[str, str | None, str]], *, dry_run: bool) -> None:
+def _print_install_report(needs_install: list[tuple[str, str | None, str, str]], *, dry_run: bool) -> None:
     """Print report of packages needing installation."""
     print(f"\n{'[DRY RUN] ' if dry_run else ''}Packages needing installation/update:\n")
 
-    for name, installed, required in sorted(needs_install):
+    for name, installed, required, marker in sorted(needs_install):
         status = "NOT INSTALLED" if installed is None else installed
-        print(f"  {name}: {status} -> >={required}")
+        # The marker is shown because it explains an entry that will then be skipped:
+        # a win32-only package always reads as NOT INSTALLED on Linux.
+        print(f"  {name}: {status} -> >={required}{marker}")
 
 
-def _run_pip_install(needs_install: list[tuple[str, str | None, str]], python: str) -> int:
+def _run_pip_install(needs_install: list[tuple[str, str | None, str, str]], python: str) -> int:
     """Install packages into ``python``'s environment.
 
     Installs into the *explicitly passed* interpreter (the project's venv), never
@@ -629,7 +648,9 @@ def _run_pip_install(needs_install: list[tuple[str, str | None, str]], python: s
         uv exit code
     """
     argv = ["uv", "pip", "install", "--python", python, "--upgrade"]
-    argv.extend(f"{name}>={required}" for name, _, required in needs_install)
+    # The marker must follow the version, not the name: "pkg>=1; sys_platform == 'win32'"
+    # is a valid PEP 508 requirement, "pkg; sys_platform == 'win32'>=1" is not.
+    argv.extend(f"{name}>={required}{marker}" for name, _, required, marker in needs_install)
 
     try:
         return subprocess.run(argv, check=False).returncode
