@@ -1,7 +1,7 @@
 [project]
 name = "bmk"
 version = "3.8.1"
-description = "Bitranox Make CLI - orchestrates build, test, clean, and custom staged scripts with layered configuration"
+description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -52,7 +52,15 @@ dependencies = [
 ]
 license = { text = "MIT" }
 authors = [{ name = "bitranox", email = "bitranox@gmail.com" }]
-keywords = ["cli", "make", "build", "test", "clean", "stagerunner", "custom-commands", "automation", "instrumentation", "script", "task-runner", "devops"]
+keywords = [
+  # What it is for. These were missing, so bmk advertised itself as a general task
+  # runner while nothing works without a pyproject.toml: wrong audience found it, and
+  # the right one could not.
+  "python", "pyproject", "uv", "pytest", "makefile", "make",
+  # What it does.
+  "build", "test", "release", "task-runner", "cli", "devops", "ci", "coverage",
+  "stagerunner", "custom-commands", "automation",
+]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",

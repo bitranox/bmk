@@ -15,12 +15,8 @@ import rtoml
 
 __all__ = [
     "CleanConfig",
-    "CoverageReportConfig",
-    "BanditConfig",
-    "PipAuditConfig",
     "PSScriptAnalyzerConfig",
     "BashateConfig",
-    "ScriptsTestConfig",
     "ToolConfig",
     "ProjectSection",
     "BuildSystemSection",
@@ -92,44 +88,20 @@ class CleanConfig:
         return cls(patterns=tuple(patterns))
 
 
-@dataclass(frozen=True)
-class CoverageReportConfig:
-    """Configuration for [tool.coverage.report] section."""
-
-    fail_under: int = 80
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CoverageReportConfig:
-        """Create from dict parsed from TOML."""
-        report_data = _get_dict(data, "report")
-        fail_under = _get_int(report_data, "fail_under", 80)
-        return cls(fail_under=fail_under)
-
-
-@dataclass(frozen=True)
-class BanditConfig:
-    """Configuration for [tool.bandit] section."""
-
-    skips: tuple[str, ...] = ()
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> BanditConfig:
-        """Create from dict parsed from TOML."""
-        skips = _get_str_list(data, "skips")
-        return cls(skips=tuple(skips))
-
-
-@dataclass(frozen=True)
-class PipAuditConfig:
-    """Configuration for [tool.pip-audit] section."""
-
-    ignore_vulns: tuple[str, ...] = ()
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PipAuditConfig:
-        """Create from dict parsed from TOML."""
-        ignore_vulns = _get_str_list(data, "ignore-vulns")
-        return cls(ignore_vulns=tuple(ignore_vulns))
+# NOTE on what is deliberately NOT here: [tool.coverage.report], [tool.bandit],
+# [tool.pip-audit] and [tool.scripts.test]. Each once had a dataclass in this file, and
+# each was dead - parsed on every load, read by nobody, covered by no test. Worse, they
+# had drifted: the [tool.scripts.test] copy claimed pytest-verbosity defaults to "-vv"
+# while the reader that actually runs pytest uses "-v", so this file answered questions
+# about bmk's behaviour incorrectly.
+#
+# Where those keys are really read: the coverage and scripts-test keys by
+# helpers/_coverage.py, in CoverageConfig.from_pyproject; pip-audit's ignored vulnerability
+# ids by project.py, in pip_audit_ignore_flags; and bandit's skips by bandit itself, since
+# bmk hands it "-c pyproject.toml" from tools.py and never parses that table at all.
+#
+# Before adding a section here, check it will actually be consumed. A second parser for a
+# key another module already owns is how the "-vv" lie got in.
 
 
 @dataclass(frozen=True)
@@ -158,25 +130,6 @@ class BashateConfig:
         max_line_length = _get_int(data, "max-line-length", 120)
         ignores = _get_str_list(data, "ignores")
         return cls(max_line_length=max_line_length, ignores=tuple(ignores))
-
-
-@dataclass(frozen=True)
-class ScriptsTestConfig:
-    """Configuration for [tool.scripts.test] section."""
-
-    pytest_verbosity: str = "-vv"
-    coverage_report_file: str = "coverage.xml"
-    src_path: str = "src"
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ScriptsTestConfig:
-        """Create from dict parsed from TOML."""
-        test_data = _get_dict(data, "test")
-        return cls(
-            pytest_verbosity=_get_str(test_data, "pytest-verbosity", "-vv"),
-            coverage_report_file=_get_str(test_data, "coverage-report-file", "coverage.xml"),
-            src_path=_get_str(test_data, "src-path", "src"),
-        )
 
 
 @dataclass(frozen=True)
@@ -305,12 +258,8 @@ class ToolConfig:
     """Configuration for the [tool] section of pyproject.toml."""
 
     clean: CleanConfig = field(default_factory=CleanConfig)
-    coverage: CoverageReportConfig = field(default_factory=CoverageReportConfig)
-    bandit: BanditConfig = field(default_factory=BanditConfig)
-    pip_audit: PipAuditConfig = field(default_factory=PipAuditConfig)
     psscriptanalyzer: PSScriptAnalyzerConfig = field(default_factory=PSScriptAnalyzerConfig)
     bashate: BashateConfig = field(default_factory=BashateConfig)
-    scripts: ScriptsTestConfig = field(default_factory=ScriptsTestConfig)
     poetry: PoetryConfig = field(default_factory=PoetryConfig)
     pdm: PdmConfig = field(default_factory=PdmConfig)
     uv: UvConfig = field(default_factory=UvConfig)
@@ -320,12 +269,8 @@ class ToolConfig:
         """Create from dict parsed from TOML."""
         return cls(
             clean=CleanConfig.from_dict(_get_dict(data, "clean")),
-            coverage=CoverageReportConfig.from_dict(_get_dict(data, "coverage")),
-            bandit=BanditConfig.from_dict(_get_dict(data, "bandit")),
-            pip_audit=PipAuditConfig.from_dict(_get_dict(data, "pip-audit")),
             psscriptanalyzer=PSScriptAnalyzerConfig.from_dict(_get_dict(data, "psscriptanalyzer")),
             bashate=BashateConfig.from_dict(_get_dict(data, "bashate")),
-            scripts=ScriptsTestConfig.from_dict(_get_dict(data, "scripts")),
             poetry=PoetryConfig.from_dict(_get_dict(data, "poetry")),
             pdm=PdmConfig.from_dict(_get_dict(data, "pdm")),
             uv=UvConfig.from_dict(_get_dict(data, "uv")),

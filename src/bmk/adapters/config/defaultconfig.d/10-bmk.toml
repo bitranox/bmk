@@ -1,5 +1,5 @@
 # ==============================================================================
-# bmk Core Settings - Stagerunner and package configuration
+# bmk Core Settings - stagerunner behaviour
 # ==============================================================================
 #
 # Settings are loaded via lib_layered_config and can be overridden via:
@@ -13,26 +13,115 @@
 #   Format: <SLUG>___<SECTION>__<KEY>=<VALUE>
 #
 #   Examples:
-#     BMK___BMK__OVERRIDE_DIR=/path/to/overrides
 #     BMK___BMK__PACKAGE_NAME=my_package
+#     BMK___BMK__SHOW_WARNINGS=false
 #
 #   In .env files, omit the slug prefix:
-#     BMK__OVERRIDE_DIR=/path/to/overrides
 #     BMK__PACKAGE_NAME=my_package
+#     BMK__SHOW_WARNINGS=false
+#
+# THIS FILE IS NOT WHERE MOST OF BMK IS CONFIGURED. It holds two settings. Almost
+# everything bmk does is driven by YOUR project's pyproject.toml - which gates run, what
+# they scan, what they ignore, and what the pipeline itself contains. That surface is
+# summarised at the bottom of this file and documented in full in
+# docs/pyproject-reference.md.
 
 [bmk]
-# Per-project directory for stage script overrides.
-# If scripts matching the command prefix exist here, they replace
-# the bundled scripts entirely for that command.
-# Empty string = use stagerunner default ($BMK_PROJECT_DIR/makescripts).
-override_dir = ""
 
-# Override the auto-derived package name (from pyproject.toml).
-# Empty string = auto-derive.
+# Override the package name bmk derives from your pyproject.toml.
+#
+# Default: "" (auto-derive from [project].name, with '-' normalised to '_')
+# Effect:  the derived name is what bandit scans (`bandit -r src/<package>`) and what
+#          coverage measures (`--source=<package>`). Get it wrong and the gates run
+#          against a path that does not exist, or measure nothing and report success.
+# When to set: only when the import package does not match the distribution name -
+#          e.g. distribution `my-tool` importing as `mytool_core`, or a src layout whose
+#          directory differs from [project].name. Auto-derivation handles the normal case.
+# Consequences: this is a blunt override. It applies to every stage that needs the
+#          package name, so a wrong value silently narrows coverage rather than failing
+#          loudly. Prefer fixing [project].name if you can.
 package_name = ""
 
-# Show warnings from passing parallel jobs in stagerunner output.
-# When true, output from successful parallel scripts is scanned for
-# lines containing "warning" (case-insensitive) and displayed after
-# the pass/fail summary.
+# Show warnings from PASSING parallel stages in the stagerunner summary.
+#
+# Default: true
+# Effect:  stages that share an order number run in parallel and their output is captured.
+#          A stage that PASSES normally has its output discarded. With this on, the
+#          captured output of passing stages is scanned for lines containing "warning"
+#          (case-insensitive) and printed after the pass/fail summary.
+# When to set false: on a noisy project where a dependency emits deprecation warnings you
+#          have already triaged, and the repeated wall of text is training you to ignore
+#          the summary. Turning it off is a deliberate trade: you stop seeing warnings
+#          from stages that passed, including new ones.
+# Recommendation: leave it on. A warning from a passing gate is the cheapest early signal
+#          you get - it is what a deprecation looks like one release before it is a
+#          failure. In CI the extra lines cost nothing; on a local loop, prefer fixing or
+#          filtering the warning at its source over silencing the whole channel.
 show_warnings = true
+
+# ==============================================================================
+# What bmk reads from YOUR pyproject.toml
+# ==============================================================================
+#
+# These are NOT settings of this file - you put them in your own project's
+# pyproject.toml. Listed here because this is where people look for "what can I
+# configure". Full detail, including exact key names, types and defaults, is in
+# docs/pyproject-reference.md.
+#
+# Required:
+#   [project].name                        -> derives the package name (see above)
+#   [project].version                     -> `bump` and `release` ABORT without it
+#   [project.optional-dependencies].dev   -> bmk syncs `.[dev]` into your .venv, falling
+#                                            back to `.` when there is no dev extra. Your
+#                                            test tooling (pytest, pytest-cov) must be
+#                                            declared here: the suite runs in YOUR venv,
+#                                            not in bmk's.
+#
+# Read if present, to configure a gate (all optional):
+#   [tool.scripts.test]                   -> pytest-verbosity (default "-v"),
+#                                            exclude-markers (default "integration"),
+#                                            coverage-report-file, src-path
+#   [tool.coverage.report].fail_under     -> coverage threshold (default 80)
+#   [tool.coverage.run].source            -> what coverage measures (default ["src"])
+#   [tool.pip-audit].ignore-vulns         -> vulnerability ids pip-audit must ignore
+#   [tool.bandit].skips                   -> bandit check ids (B###) to skip
+#   [tool.bashate]                        -> max-line-length, ignores (for .sh files)
+#   [tool.psscriptanalyzer].exclude-rules -> PSScriptAnalyzer rules (for .ps1 files)
+#   [tool.clean].patterns                 -> extra paths `bmk clean` removes
+#   [tool.git].default-remote             -> remote `release` pushes to (default "origin")
+#   [tool.pyright].exclude                -> bmk APPENDS its venv dirs to this list and
+#                                            WRITES THE FILE BACK. It is the one key bmk
+#                                            edits. Without it, pyright's own `**/.*`
+#                                            default already skips the venvs; WITH it,
+#                                            pyright's defaults are replaced, so the venvs
+#                                            would be walked and a strict run can take
+#                                            hours. Untouched if [tool.pyright].include
+#                                            is set.
+#
+# WATCH THE SPELLING. [tool.scripts.test] uses hyphens (pytest-verbosity,
+# exclude-markers), but [tool.coverage.report].fail_under uses an underscore, because that
+# is coverage's own key. A hyphen/underscore mix-up does not error - the key is simply
+# never seen and you silently get the default.
+#
+# NOTE these two are different vocabularies and neither tool reads the other's table:
+#   [tool.pip-audit].ignore-vulns takes PYSEC / GHSA / CVE ids.
+#   [tool.bandit].skips takes bandit check ids (B101, B603, ...).
+# A CVE id in [tool.bandit].skips is silently inert - it looks like protection and does
+# nothing.
+#
+# Extending the pipeline itself:
+#   [tool.bmk.pipelines.<prefix>]         -> add / remove / replace stages of any
+#                                            pipeline (test, push, release, or your own
+#                                            `bmk custom <name>`). Each stage is
+#                                            { name, order, argv } - argv is a LIST, never
+#                                            a shell string, so your stages get the same
+#                                            no-shell guarantee as the built-in ones.
+#                                            A bmk_makescripts/stages.toml with
+#                                            [pipelines.<prefix>] wins over pyproject.
+#
+# Dependency tables bmk scans for the `deps` gate: [project].dependencies,
+# [project.optional-dependencies], [dependency-groups], [tool.poetry], [tool.pdm],
+# [tool.uv].
+#
+# A missing or malformed pyproject.toml never raises: bmk degrades rather than failing
+# your build with a parse error.
