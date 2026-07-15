@@ -6,6 +6,26 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.8.1] 2026-07-15 18:45:01
+
+### Fixed
+- **A new bmk release is now picked up immediately, instead of whenever uv's index cache
+  happened to revalidate.** `_ensure_bmk` runs before EVERY target for exactly one reason -
+  so `--reinstall` re-resolves and you never run a bmk that has quietly drifted - but
+  `--reinstall` re-resolves against uv's CACHED package index, so a release published
+  minutes ago was invisible and you silently kept the old bmk. Measured with 3.8.0 already
+  on PyPI: `uv tool install "bmk>=3.7.1"` still installed **3.7.1**, and the Makefile's own
+  claim that a new release "is picked up automatically" was therefore false for as long as
+  the cache stayed warm. The install now refreshes bmk's own index metadata
+  (`--refresh-package bmk`), which costs about 1s per make.
+
+  The refresh is skipped when `UV_OFFLINE` is set. That is not politeness: uv REFUSES the
+  combination ("the argument `UV_OFFLINE` cannot be used with `--refresh`"), so an
+  unconditional flag would have failed every `make` for an offline or air-gapped user, with
+  an error blaming an environment variable they never connected to this Makefile - and no
+  way to opt out. Offline keeps installing from the cache, which is what an offline user
+  wants regardless.
+
 ## [3.8.0] 2026-07-15 18:09:41
 
 ### Changed

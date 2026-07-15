@@ -170,6 +170,28 @@ def test_tool_env_is_shared_not_per_project() -> None:
 
 
 @pytest.mark.os_agnostic
+def test_a_new_bmk_release_is_seen_immediately() -> None:
+    """The install refreshes bmk's cached index metadata - and skips that when offline.
+
+    `--reinstall` re-resolves, but against uv's CACHED index, so a release published
+    minutes ago stays invisible: measured, with 3.8.0 already on PyPI,
+    `uv tool install "bmk>=3.7.1"` still installed 3.7.1. That silently defeats the one
+    thing running the install before EVERY target is meant to buy.
+
+    The offline exemption is not optional politeness: uv REFUSES the combination ("the
+    argument UV_OFFLINE cannot be used with --refresh"), so an unconditional flag would
+    fail every make for an offline user, blaming an env var they never linked to it.
+    """
+    text = _template_text()
+
+    assert re.search(r"^BMK_REFRESH := \$\(if \$\(UV_OFFLINE\),,--refresh-package bmk\)$", text, re.M), (
+        "the refresh must be present, and must be omitted when UV_OFFLINE is set"
+    )
+    for attempt in re.findall(r"uv tool install[^|]*", _install_recipe(text)):
+        assert "$(BMK_REFRESH)" in attempt, f"install attempt would use a stale index: {attempt.strip()!r}"
+
+
+@pytest.mark.os_agnostic
 def test_bmk_is_resolved_from_uvs_own_bin_dir() -> None:
     """bmk is invoked via the path uv reports, not a bare name and not a guessed one.
 

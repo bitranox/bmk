@@ -1,4 +1,4 @@
-# BMK MAKEFILE 3.8.0
+# BMK MAKEFILE 3.8.1
 # do not alter this file - it might be overwritten on new versions of BMK
 # if You want to alter it, remove the first line # BMK MAKEFILE 1.0 - then it is a custom makefile and will not be overwritten
 # bmk Makefile — thin wrapper using `uv tool install` for persistent bmk
@@ -106,10 +106,16 @@ endif
 # ──────────────────────────────────────────────────────────────
 # Ensure bmk (and ONLY bmk) is installed, once per machine
 # ──────────────────────────────────────────────────────────────
-# This runs before EVERY target, on purpose: `--reinstall` re-resolves the `bmk` spec
-# against PyPI, so each make picks up a new bmk release with nothing to remember and no
-# version marker to go stale. It costs a couple of seconds; that is the price of never
-# running against a bmk that has quietly drifted.
+# This runs before EVERY target, on purpose: `--reinstall` re-resolves the `bmk` spec so
+# each make picks up a new bmk release with nothing to remember and no version marker to
+# go stale. It costs a couple of seconds; that is the price of never running against a bmk
+# that has quietly drifted.
+#
+# `--reinstall` alone does NOT deliver that, which is why $(BMK_REFRESH) exists: uv
+# re-resolves against its CACHED package index, so a release published minutes ago is
+# invisible and you silently keep the old bmk until the cache revalidates (measured: with
+# 3.8.0 on PyPI, `uv tool install "bmk>=3.7.1"` still installed 3.7.1). Refreshing just
+# bmk's own metadata makes "picked up automatically" true immediately, for ~1s per make.
 #
 # NOTE what is NOT here: the project. bmk is installed on its own, so its env holds bmk's
 # toolchain and nothing else. The project's dependencies live in the project's own venv
@@ -139,12 +145,19 @@ endif
 #
 # BMK_MIN is kept as a floor even though nothing can cap bmk any more (that needed the
 # co-resolution this recipe no longer does). It is inert insurance and costs nothing.
-BMK_MIN := 3.8.0
+BMK_MIN := 3.8.1
+
+# Refresh bmk's cached index metadata so a new release is seen the moment it exists -
+# EXCEPT when uv is in offline mode, where uv refuses the combination outright ("the
+# argument UV_OFFLINE cannot be used with --refresh") and would fail every single make
+# with an error blaming an env var the user never connected to this flag. Offline then
+# keeps working from the cache, which is exactly what an offline user wants anyway.
+BMK_REFRESH := $(if $(UV_OFFLINE),,--refresh-package bmk)
 
 .PHONY: _ensure_bmk
 _ensure_bmk:
-	@uv tool install --reinstall --force "bmk>=$(BMK_MIN)" \
-	  || uv tool install --reinstall --force "bmk>=$(BMK_MIN)"
+	@uv tool install --reinstall --force $(BMK_REFRESH) "bmk>=$(BMK_MIN)" \
+	  || uv tool install --reinstall --force $(BMK_REFRESH) "bmk>=$(BMK_MIN)"
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS
