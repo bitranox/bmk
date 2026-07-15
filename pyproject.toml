@@ -1,32 +1,75 @@
 [project]
 name = "bmk"
-version = "3.8.1"
+version = "3.8.2"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
+# bmk declares its whole toolchain here, by design: it ships no [dev] extra, because the
+# tools ARE the product. Keep the groups below - an undifferentiated list is how `textual`
+# (orphan of a TUI deleted in 3.0.0) and `twine` (never invoked in bmk's entire history) sat
+# here unnoticed, dragging 22 transitive packages into every install. Before adding a line,
+# say which group it belongs to; if it fits none, it does not belong here.
 dependencies = [
-    "rich-click>=1.9.8",
+    # --- imported by bmk's own code ---------------------------------------------------
+    "rich-click>=1.9.8",           # the CLI surface
+    "click>=8.4.2",                # imported directly in cli/main.py for cli.main(obj=...);
+                                   # ALSO the CVE-2026-7246 floor, so this line is load-bearing
+                                   # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.3.2",
     "lib_log_rich>=6.3.5",
     "lib_layered_config>=5.6.0",
-    "btx_lib_mail>=1.3.2",
-    "pydantic>=2.13.4",
-    "orjson>=3.11.9",
-    "tomlkit>=0.15.0",
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
-    "hypothesis>=6.156.6",
+    "btx_lib_mail>=1.3.2",         # send-email / send-notification
+    "pydantic>=2.13.4",            # the pipeline-overlay and email schemas
+    "orjson>=3.11.9",              # JSON: PyPI responses, CLI output
+    "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
+    "tomlkit>=0.15.0",             # TOML round-trip EDIT: preserves comments when bmk writes back
+    "httpx2>=2.7.0",               # PyPI version lookups
+    "python-dotenv>=1.2.2",        # reads CODECOV_TOKEN from .env
+
+    # --- invoked as tools, never imported ---------------------------------------------
+    # These look unused to an import scan. They are not: each one is a stage. The
+    # distribution name and the executable differ for several - import-linter ships
+    # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
     "ruff>=0.15.21",
-    "pyright[nodejs]>=1.1.411",
+    "pyright[nodejs]>=1.1.411",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
+    "pip-audit>=2.10.1",
+    "import-linter>=2.13",
+    "shellcheck-py>=0.11.0.1",
+    "shfmt-py>=4.0.0",
+    "bashate>=2.1.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",           # a pytest PLUGIN, activated by CI's --cov flags
+    "hypothesis>=6.156.6",         # property tests in bmk's own suite
     # Floor stays at 1.5.0, NOT 1.5.1: PyPI yanked 1.5.1 (upstream shipped unintended breaking
     # changes and will re-release them as a new major). A yanked release is invisible to a range
     # resolve, and nothing newer exists, so a >=1.5.1 floor has ZERO candidates and makes bmk
-    # itself uninstallable - which bricks `make` in every repo that installs bmk with its deps.
-    # This is a toolchain floor, not a CVE floor, so 1.5.0 gives up nothing. Do not raise it to
-    # 1.5.1 in a dependency sweep; only a real 1.5.2+ release should move it.
+    # itself uninstallable - which bricked `make` fleet-wide once already. This is a toolchain
+    # floor, not a CVE floor, so 1.5.0 gives up nothing. Do not raise it in a dependency sweep;
+    # only a real 1.5.2+ release should move it.
     "build>=1.5.0",
-    "twine>=6.2.0",
+
+    # --- neither imported nor invoked, and here on purpose -----------------------------
+    # `python -m build` resolves the backend from [build-system].requires into its own
+    # ephemeral venv, which pip-audit never sees - pip-audit audits the project's real .venv.
+    # Declaring hatchling again HERE is what puts it in the audited env, so a future hatchling
+    # CVE is actually caught. Not redundant with [build-system].
+    "hatchling>=1.31.0",
+    # A transitive of pip-audit, floored for CVE-2025-66471, CVE-2025-66418, CVE-2026-21441.
+    # bmk never imports urllib3; httpx2 is its HTTP client. This is a floor, not a choice of
+    # library, so "replace it with httpx2" is not a thing that can be done.
+    "urllib3>=2.7.0",
+
+    # --- deliberately absent ------------------------------------------------------------
+    # twine: bmk never uploads to PyPI itself. `release` tags, pushes and calls `gh release`;
+    # the publish is pypa/gh-action-pypi-publish in the release workflow. twine was declared
+    # here for years and invoked nowhere - `git log -S twine` over src/ finds no commit that
+    # ever wired it up. Removing it also removed keyring and the jaraco-* chain, which is why
+    # the jaraco-context CVE floor went with it: that package only ever arrived via twine, and
+    # a pin here INSTALLS a package rather than merely bounding it.
+    #
+    # textual: orphan of scripts/menu.py, a TUI deleted in the 3.0.0 rewrite. Zero imports.
+    #
     # codecov-cli is disabled, not dropped: it requires click<8.3.0, which drags click back to
     # 8.2.1 - the version with CVE-2026-7246 (command injection in click.edit(), fixed in 8.3.3).
     # Nothing else here caps click, so with this line active the audit gate goes red on every
@@ -34,21 +77,6 @@ dependencies = [
     # not this CLI, and "bmk codecov" resolves codecovcli from PATH and only warns when absent.
     # Re-enable once codecov-cli relaxes its click<8.3.0 pin.
     # "codecov-cli>=11.3.1",
-    # Transitive CVE pins
-    "click>=8.4.2",                # CVE-2026-7246
-    "pip-audit>=2.10.1",
-    "textual>=8.2.8",
-    "import-linter>=2.13",
-    "shellcheck-py>=0.11.0.1",
-    "shfmt-py>=4.0.0",
-    "bashate>=2.1.1",
-    "rtoml>=0.13.0",
-    "httpx2>=2.7.0",
-    "python-dotenv>=1.2.2",
-    "hatchling>=1.31.0",           # needed for bild system - additionally added here by design
-    # Transitive CVE pins (genuine transitive deps needing minimum version)
-    "jaraco-context>=6.1.2",       # CVE-2026-23949  (twine -> keyring -> jaraco.context)
-    "urllib3>=2.7.0",              # CVE-2025-66471, CVE-2025-66418, CVE-2026-21441  (twine, codecov-cli, pip-audit)
 ]
 license = { text = "MIT" }
 authors = [{ name = "bitranox", email = "bitranox@gmail.com" }]

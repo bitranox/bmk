@@ -1,365 +1,124 @@
-# Module Reference: Architecture & File Index
+# System Documentation: bmk
+
+> Architecture level only. WHY, and how the parts fit. The code owns the HOW.
 
 ## Status
 
-Complete (v1.1.2+)
+Complete.
 
----
+## Purpose (Why)
 
-## Related Files
+A Python project needs the same dozen chores in every repo: format, lint, type-check, audit,
+test, bump, tag, release. `make` is the right front door for them - it is everywhere, and it
+gives a newcomer one thing to type. What rots is the inside: a make recipe is a string handed
+to a shell, so the chores end up as hundreds of lines of bash, per repo, drifting apart, and
+breaking differently on Windows.
 
-### Domain Layer
-- `src/bmk/domain/enums.py`  -  Type-safe enums (OutputFormat, DeployTarget)
-- `src/bmk/domain/errors.py`  -  Error types
-- `src/bmk/domain/stages.py`  -  Stage/pipeline domain types
+bmk keeps the front door and replaces what is behind it. The Makefile becomes a thin,
+versioned wrapper that delegates to a Python runner, so the same `make test` behaves
+identically on Linux, macOS and Windows, and no repo has a shell script to maintain.
 
-### Application Layer
-- `src/bmk/application/ports.py`  -  Callable Protocol definitions for adapter functions
+## Context
 
-### Adapters Layer
-- `src/bmk/adapters/config/loader.py`  -  Configuration loading with LRU caching
-- `src/bmk/adapters/config/deploy.py`  -  Configuration deployment
-- `src/bmk/adapters/config/display.py`  -  Configuration display (TOML/JSON output, redaction)
-- `src/bmk/adapters/config/overrides.py`  -  CLI `--set` override parsing and deep-merge
-- `src/bmk/adapters/email/sender.py`  -  SMTP email with EmailConfig (Pydantic)
-- `src/bmk/adapters/email/validation.py`  -  Email recipient validation
-- `src/bmk/adapters/logging/setup.py`  -  lib_log_rich initialization
-- `src/bmk/adapters/cli/`  -  CLI adapter package:
-  - `__init__.py`  -  Public facade
-  - `constants.py`  -  Shared constants
-  - `exit_codes.py`  -  POSIX exit codes (ExitCode IntEnum)
-  - `traceback.py`  -  Traceback state management
-  - `context.py`  -  Click context helpers
-  - `root.py`  -  Root command group
-  - `main.py`  -  Entry point
-  - `commands/info.py`  -  info, fail commands
-  - `commands/config.py`  -  config, config-deploy, config-generate-examples commands
-  - `commands/_shared.py`  -  Script resolution, execution with BMK env vars, VIRTUAL_ENV isolation
-  - `commands/testsuite_cmd.py`  -  test, t commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
-  - `commands/test_integration_cmd.py`  -  testintegration, testi, ti commands (--human flag, BMK_OUTPUT_FORMAT; JSON mode suppresses output on success)
-  - `commands/email/`  -  send-email, send-notification commands (subpackage)
-  - `commands/logging.py`  -  logdemo command
-  - `commands/install_cmd.py`  -  install command (deploy the bundled Makefile) + prerequisite check
-  - `commands/_prerequisites.py`  -  per-OS external-tool detection and install hints
-  - `commands/ensure_cmd.py` / `commands/_ensure.py`  -  ensure command (install missing external tools per-OS)
-  - `commands/ship_cmd.py`  -  ship command (CI-gated push + release; gh run lookup parsed with orjson)
-
-### Adapters Layer (In-Memory / Testing)
-- `src/bmk/adapters/memory/__init__.py`  -  Public facade + Protocol conformance assertions
-- `src/bmk/adapters/memory/config.py`  -  In-memory config adapters
-- `src/bmk/adapters/memory/email.py`  -  In-memory email adapters
-- `src/bmk/adapters/memory/logging.py`  -  In-memory logging (no-op)
-
-### Composition Layer
-- `src/bmk/composition/__init__.py`  -  Wires adapters to ports
-
-### Entry Points
-- `src/bmk/__main__.py`  -  Thin shim for `python -m`
-- `src/bmk/__init__.py`  -  Public API exports
-- `src/bmk/__init__conf__.py`  -  Package metadata constants
-
-### Configuration Defaults
-- `src/bmk/adapters/config/defaultconfig.toml`  -  Base defaults
-- `src/bmk/adapters/config/defaultconfig.d/40-layered-config.toml`  -  lib_layered_config integration docs
-- `src/bmk/adapters/config/defaultconfig.d/50-mail.toml`  -  Email defaults
-- `src/bmk/adapters/config/defaultconfig.d/90-logging.toml`  -  Logging defaults
-
-### Tests
-- `tests/test_behaviors.py`  -  Domain function tests
-- `tests/test_cache_effectiveness.py`  -  LRU cache behavior tests
-- `tests/test_cli.py`  -  CLI command tests
-- `tests/test_config_overrides.py`  -  `--set` parsing tests
-- `tests/test_display.py`  -  Config display formatting tests
-- `tests/test_exit_codes.py`  -  ExitCode enum tests
-- `tests/test_mail.py`  -  Email configuration and sending tests
-- `tests/test_metadata.py`  -  Package metadata tests
-- `tests/test_module_entry.py`  -  `python -m` entry tests
-- `tests/test_ports.py`  -  Protocol conformance tests
-- `tests/test_scripts.py`  -  Build script tests
-
----
+bmk drives a project it does not belong to. It reads that project's `pyproject.toml`,
+provisions the project's virtualenv with uv, and runs external tools (ruff, pyright, bandit,
+pip-audit, import-linter, pytest, shellcheck, PSScriptAnalyzer) against it, then talks to git,
+GitHub and PyPI to cut a release. It ships the Makefile that invokes it.
 
 ## Architecture
 
-### Layer Assignments
+**Where it fits:** a CLI application in clean-architecture layers. bmk is consumed as a tool
+rather than as a library - it exposes only a small public surface (`get_config`,
+`print_info`), and a project talks to it through `make`, not through imports.
 
-| Directory/Module       | Layer       | Responsibility                                |
-|------------------------|-------------|-----------------------------------------------|
-| `domain/`              | Domain      | Pure logic  -  no I/O, logging, or frameworks |
-| `application/ports.py` | Application | Protocol definitions for adapters             |
-| `adapters/config/`     | Adapters    | Configuration loading, deployment, display    |
-| `adapters/email/`      | Adapters    | SMTP email sending                            |
-| `adapters/logging/`    | Adapters    | lib_log_rich initialization                   |
-| `adapters/cli/`        | Adapters    | Click CLI framework integration               |
-| `adapters/memory/`     | Adapters    | In-memory implementations for testing         |
-| `composition/`         | Composition | Wires adapters to ports                       |
+**Layers** (enforced by import-linter contracts, not convention):
 
-### Import Enforcement
-
-Layer boundaries enforced via `import-linter` contracts in `pyproject.toml`:
-- **Domain is pure**: Cannot import from adapters or composition
-- **Clean Architecture layers**: Validates dependency direction (composition → adapters → application → domain)
-
-Run `lint-imports` to verify compliance.
-
----
-
-## Exit Codes
-
-POSIX-conventional exit codes defined in `adapters/cli/exit_codes.py`:
-
-| Code | Name                | Usage                                     |
-|------|---------------------|-------------------------------------------|
-| 0    | `SUCCESS`           | Command completed successfully            |
-| 1    | `GENERAL_ERROR`     | Unhandled exception, general failure      |
-| 2    | `FILE_NOT_FOUND`    | Attachment or file not found              |
-| 13   | `PERMISSION_DENIED` | Cannot write to target directory          |
-| 22   | `INVALID_ARGUMENT`  | Invalid CLI argument or section not found |
-| 69   | `SMTP_FAILURE`      | SMTP delivery failed                      |
-| 78   | `CONFIG_ERROR`      | Missing required configuration            |
-| 110  | `TIMEOUT`           | Operation timed out                       |
-| 130  | `SIGNAL_INT`        | Interrupted (SIGINT/Ctrl+C)               |
-| 141  | `BROKEN_PIPE`       | Output pipe closed                        |
-| 143  | `SIGNAL_TERM`       | Terminated (SIGTERM)                      |
-
----
-
-## CLI Commands
-
-### Root Command
-
-**Command:** `bmk`
-
-| Option                         | Description                                 |
-|--------------------------------|---------------------------------------------|
-| `--version`                    | Show version and exit                       |
-| `--traceback / --no-traceback` | Show full Python traceback on errors        |
-| `--profile NAME`               | Load configuration from a named profile     |
-| `--set SECTION.KEY=VALUE`      | Override configuration setting (repeatable) |
-| `-h, --help`                   | Show help and exit                          |
-
-### Stage Runner Commands (test, testintegration, build, clean, push, etc.)
-
-Commands that delegate to the stage runner (`test`, `testintegration`, `build`, `clean`,
-`push`, `release`, `dependencies`, etc.) respect `BMK_OUTPUT_FORMAT`:
-
-| Behaviour              | JSON mode (default)                                     | Text mode (`--human` / `BMK_OUTPUT_FORMAT=text`) |
-|------------------------|---------------------------------------------------------|--------------------------------------------------|
-| Stage runner output    | Captured; shown only on stage failure                   | Shown immediately (verbose)                      |
-| Makefile version check | Auto-accepts updates                                    | Prompts interactively                            |
-| Dependency checking    | Silent (no report or summary)                           | Full report displayed                            |
-| Pytest                 | `--tb=short -q --no-header`; coverage report suppressed | Default verbose output                           |
-
-### info
-
-Print resolved package metadata.
-
-**Exit codes:** 0
-
-### fail
-
-Trigger intentional `RuntimeError` for testing error handling.
-
-**Exit codes:** 1
-
-### config
-
-Display merged configuration from all sources.
-
-| Option                   | Description                    |
-|--------------------------|--------------------------------|
-| `--format [human\|json]` | Output format (default: human) |
-| `--section NAME`         | Show only specific section     |
-
-**Exit codes:** 0, 22 (section not found)
-
-### config-deploy
-
-Deploy default configuration to system or user directories.
-
-| Option                       | Description                              |
-|------------------------------|------------------------------------------|
-| `--target [app\|host\|user]` | Target layer(s)  -  required, repeatable |
-| `--force`                    | Overwrite existing files                 |
-| `--profile NAME`             | Deploy to profile subdirectory           |
-
-**Exit codes:** 0, 1, 13 (permission denied)
-
-### config-generate-examples
-
-Generate example configuration files.
-
-| Option              | Description                   |
-|---------------------|-------------------------------|
-| `--destination DIR` | Target directory  -  required |
-| `--force`           | Overwrite existing files      |
-
-**Exit codes:** 0, 1
-
-### send-email
-
-Send email using configured SMTP settings.
-
-| Option                               | Description                     |
-|--------------------------------------|---------------------------------|
-| `--to ADDRESS`                       | Recipient (repeatable)          |
-| `--subject TEXT`                     | Subject line  -  required       |
-| `--body TEXT`                        | Plain-text body                 |
-| `--body-html TEXT`                   | HTML body                       |
-| `--from ADDRESS`                     | Override sender                 |
-| `--attachment PATH`                  | File to attach (repeatable)     |
-| `--smtp-host HOST:PORT`              | Override SMTP host (repeatable) |
-| `--smtp-username USER`               | Override username               |
-| `--smtp-password PASS`               | Override password               |
-| `--use-starttls / --no-use-starttls` | Override STARTTLS               |
-| `--timeout SECONDS`                  | Override timeout                |
-
-**Exit codes:** 0, 2 (file not found), 22, 69 (SMTP failure), 78 (no SMTP hosts)
-
-### send-notification
-
-Send simple plain-text notification email.
-
-| Option                               | Description                     |
-|--------------------------------------|---------------------------------|
-| `--to ADDRESS`                       | Recipient (repeatable)          |
-| `--subject TEXT`                     | Subject  -  required            |
-| `--message TEXT`                     | Message  -  required            |
-| `--from ADDRESS`                     | Override sender                 |
-| `--smtp-host HOST:PORT`              | Override SMTP host (repeatable) |
-| `--smtp-username USER`               | Override username               |
-| `--smtp-password PASS`               | Override password               |
-| `--use-starttls / --no-use-starttls` | Override STARTTLS               |
-| `--timeout SECONDS`                  | Override timeout                |
-
-**Exit codes:** 0, 22, 69 (SMTP failure), 78 (no SMTP hosts)
-
-### logdemo
-
-Run logging demonstration.
-
-| Option         | Description                      |
-|----------------|----------------------------------|
-| `--theme NAME` | Logging theme (default: classic) |
-
-**Exit codes:** 0
-
----
-
-## Profile Validation
-
-Profile names (`--profile` option) are validated using `lib_layered_config.validate_profile_name()`.
-
-### validate_profile()
-
-**Location:** `adapters/config/loader.py`
-
-```python
-def validate_profile(profile: str, max_length: int | None = None) -> None:
-    """Validate profile name using lib_layered_config."""
+```mermaid
+graph TD
+    C[composition - wires adapters to ports] --> A[adapters - CLI, config, stagerunner, email, logging]
+    A --> P[application - port protocols]
+    P --> D[domain - pure types, enums, errors, stage model]
 ```
 
-| Parameter    | Type          | Default  | Description                                 |
-|--------------|---------------|----------|---------------------------------------------|
-| `profile`    | `str`         | required | Profile name to validate                    |
-| `max_length` | `int \| None` | 64       | Maximum length (DEFAULT_MAX_PROFILE_LENGTH) |
+Dependencies point inward only, and the domain imports neither adapters nor composition. The
+contracts fail the build, so this is a fact rather than an aspiration.
 
-### Validation Rules
+**Main components:**
 
-| Rule             | Description                                          |
-|------------------|------------------------------------------------------|
-| Maximum length   | 64 characters (configurable via `max_length`)        |
-| Character set    | ASCII alphanumeric, hyphens (`-`), underscores (`_`) |
-| Start character  | Must start with alphanumeric character               |
-| Empty string     | Rejected                                             |
-| Windows reserved | CON, PRN, AUX, NUL, COM1-9, LPT1-9 rejected          |
-| Path traversal   | `/`, `\`, `..` rejected                              |
-| Control chars    | Rejected                                             |
+| Component             | Responsibility (one line)                                                                |
+|-----------------------|------------------------------------------------------------------------------------------|
+| domain                | The vocabulary: what a stage and a pipeline are, the enums, the errors. No I/O.          |
+| application           | The port protocols an adapter must satisfy.                                              |
+| stagerunner           | Resolves a command into ordered stages and runs them; owns the environment they run in.  |
+| stagerunner/registry  | Which stages make up which pipeline, and at what order.                                  |
+| stagerunner/overrides | Lets a project add, remove or replace stages from TOML.                                  |
+| stagerunner/venv      | Provisions and syncs the project's own venv, and keeps it out of git and the type-check. |
+| stagerunner/tools     | Turns a stage into an argv list for an external tool.                                    |
+| cli                   | The rich-click surface; one command per pipeline.                                        |
+| config                | Layered configuration, deployment and display.                                           |
+| memory                | In-memory adapters, shipped in src so consumers can test against them (see ADR 0001).    |
+| composition           | Wires the adapters to the ports.                                                         |
+| makefile              | The template bmk installs into a project, and re-installs when it updates.               |
 
-### Error Handling
+**How a command runs:**
 
-Raises `ValueError` with descriptive message on invalid input.
-
----
-
-## Email Configuration
-
-### EmailConfig Fields
-
-The `EmailConfig` Pydantic model (`adapters/email/sender.py`) provides validated, immutable email configuration:
-
-| Field                          | Type          | Default | Description                          |
-|--------------------------------|---------------|---------|--------------------------------------|
-| `smtp_hosts`                   | `list[str]`   | `[]`    | SMTP servers in `host[:port]` format |
-| `from_address`                 | `str \| None` | `None`  | Default sender address               |
-| `recipients`                   | `list[str]`   | `[]`    | Default recipient addresses          |
-| `smtp_username`                | `str \| None` | `None`  | SMTP authentication username         |
-| `smtp_password`                | `str \| None` | `None`  | SMTP authentication password         |
-| `use_starttls`                 | `bool`        | `True`  | Enable STARTTLS negotiation          |
-| `timeout`                      | `float`       | `30.0`  | Socket timeout in seconds            |
-| `raise_on_missing_attachments` | `bool`        | `True`  | Raise on missing attachment files    |
-| `raise_on_invalid_recipient`   | `bool`        | `True`  | Raise on invalid recipient addresses |
-
-### Attachment Security Fields
-
-| Field                                    | Type                      | Default      | Description                                   |
-|------------------------------------------|---------------------------|--------------|-----------------------------------------------|
-| `attachment_allowed_extensions`          | `frozenset[str] \| None`  | `None`       | Whitelist of allowed extensions               |
-| `attachment_blocked_extensions`          | `frozenset[str] \| None`  | `None`       | Blacklist of blocked extensions               |
-| `attachment_allowed_directories`         | `frozenset[Path] \| None` | `None`       | Whitelist of allowed source directories       |
-| `attachment_blocked_directories`         | `frozenset[Path] \| None` | `None`       | Blacklist of blocked directories              |
-| `attachment_max_size_bytes`              | `int \| None`             | `26_214_400` | Maximum file size (25 MiB), `None` to disable |
-| `attachment_allow_symlinks`              | `bool`                    | `False`      | Whether symlinks are permitted                |
-| `attachment_raise_on_security_violation` | `bool`                    | `True`       | Raise or skip on security violation           |
-
-**Notes:**
-- `None` values use `btx_lib_mail`'s OS-specific defaults (blocked extensions/directories)
-- Empty arrays `[]` in TOML configuration are coerced to `None`
-- `max_size_bytes = 0` is coerced to `None` (disable size checking)
-- String paths are converted to `Path` objects during validation
-
-### Configuration Loading
-
-`load_email_config_from_dict()` handles the nested `[email.attachments]` TOML section:
-
-```python
-# TOML structure:
-# [email]
-# smtp_hosts = ["smtp.example.com:587"]
-# [email.attachments]
-# max_size_bytes = 10485760
-
-config = load_email_config_from_dict(config_dict)
-# Flattens to: attachment_max_size_bytes = 10485760
+```mermaid
+graph TD
+    M[make test] --> B[bmk test]
+    B --> V[provision + sync the project venv]
+    V --> R[resolve stages: built-ins + the project's TOML overlay]
+    R --> E[engine: run stages by order, parallel within an order]
+    E --> T[external tools, argv only, never a shell]
 ```
 
----
+## Key Decisions (Why this way)
 
-## Testing Infrastructure
+- **Decision:** the runner is Python, not shell. **Why:** the same code path then runs on
+  every OS, so behaviour cannot diverge between a bash and a PowerShell variant of the same
+  stage. **Trade-off:** a Python process to start before any work happens.
 
-### In-Memory Adapters
+- **Decision:** every stage is an argv list; `shell=True` appears nowhere. **Why:** a shell
+  re-parses whatever it is handed, so data becomes code - punctuation in a commit message was
+  enough to truncate and push the wrong one. **Trade-off:** no shell conveniences (globbing,
+  pipelines) inside a stage; a stage that wants them must ask for them explicitly.
 
-The `adapters/memory/` package provides lightweight implementations for testing:
+- **Decision:** bmk's environment holds bmk's toolchain and nothing of the project's; the
+  project's dependencies live in the project's own venv, and that is what the tests, the
+  type-checker and the audit all run against. **Why:** see ADR 0002 - while the two resolved
+  together, a project dependency could silently backtrack bmk to an ancient release, a yanked
+  transitive could stop bmk installing at all, and the suite ran in an environment neither the
+  type-checker nor the audit inspected. **Trade-off:** the project must declare its own test
+  tooling.
 
-| Module              | Protocols Satisfied                                                         |
-|---------------------|-----------------------------------------------------------------------------|
-| `memory/config.py`  | `GetConfig`, `GetDefaultConfigPath`, `DeployConfiguration`, `DisplayConfig` |
-| `memory/email.py`   | `SendEmail`, `SendNotification`, `LoadEmailConfigFromDict`                  |
-| `memory/logging.py` | `InitLogging`                                                               |
+- **Decision:** stages are grouped by an order number; stages sharing an order run in
+  parallel. **Why:** the independent checks (lint, types, security, tests) are the slow ones
+  and do not need each other. **Trade-off:** parallel stages cannot share stdout, so their
+  output is captured and replayed.
 
-Use `composition.build_testing()` to wire all in-memory adapters.
+- **Decision:** JSON output by default; capture tool output and show it only when a stage
+  fails. **Why:** a passing gate should be one line, and a failing one should be the only
+  thing on screen. **Trade-off:** an interactive user has to ask for `--human`.
 
-### Test Fixtures (conftest.py)
+- **Decision:** a project extends a pipeline through a TOML overlay, not by dropping in a
+  script. **Why:** the previous script-override mechanism meant every project maintained
+  shell again, which is the problem bmk exists to remove. **Trade-off:** an overlay can only
+  compose stages; anything genuinely novel belongs in a tool the stage calls.
 
-| Fixture                   | Purpose                                        |
-|---------------------------|------------------------------------------------|
-| `config_factory`          | Creates real `Config` instances from test data |
-| `inject_config`           | Injects config into CLI path                   |
-| `cli_runner`              | Fresh `CliRunner` per test                     |
-| `strip_ansi`              | Strips ANSI escape codes from output           |
-| `clear_config_cache`      | Clears LRU cache before tests                  |
-| `managed_traceback_state` | Resets/restores traceback configuration        |
+- **Decision:** the Makefile is a versioned template that regenerates itself. **Why:** a
+  copy-pasted Makefile drifts per repo, and a fix then has to be applied by hand everywhere.
+  **Trade-off:** local edits to it are overwritten, so a project that needs its own must opt
+  out by removing the version marker.
 
----
+## Dependencies
 
-**Last Updated:** 2026-02-24 (JSON mode output suppression, VIRTUAL_ENV isolation)
+uv (required - there is no pip fallback), git, and the GitHub CLI for release gating.
+Internally: rich-click and click, pydantic, orjson, rtoml and tomlkit, httpx2,
+python-dotenv, and the bitranox libraries lib_cli_exit_tools, lib_log_rich,
+lib_layered_config and btx_lib_mail. The gate tools it drives are listed in Context.
+
+## Links
+
+- [ADR 0001](../adr/0001-memory-adapters-in-src.md) - in-memory adapters in src
+- [ADR 0002](../adr/0002-bmk-env-holds-bmk-alone.md) - bmk's env holds bmk alone, and is shared
+- [pyproject reference](../pyproject-reference.md) - what bmk reads from a project
+- [CLI reference](../cli-reference.md) - the commands themselves

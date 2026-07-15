@@ -6,6 +6,45 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.8.2] 2026-07-15 19:54:07
+
+### Removed
+- **Two dead dependencies, and 22 packages with them: 95 -> 73.** Both were declared and
+  never used, in an environment every repo installs.
+
+  `textual` was the orphan of `scripts/menu.py`, a 637-line TUI deleted in the 3.0.0 rewrite;
+  the dependency was never pruned. Its only remaining trace was a string in a test fixture.
+  `make menu` is gone from the docs with it - it was documented in four places and had no
+  target, no command and no module behind it.
+
+  `twine` was never invoked at any point in bmk's history (`git log -S twine` over `src/`
+  finds nothing). bmk does not upload to PyPI itself: `release` tags, pushes and calls
+  `gh release`, and the publish is `pypa/gh-action-pypi-publish` in the release workflow.
+
+  Removing twine also removed `keyring` and the `jaraco-*` chain, which is why the
+  `jaraco-context` CVE floor went too: that package only ever reached the tree via
+  twine -> keyring. A floor in `[project].dependencies` INSTALLS a package rather than merely
+  bounding it, so leaving it would have dragged jaraco-context back in to guard nothing. The
+  `urllib3` floor stays - pip-audit genuinely pulls it - and its comment no longer credits
+  twine or the disabled codecov-cli.
+
+### Changed
+- **`[project].dependencies` is now grouped by WHY each dep is there**: imported by bmk,
+  invoked as a tool but never imported, present on purpose though neither, or deliberately
+  absent. An undifferentiated list is how both dead entries hid: most of bmk's dependencies
+  are tools it shells out to, so an import scan calls the whole toolchain unused and no one
+  trusts the result. The awkward cases are now stated where they are read - `click` is both
+  imported and a CVE floor, `hatchling` is duplicated from `[build-system]` so that pip-audit
+  (which audits the project venv, not build's ephemeral one) can see it, `pytest-cov` is a
+  plugin rather than an executable, and `import-linter`/`shellcheck-py`/`shfmt-py` ship
+  executables under different names.
+- `docs/systemdesign/module_reference.md` regenerated to the architecture-only template.
+  It was a file index - every path, exit code and CLI option - which duplicates what the code
+  already states and therefore rots: it declared itself "Complete (v1.1.2+)" at v3.8.1, with
+  roughly half its paths pointing at files that no longer exist. It now carries the layer
+  contract, how a command resolves and runs, and the decisions with their trade-offs, and no
+  file paths at all. 371 -> 123 lines.
+
 ## [3.8.1] 2026-07-15 18:45:01
 
 ### Fixed
