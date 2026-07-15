@@ -6,6 +6,22 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.6.1] 2026-07-15 14:00:30
+
+### Fixed
+- **bmk is installable again: its `build` floor no longer points at a yanked release.** PyPI yanked
+  `build` 1.5.1 (upstream shipped unintended breaking changes and plans to re-release them as a new
+  major version). A yanked release is invisible to a range resolve and nothing newer exists, so
+  bmk's `build>=1.5.1` floor had zero candidates and `uv tool install "bmk>=3.6.0"` failed outright
+  with "your requirements are unsatisfiable". Because the Makefile installs bmk together with the
+  project's dependencies before every target, this bricked `make` entirely - no test, no lint, no
+  build - in every repo on bmk 3.6.0, without a single line changing in those repos.
+
+  The floor is now `build>=1.5.0`, the newest release upstream still stands behind. This is a
+  toolchain floor and not a CVE floor, so nothing is given up. The pin carries an inline comment
+  explaining why it must not be raised back to 1.5.1 by a routine dependency sweep; only a real
+  1.5.2+ release should move it.
+
 ## [3.6.0] 2026-07-14 20:28:03
 
 ### Fixed
