@@ -132,17 +132,33 @@ def latest_installed_patch(minor: str, cwd: Path) -> str | None:
     return best[1] if best else None
 
 
+_VERSION_PROBE = "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+
+
 def venv_version(venv: Path) -> str | None:
-    """``X.Y.Z`` of an existing venv, from its ``pyvenv.cfg``, or None."""
-    cfg = venv / "pyvenv.cfg"
-    if not cfg.is_file():
+    """``X.Y.Z`` the venv's interpreter ACTUALLY reports, or None.
+
+    Deliberately NOT ``pyvenv.cfg``'s ``version_info``: that text is written once, at
+    creation, and then goes stale. uv builds a venv against the MINOR alias
+    (``.../cpython-3.12-linux.../bin``), so ``uv python upgrade 3.12`` migrates the venv onto
+    the new patch simply by moving what that alias resolves to - the interpreter becomes
+    3.12.13 while ``version_info`` still reads 3.12.12. Measured, both halves:
+
+        venv on the 3.12 alias   -> pyvenv.cfg 3.12.12, interpreter 3.12.12
+        uv python upgrade 3.12   -> installs 3.12.13, repoints the alias
+        same venv, untouched     -> pyvenv.cfg 3.12.12, interpreter 3.12.13
+
+    Trusting the text would rebuild a venv uv had ALREADY upgraded: a full re-resolve, in
+    every repo, on every patch release, for nothing. It also inverts the design - because
+    ``upgrade`` migrates alias-built venvs by itself, a new patch needs no rebuild at all
+    and only a MINOR change does. Asking the interpreter costs one subprocess and is true in
+    both directions.
+    """
+    python = venv_python(venv)
+    if not python.is_file():
         return None
-    for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
-        key, _, value = line.partition("=")
-        if key.strip() == "version_info":
-            # uv writes a bare X.Y.Z; CPython's own venv writes X.Y.Z.final.0.
-            return ".".join(value.strip().split(".")[:3]) or None
-    return None
+    raw = _run_capture([str(python), "-c", _VERSION_PROBE], venv.parent)
+    return raw.strip() or None if raw else None
 
 
 def is_venv(venv: Path) -> bool:

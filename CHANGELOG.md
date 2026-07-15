@@ -6,6 +6,32 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.10.1] 2026-07-16 01:15:25
+
+### Fixed
+- **A new Python patch no longer rebuilds every venv for nothing.** 3.10.0 decided whether the
+  venv was current by reading `pyvenv.cfg`'s `version_info`. That text is written once, at
+  creation, and then goes stale - so it reported a mismatch against a venv uv had *already*
+  upgraded, and forced a full re-resolve in every repo on every patch release.
+
+  uv builds a venv against the MINOR alias (`.../cpython-3.12-linux.../bin`), so
+  `uv python upgrade 3.12` migrates existing venvs onto the new patch just by repointing what
+  that alias resolves to. Measured, both halves:
+
+  ```
+  venv on the 3.12 alias  -> pyvenv.cfg 3.12.12, interpreter 3.12.12
+  uv python upgrade 3.12  -> installs 3.12.13, repoints the alias
+  same venv, untouched    -> pyvenv.cfg 3.12.12, interpreter 3.12.13
+  ```
+
+  `venv_version` now asks the interpreter (`sys.version_info`) instead of trusting the text, so
+  it sees 3.12.13 and leaves the venv alone. One subprocess, true in both directions.
+
+  This also inverts the cost of the feature, in your favour: because `upgrade` migrates
+  alias-built venvs by itself, **a new patch needs no rebuild at all** - the venv is already on
+  it. Only a MINOR change (a classifier moving 3.14 -> 3.15) still forces one, which is the case
+  that genuinely cannot be done in place.
+
 ## [3.10.0] 2026-07-16 00:49:30
 
 ### Added

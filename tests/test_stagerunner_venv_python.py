@@ -10,6 +10,7 @@ apart, which is the same class of defect as a gate resolving the wrong interpret
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -142,23 +143,51 @@ def test_latest_installed_patch_none_on_garbage_json(monkeypatch: pytest.MonkeyP
 
 
 # ---------------------------------------------------------------------------
-# venv_version: what the existing venv actually is
+# venv_version: ask the interpreter, never pyvenv.cfg's text
+#
+# uv builds a venv against the MINOR alias, so `uv python upgrade` migrates an existing
+# venv onto the new patch by repointing that alias - while pyvenv.cfg's version_info,
+# written once at creation, keeps reporting the old one. Measured:
+#     venv on the 3.12 alias  -> pyvenv.cfg 3.12.12, interpreter 3.12.12
+#     uv python upgrade 3.12
+#     same venv, untouched    -> pyvenv.cfg 3.12.12, interpreter 3.12.13
+# Reading the text would rebuild a venv uv had already upgraded, in every repo, on every
+# patch release. These pin that the text is NOT the source of truth.
 # ---------------------------------------------------------------------------
 
 
-def test_venv_version_reads_pyvenv_cfg(tmp_path: Path) -> None:
+def _fake_venv(tmp_path: Path, *, cfg_says: str) -> Path:
     v = tmp_path / ".venv"
-    v.mkdir()
-    (v / "pyvenv.cfg").write_text("home = /x\nversion_info = 3.14.0\n", encoding="utf-8")
-    assert venv_mod.venv_version(v) == "3.14.0"
+    (v / ("Scripts" if os.name == "nt" else "bin")).mkdir(parents=True)
+    venv_mod.venv_python(v).write_text("", encoding="utf-8")
+    (v / "pyvenv.cfg").write_text(f"home = /x\nversion_info = {cfg_says}\n", encoding="utf-8")
+    return v
 
 
-def test_venv_version_handles_a_four_part_version_info(tmp_path: Path) -> None:
-    """uv writes `version_info = 3.14.0.final.0` in some versions; keep the X.Y.Z part."""
-    v = tmp_path / ".venv"
-    v.mkdir()
-    (v / "pyvenv.cfg").write_text("version_info = 3.14.0.final.0\n", encoding="utf-8")
-    assert venv_mod.venv_version(v) == "3.14.0"
+def test_venv_version_asks_the_interpreter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    v = _fake_venv(tmp_path, cfg_says="3.12.12")
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns("3.12.13\n"))
+
+    assert venv_mod.venv_version(v) == "3.12.13"
+
+
+def test_venv_version_ignores_a_stale_pyvenv_cfg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The exact post-upgrade state: cfg says 3.12.12, the interpreter is 3.12.13.
+
+    Returning the cfg text here is what would trigger a needless full rebuild.
+    """
+    v = _fake_venv(tmp_path, cfg_says="3.12.12")
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns("3.12.13\n"))
+
+    assert venv_mod.venv_version(v) != "3.12.12"
+
+
+def test_venv_version_none_when_the_interpreter_will_not_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A broken venv reports nothing, so the caller leaves it alone rather than guessing."""
+    v = _fake_venv(tmp_path, cfg_says="3.14.0")
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(None))
+
+    assert venv_mod.venv_version(v) is None
 
 
 def test_venv_version_none_when_absent(tmp_path: Path) -> None:
