@@ -20,6 +20,7 @@ same name. See [cli-reference.md](cli-reference.md) for the options each accepts
 | `make commit\|c`                  | `[MESSAGE...]` or `MSG="..."`; env: `BMK_COMMIT_MESSAGE`                                    | Create a git commit with timestamped message         |
 | `make push\|psh\|p`               | `[MESSAGE...]` or `MSG="..."`; env: `BMK_GIT_REMOTE` (=origin), `BMK_GIT_BRANCH` (=current) | Run tests, commit, and push to remote                |
 | `make release\|rel\|r`            |                                                                                             | Tag vX.Y.Z, push, create GitHub release via `gh`     |
+| `make ship\|sh`                   | `[--ci-workflow NAME]` `[--release-workflow NAME]`; `[MESSAGE...]` or `MSG="..."`           | Push, wait for CI, release, wait for release CI      |
 | `make dependencies\|deps\|d`      | `[--update\|-u]`; subcommands: `[update\|u]`                                                | Check and list project dependencies                  |
 | `make dependencies-update`        |                                                                                             | Update dependencies to latest versions               |
 | `make config`                     | `[--format {human\|json}]` `[--section SECTION]`                                            | Show current merged configuration                    |

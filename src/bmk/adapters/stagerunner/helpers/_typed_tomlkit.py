@@ -18,7 +18,7 @@ explicit annotation is what converts the one into the other.
 
 Use this for EDITING a TOML file, where comments and formatting must survive.
 For merely READING configuration, use ``_toml_config.load_pyproject_config``,
-which parses into typed dataclasses via rtoml.
+which parses into typed Pydantic models via rtoml.
 """
 
 from __future__ import annotations

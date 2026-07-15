@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import cast
 
 import orjson
 from lib_layered_config import Config
+from pydantic import BaseModel, ConfigDict, Field
 
 CoercedValue = str | int | float | bool | None | list[object] | dict[str, object]
-"""Union of types that :func:`coerce_value` can produce."""
+"""Union of types that :func:`coerce_value` can produce.
+
+``dict``/``list`` are in here deliberately: ``--set`` takes JSON, so
+``--set sec.key='{"a": 1}'`` is a legitimate override value, not an untyped leak.
+"""
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigOverride:
-    """A single parsed configuration override."""
+class ConfigOverride(BaseModel):
+    """A single parsed configuration override, straight off the CLI boundary.
 
-    section: str
-    key_path: tuple[str, ...]
+    The constraints below are a safety net for direct construction. They are NOT the main
+    validation: :func:`parse_override` checks the same things first, because it can quote
+    the offending input ("Invalid override 'a=b': section name is empty"), and a caller
+    fixing a typo needs the string they typed, not a field name.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    section: str = Field(min_length=1)
+    key_path: tuple[str, ...] = Field(min_length=1)
     value: CoercedValue
 
 

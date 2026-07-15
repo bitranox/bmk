@@ -36,13 +36,13 @@ def test_get_permission_defaults_returns_library_defaults_when_not_configured(
 
     defaults = get_permission_defaults(config)
 
-    assert defaults["app_directory"] == 0o755
-    assert defaults["app_file"] == 0o644
-    assert defaults["host_directory"] == 0o755
-    assert defaults["host_file"] == 0o644
-    assert defaults["user_directory"] == 0o700
-    assert defaults["user_file"] == 0o600
-    assert defaults["enabled"] is True
+    assert defaults.app_directory == 0o755
+    assert defaults.app_file == 0o644
+    assert defaults.host_directory == 0o755
+    assert defaults.host_file == 0o644
+    assert defaults.user_directory == 0o700
+    assert defaults.user_file == 0o600
+    assert defaults.enabled is True
 
 
 @pytest.mark.os_agnostic
@@ -64,11 +64,11 @@ def test_get_permission_defaults_reads_from_config(
 
     defaults = get_permission_defaults(config)
 
-    assert defaults["user_directory"] == 0o750
-    assert defaults["user_file"] == 0o640
-    assert defaults["enabled"] is False
+    assert defaults.user_directory == 0o750
+    assert defaults.user_file == 0o640
+    assert defaults.enabled is False
     # Non-overridden values use library defaults
-    assert defaults["app_directory"] == 0o755
+    assert defaults.app_directory == 0o755
 
 
 @pytest.mark.os_agnostic
@@ -185,8 +185,8 @@ def test_get_permission_defaults_accepts_octal_strings(
 
     defaults = get_permission_defaults(config)
 
-    assert defaults["user_directory"] == 0o750
-    assert defaults["user_file"] == 0o640
+    assert defaults.user_directory == 0o750
+    assert defaults.user_file == 0o640
 
 
 # ======================== CLI Option Parsing Tests ========================

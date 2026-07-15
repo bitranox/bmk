@@ -15,6 +15,7 @@ from lib_layered_config import (
     DEFAULT_USER_DIR_MODE,
     DEFAULT_USER_FILE_MODE,
 )
+from pydantic import BaseModel, ConfigDict
 
 from bmk.domain.enums import DeployTarget
 
@@ -65,45 +66,68 @@ def _get_mode(section: dict[str, int | str | bool], key: str, default: int) -> i
     return parse_mode(raw, default)
 
 
-def get_permission_defaults(config: Config) -> dict[str, int | bool]:
+class PermissionDefaults(BaseModel):
+    """The deploy permission modes, one field per layer.
+
+    A fixed schema, so it is a model rather than a dict. As a dict it was indexed with a
+    constructed key - ``defaults[f"{layer}_directory"]`` - which needed an int() cast and a
+    comment arguing the cast was safe. Neither is needed once the fields are typed, and a
+    typo in a layer name is now a static error rather than a KeyError at deploy time.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    app_directory: int = DEFAULT_APP_DIR_MODE
+    app_file: int = DEFAULT_APP_FILE_MODE
+    # lib_layered_config defines no separate HOST_* constants: the host layer shares the
+    # app layer's defaults, both world-readable (755/644). Intentional, see CLAUDE.md
+    # "Deployment Permissions".
+    host_directory: int = DEFAULT_APP_DIR_MODE
+    host_file: int = DEFAULT_APP_FILE_MODE
+    user_directory: int = DEFAULT_USER_DIR_MODE
+    user_file: int = DEFAULT_USER_FILE_MODE
+    enabled: bool = True
+
+    def modes_for(self, target: DeployTarget) -> tuple[int, int]:
+        """Return (dir_mode, file_mode) for one layer."""
+        return {
+            DeployTarget.APP: (self.app_directory, self.app_file),
+            DeployTarget.HOST: (self.host_directory, self.host_file),
+            DeployTarget.USER: (self.user_directory, self.user_file),
+        }[target]
+
+
+def get_permission_defaults(config: Config) -> PermissionDefaults:
     """Load permission defaults from [lib_layered_config.default_permissions].
 
-    Reads configurable permission defaults for each deployment layer.
-    Falls back to lib_layered_config library defaults if not configured.
+    Reads configurable permission defaults for each deployment layer, falling back to
+    lib_layered_config's own defaults where the key is absent or unparseable.
 
     Args:
         config: Configuration object with merged settings.
 
     Returns:
-        Dictionary with keys:
-            - app_directory: Directory mode for app layer (default 0o755)
-            - app_file: File mode for app layer (default 0o644)
-            - host_directory: Directory mode for host layer (default 0o755)
-            - host_file: File mode for host layer (default 0o644)
-            - user_directory: Directory mode for user layer (default 0o700)
-            - user_file: File mode for user layer (default 0o600)
-            - enabled: Whether permission setting is enabled (default True)
+        A PermissionDefaults; every field has a default, so this never fails.
 
     Example:
         >>> from lib_layered_config import Config
         >>> config = Config({}, {})  # Empty config
-        >>> defaults = get_permission_defaults(config)
-        >>> defaults["user_directory"] == 0o700
+        >>> get_permission_defaults(config).user_directory == 0o700
         True
     """
     section = config.get("lib_layered_config", {}).get("default_permissions", {})
-    # NOTE: lib_layered_config does not define separate HOST_* constants.
-    # Host layer shares defaults with app layer (both world-readable: 755/644).
-    # This is intentional per CLAUDE.md "Deployment Permissions" documentation.
-    return {
-        "app_directory": _get_mode(section, "app_directory", DEFAULT_APP_DIR_MODE),
-        "app_file": _get_mode(section, "app_file", DEFAULT_APP_FILE_MODE),
-        "host_directory": _get_mode(section, "host_directory", DEFAULT_APP_DIR_MODE),
-        "host_file": _get_mode(section, "host_file", DEFAULT_APP_FILE_MODE),
-        "user_directory": _get_mode(section, "user_directory", DEFAULT_USER_DIR_MODE),
-        "user_file": _get_mode(section, "user_file", DEFAULT_USER_FILE_MODE),
-        "enabled": section.get("enabled", True),
-    }
+    # Each mode is read through _get_mode rather than handed to Pydantic raw: a mode may be
+    # written as 0o755, "0o755", "755" or 493, and a bad one must fall back to the default
+    # with a warning rather than fail the deploy.
+    return PermissionDefaults(
+        app_directory=_get_mode(section, "app_directory", DEFAULT_APP_DIR_MODE),
+        app_file=_get_mode(section, "app_file", DEFAULT_APP_FILE_MODE),
+        host_directory=_get_mode(section, "host_directory", DEFAULT_APP_DIR_MODE),
+        host_file=_get_mode(section, "host_file", DEFAULT_APP_FILE_MODE),
+        user_directory=_get_mode(section, "user_directory", DEFAULT_USER_DIR_MODE),
+        user_file=_get_mode(section, "user_file", DEFAULT_USER_FILE_MODE),
+        enabled=bool(section.get("enabled", True)),
+    )
 
 
 def get_modes_for_target(
@@ -141,14 +165,9 @@ def get_modes_for_target(
         >>> dir_mode == 0o700
         True
     """
-    defaults = get_permission_defaults(config)
-    layer = target.value  # "app", "host", or "user"
-
-    # defaults always contains int values for all layer keys (get_permission_defaults
-    # uses lib_layered_config defaults as fallbacks), so cast is safe here.
-    dir_mode: int = dir_mode_override if dir_mode_override is not None else int(defaults[f"{layer}_directory"])
-    file_mode: int = file_mode_override if file_mode_override is not None else int(defaults[f"{layer}_file"])
-
+    dir_default, file_default = get_permission_defaults(config).modes_for(target)
+    dir_mode = dir_mode_override if dir_mode_override is not None else dir_default
+    file_mode = file_mode_override if file_mode_override is not None else file_default
     return dir_mode, file_mode
 
 

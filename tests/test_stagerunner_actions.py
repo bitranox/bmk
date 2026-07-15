@@ -54,6 +54,32 @@ def test_run_argv_resolves_bare_name_tool_against_env_path(tmp_path: Path) -> No
     assert "resolved" in sink.getvalue()
 
 
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal-0 liveness probe")
+def test_run_argv_kills_the_child_when_reading_its_output_raises(tmp_path: Path) -> None:
+    # text=True decodes strictly, so a tool emitting one undecodable byte raises
+    # UnicodeDecodeError while run_argv is iterating proc.stdout. Before the finally
+    # killed it, that abandoned a LIVE child: the stage failed but the tool kept running
+    # unreaped. The child reports its own pid so this asserts on the real process rather
+    # than patching subprocess.
+    pid_file = tmp_path / "child.pid"
+    code = (
+        "import sys, os, time\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "sys.stdout.buffer.write(b'\\xff\\n')\n"
+        "sys.stdout.buffer.flush()\n"
+        "time.sleep(30)\n"
+    )
+
+    with pytest.raises(UnicodeDecodeError):
+        run_argv([sys.executable, "-c", code], _ctx(tmp_path), CapturingSink())
+
+    child_pid = int(pid_file.read_text())
+    with pytest.raises(ProcessLookupError):
+        # Killed AND reaped by the finally, so the pid is gone - not merely a zombie.
+        os.kill(child_pid, 0)
+
+
 def test_run_argv_raises_when_bare_tool_not_found(tmp_path: Path) -> None:
     # An unresolvable tool is left unchanged so the spawn raises the original error
     # (FileNotFoundError / WinError 2), rather than being silently swallowed.

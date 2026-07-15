@@ -8,10 +8,10 @@ up-to-date and identifies potential upgrades.
 
 Contents
 --------
-* ``DependencyInfo`` – captures a dependency's current constraint and latest version.
-* ``check_dependencies`` – main entry point that checks all dependencies.
-* ``print_report`` – renders a formatted report of dependency status.
-* ``update_dependencies`` – updates outdated dependencies to latest versions.
+* ``DependencyInfo`` - captures a dependency's current constraint and latest version.
+* ``check_dependencies`` - main entry point that checks all dependencies.
+* ``print_report`` - renders a formatted report of dependency status.
+* ``update_dependencies`` - updates outdated dependencies to latest versions.
 
 System Role
 -----------
@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DependencyInfo",
+    "DependencyStatus",
     "check_dependencies",
     "compare_versions",
     "fetch_latest_version",
@@ -48,6 +50,21 @@ __all__ = [
     "sync_installed_packages",
     "update_dependencies",
 ]
+
+
+class DependencyStatus(str, Enum):
+    """How one declared dependency compares to the latest release on PyPI.
+
+    A ``str`` Enum (not ``StrEnum``: the floor is Python 3.10), so members compare and hash
+    equal to their value and the report tables keep working unchanged.
+    """
+
+    UP_TO_DATE = "up-to-date"
+    OUTDATED = "outdated"
+    PINNED = "pinned"
+    UNKNOWN = "unknown"
+    ERROR = "error"
+
 
 # HTTP status codes
 _HTTP_NOT_FOUND = 404
@@ -73,7 +90,7 @@ class DependencyInfo:
     constraint: str
     current_min: str
     latest: str
-    status: str  # "up-to-date", "outdated", "pinned", "unknown", "error"
+    status: DependencyStatus
     original_spec: str = ""  # Original dependency specification string
     upper_bound: str = ""  # Upper version bound if specified (e.g., "<9" means "9")
 
@@ -230,10 +247,10 @@ def _version_gte(version_a: str, version_b: str) -> bool:
     return a_padded >= b_padded
 
 
-def compare_versions(current: str, latest: str) -> str:
+def compare_versions(current: str, latest: str) -> DependencyStatus:
     """Compare two version strings and return status."""
     if not current or not latest:
-        return "unknown"
+        return DependencyStatus.UNKNOWN
 
     current_parts = _parse_version_tuple(current)
     latest_parts = _parse_version_tuple(latest)
@@ -244,8 +261,8 @@ def compare_versions(current: str, latest: str) -> str:
     latest_padded = latest_parts + (0,) * (max_len - len(latest_parts))
 
     if current_padded >= latest_padded:
-        return "up-to-date"
-    return "outdated"
+        return DependencyStatus.UP_TO_DATE
+    return DependencyStatus.OUTDATED
 
 
 def _extract_dependencies_from_list(
@@ -258,7 +275,7 @@ def _extract_dependencies_from_list(
     for dep in deps:
         if not dep:
             continue
-        # Skip direct URL references (PEP 440) — not on PyPI
+        # Skip direct URL references (PEP 440) - not on PyPI
         if " @ " in dep:
             continue
 
@@ -270,24 +287,24 @@ def _extract_dependencies_from_list(
         # Fetch latest version (respecting upper bound if present)
         latest_absolute = fetch_latest_version(name)
         if latest_absolute is None:
-            status = "error"
+            status = DependencyStatus.ERROR
             latest_str = "not found"
         elif not min_version:
-            status = "unknown"
+            status = DependencyStatus.UNKNOWN
             latest_str = latest_absolute
         elif upper_bound and _version_gte(latest_absolute, upper_bound):
             # Latest version exceeds our upper bound - check for updates within range
             latest_in_range = _fetch_latest_version_below(name, upper_bound)
             if latest_in_range is None:
-                status = "pinned"
+                status = DependencyStatus.PINNED
                 latest_str = f"{latest_absolute} (pinned <{upper_bound})"
             elif _version_gte(min_version, latest_in_range):
                 # We're at the latest version within the allowed range
-                status = "pinned"
+                status = DependencyStatus.PINNED
                 latest_str = f"{latest_absolute} (pinned <{upper_bound})"
             else:
                 # There's a newer version within the allowed range
-                status = "outdated"
+                status = DependencyStatus.OUTDATED
                 latest_str = f"{latest_in_range} (max <{upper_bound}, absolute: {latest_absolute})"
         else:
             # No upper bound constraint or latest is within range
@@ -398,7 +415,7 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
 
     for source, source_deps in sorted(by_source.items()):
         # Filter if not verbose
-        display_deps = source_deps if verbose else [d for d in source_deps if d.status != "up-to-date"]
+        display_deps = source_deps if verbose else [d for d in source_deps if d.status != DependencyStatus.UP_TO_DATE]
 
         if not display_deps:
             continue
@@ -421,16 +438,16 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
                 f"  -> {dep.latest:<{latest_width}}  [{dep.status}]"
             )
 
-            if dep.status == "outdated":
+            if dep.status == DependencyStatus.OUTDATED:
                 outdated_count += 1
-            elif dep.status == "error":
+            elif dep.status == DependencyStatus.ERROR:
                 error_count += 1
 
     # Summary
     total = len(deps)
-    up_to_date = sum(1 for d in deps if d.status == "up-to-date")
-    pinned = sum(1 for d in deps if d.status == "pinned")
-    unknown = sum(1 for d in deps if d.status == "unknown")
+    up_to_date = sum(1 for d in deps if d.status == DependencyStatus.UP_TO_DATE)
+    pinned = sum(1 for d in deps if d.status == DependencyStatus.PINNED)
+    unknown = sum(1 for d in deps if d.status == DependencyStatus.UNKNOWN)
 
     print(f"\nSummary: {total} dependencies checked")
     print(f"  Up-to-date: {up_to_date}")
@@ -445,14 +462,14 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
     return 0
 
 
-def _get_status_icon(status: str) -> str:
+def _get_status_icon(status: DependencyStatus) -> str:
     """Get a status icon character (ASCII-safe for Windows compatibility)."""
     icons = {
-        "up-to-date": "[ok]",
-        "outdated": "[!!]",
-        "pinned": "[==]",
-        "unknown": "[??]",
-        "error": "[XX]",
+        DependencyStatus.UP_TO_DATE: "[ok]",
+        DependencyStatus.OUTDATED: "[!!]",
+        DependencyStatus.PINNED: "[==]",
+        DependencyStatus.UNKNOWN: "[??]",
+        DependencyStatus.ERROR: "[XX]",
     }
     return icons.get(status, "[??]")
 
@@ -614,7 +631,7 @@ def _find_packages_needing_install(
 
         if installed is None:
             needs_install.append((name_with_extras, None, dep.current_min, marker))
-        elif compare_versions(installed, dep.current_min) == "outdated":
+        elif compare_versions(installed, dep.current_min) == DependencyStatus.OUTDATED:
             needs_install.append((name_with_extras, installed, dep.current_min, marker))
 
     return needs_install
@@ -758,7 +775,7 @@ def update_dependencies(
     Returns:
         Number of dependencies updated
     """
-    outdated = [d for d in deps if d.status == "outdated"]
+    outdated = [d for d in deps if d.status == DependencyStatus.OUTDATED]
     if not outdated:
         if not quiet:
             print("All dependencies are up-to-date!")
@@ -830,7 +847,7 @@ def main(
     if not quiet:
         exit_code = print_report(deps, verbose=verbose)
     else:
-        exit_code = 1 if any(d.status == "outdated" for d in deps) else 0
+        exit_code = 1 if any(d.status == DependencyStatus.OUTDATED for d in deps) else 0
 
     if update:
         # Update pyproject.toml with latest versions

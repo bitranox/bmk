@@ -12,7 +12,26 @@ from typing import Any, cast
 
 from btx_lib_mail import validate_email_address, validate_smtp_host
 from btx_lib_mail.lib_mail import ConfMail
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+
+REVEAL_SECRETS = "reveal_secrets"
+"""Serialization-context key that opts OUT of password redaction.
+
+``model_dump(context={REVEAL_SECRETS: True})`` returns the real ``smtp_password``.
+Only a caller that round-trips the model back into an ``EmailConfig`` needs it; anything
+that logs, prints, or exports the dump must NOT pass it.
+"""
+
+_REDACTED = "[REDACTED]"
 
 
 class EmailConfig(BaseModel):
@@ -27,7 +46,7 @@ class EmailConfig(BaseModel):
         ['smtp.example.com:587']
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     smtp_hosts: list[str] = Field(default_factory=list)
     from_address: str | None = None
@@ -39,14 +58,33 @@ class EmailConfig(BaseModel):
     raise_on_missing_attachments: bool = True
     raise_on_invalid_recipient: bool = True
 
-    # Attachment security settings (None = use btx_lib_mail defaults)
-    attachment_allowed_extensions: frozenset[str] | None = None
-    attachment_blocked_extensions: frozenset[str] | None = None
-    attachment_allowed_directories: frozenset[Path] | None = None
-    attachment_blocked_directories: frozenset[Path] | None = None
-    attachment_max_size_bytes: int | None = 26_214_400  # 25 MiB
-    attachment_allow_symlinks: bool = False
-    attachment_raise_on_security_violation: bool = True
+    # Attachment security settings (None = use btx_lib_mail defaults).
+    #
+    # These live under a nested [email.attachments] TOML section but are flat fields here.
+    # AliasPath does that mapping declaratively, so the loader hands the email section
+    # straight to model_validate: it used to copy the section into a plain dict, pop
+    # "attachments" and re-key each entry with an f-string, which is hand-rolled parsing in
+    # front of a parser. populate_by_name keeps the field name usable too, so constructing
+    # EmailConfig(attachment_max_size_bytes=...) in code still works.
+    attachment_allowed_extensions: frozenset[str] | None = Field(
+        default=None, validation_alias=AliasPath("attachments", "allowed_extensions")
+    )
+    attachment_blocked_extensions: frozenset[str] | None = Field(
+        default=None, validation_alias=AliasPath("attachments", "blocked_extensions")
+    )
+    attachment_allowed_directories: frozenset[Path] | None = Field(
+        default=None, validation_alias=AliasPath("attachments", "allowed_directories")
+    )
+    attachment_blocked_directories: frozenset[Path] | None = Field(
+        default=None, validation_alias=AliasPath("attachments", "blocked_directories")
+    )
+    attachment_max_size_bytes: int | None = Field(
+        default=26_214_400, validation_alias=AliasPath("attachments", "max_size_bytes")
+    )  # 25 MiB
+    attachment_allow_symlinks: bool = Field(default=False, validation_alias=AliasPath("attachments", "allow_symlinks"))
+    attachment_raise_on_security_violation: bool = Field(
+        default=True, validation_alias=AliasPath("attachments", "raise_on_security_violation")
+    )
 
     @field_validator("smtp_hosts", "recipients", mode="before")
     @classmethod
@@ -176,6 +214,34 @@ class EmailConfig(BaseModel):
 
         return self
 
+    @field_serializer("smtp_password", when_used="always")
+    def _redact_smtp_password(self, value: str | None, info: SerializationInfo) -> str | None:
+        """Redact the password on model_dump()/model_dump_json() by default.
+
+        Overriding ``__repr__`` alone was not enough: ``model_dump()`` and
+        ``model_dump_json()`` re-read the raw field, so a caller that dumped the config
+        into a log line or an error payload leaked the plaintext password. Redacting in
+        the serializer closes every export path at once.
+
+        A caller that round-trips the dump BACK into an ``EmailConfig``
+        (``apply_validated_overrides`` in ``cli/commands/email/_common.py``) must opt out with
+        ``context={REVEAL_SECRETS: True}``, or the redaction string would be re-validated
+        as the real password and break SMTP auth.
+
+        Example:
+            >>> config = EmailConfig(smtp_password="secret123")
+            >>> config.model_dump()["smtp_password"]
+            '[REDACTED]'
+            >>> config.model_dump(context={REVEAL_SECRETS: True})["smtp_password"]
+            'secret123'
+        """
+        if value is None:
+            return None
+        raw_context = info.context
+        if isinstance(raw_context, dict) and cast("dict[str, Any]", raw_context).get(REVEAL_SECRETS):
+            return value
+        return _REDACTED
+
     def __repr__(self) -> str:
         """Return string representation with smtp_password redacted.
 
@@ -195,10 +261,24 @@ class EmailConfig(BaseModel):
         fields: list[str] = []
         for name, value in self:
             if name == "smtp_password" and value is not None:
-                fields.append(f"{name}='[REDACTED]'")
+                fields.append(f"{name}='{_REDACTED}'")
             else:
                 fields.append(f"{name}={value!r}")
         return f"EmailConfig({', '.join(fields)})"
+
+    def __str__(self) -> str:
+        """Delegate to the redacting ``__repr__``.
+
+        Pydantic gives BaseModel its own ``__str__``, so overriding ``__repr__`` alone left
+        ``str(config)``, ``f"{config}"`` and ``logger.info("%s", config)`` printing the
+        plaintext password - the most natural ways anyone logs an object.
+
+        Example:
+            >>> config = EmailConfig(smtp_password="secret123")
+            >>> "secret123" in f"{config}"
+            False
+        """
+        return self.__repr__()
 
     def to_conf_mail(self) -> ConfMail:
         """Convert to btx_lib_mail ConfMail object.
@@ -289,20 +369,10 @@ def load_email_config_from_dict(config_dict: Mapping[str, Any]) -> EmailConfig:
         >>> config.attachment_allow_symlinks
         True
     """
-    email_section: Any = config_dict.get("email", {})
-
-    # Handle non-dict email section (e.g. "email": "invalid")
-    if not isinstance(email_section, Mapping):
-        return EmailConfig.model_validate(email_section)
-
-    email_raw: dict[str, Any] = dict(cast(Mapping[str, Any], email_section))
-
-    # Flatten nested [email.attachments] section with prefix
-    attachments_raw: dict[str, Any] = email_raw.pop("attachments", {})
-    for key, value in attachments_raw.items():
-        email_raw[f"attachment_{key}"] = value
-
-    return EmailConfig.model_validate(email_raw if email_raw else {})
+    # One parse, and nothing before it: the nested [email.attachments] section maps onto the
+    # flat attachment_* fields through their AliasPath declarations, so there is no dict to
+    # reshape here any more.
+    return EmailConfig.model_validate(config_dict.get("email", {}))
 
 
 __all__ = [

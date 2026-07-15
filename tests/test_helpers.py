@@ -325,7 +325,7 @@ class TestFindDotenvUpward:
 
         result = coverage_module._find_dotenv_upward(child)
 
-        # May return None or find a .env above tmp_path — assert type is correct
+        # May return None or find a .env above tmp_path - assert type is correct
         assert result is None or result.name == ".env"
 
 
@@ -1079,7 +1079,7 @@ class TestExtractDependenciesFromList:
 
 
 # =============================================================================
-# _coverage.py — MIXED function tests
+# _coverage.py - MIXED function tests
 # =============================================================================
 
 

@@ -17,7 +17,7 @@ from lib_layered_config.domain.config import SourceInfo
 from bmk.adapters.config.display import display_config
 from bmk.domain.enums import OutputFormat
 
-# ======================== display_config — error paths ========================
+# ======================== display_config - error paths ========================
 
 
 @pytest.mark.os_agnostic
@@ -40,7 +40,7 @@ def test_display_config_raises_for_nonexistent_section_json(
         display_config(config, output_format=OutputFormat.JSON, section="nonexistent")
 
 
-# ======================== display_config — wrapper integration ========================
+# ======================== display_config - wrapper integration ========================
 
 
 @pytest.mark.os_agnostic

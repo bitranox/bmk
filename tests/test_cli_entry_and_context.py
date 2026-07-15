@@ -22,7 +22,7 @@ from bmk.adapters.cli.context import (
 from bmk.adapters.cli.main import main
 
 # ---------------------------------------------------------------------------
-# main() — missing services_factory
+# main() - missing services_factory
 # ---------------------------------------------------------------------------
 
 
@@ -34,7 +34,7 @@ def test_main_raises_when_services_factory_is_none() -> None:
 
 
 # ---------------------------------------------------------------------------
-# main() — ClickException handling
+# main() - ClickException handling
 # ---------------------------------------------------------------------------
 
 
@@ -53,7 +53,7 @@ def test_main_handles_click_exception(managed_traceback_state: None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# get_cli_context — RuntimeError when not initialized
+# get_cli_context - RuntimeError when not initialized
 # ---------------------------------------------------------------------------
 
 
@@ -68,7 +68,7 @@ def test_get_cli_context_raises_when_not_initialized() -> None:
 
 
 # ---------------------------------------------------------------------------
-# root.py — RuntimeError when services factory not callable
+# root.py - RuntimeError when services factory not callable
 # ---------------------------------------------------------------------------
 
 
@@ -129,7 +129,7 @@ def test_store_and_get_cli_context_round_trip() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _nest_override — TypeError on non-dict intermediate
+# _nest_override - TypeError on non-dict intermediate
 # ---------------------------------------------------------------------------
 
 
@@ -146,7 +146,7 @@ def test_nest_override_raises_on_non_dict_intermediate() -> None:
 
 
 # ---------------------------------------------------------------------------
-# permissions._get_mode — bool value fallback
+# permissions._get_mode - bool value fallback
 # ---------------------------------------------------------------------------
 
 
@@ -163,7 +163,7 @@ def test_get_mode_returns_default_for_bool_value() -> None:
 
 
 # ---------------------------------------------------------------------------
-# memory adapters — uncovered paths
+# memory adapters - uncovered paths
 # ---------------------------------------------------------------------------
 
 

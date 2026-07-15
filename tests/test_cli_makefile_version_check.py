@@ -62,7 +62,7 @@ def test_no_makefile_skips_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No Makefile in cwd — subcommand runs normally without prompt."""
+    """No Makefile in cwd - subcommand runs normally without prompt."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
 
     result: Result = cli_runner.invoke(cli_mod.cli, ["info"], obj=production_factory)
@@ -77,7 +77,7 @@ def test_custom_makefile_skips_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Custom Makefile (no sentinel) — subcommand runs normally."""
+    """Custom Makefile (no sentinel) - subcommand runs normally."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     (tmp_path / "Makefile").write_text("# My custom Makefile\nall:\n", encoding="utf-8")
 
@@ -94,7 +94,7 @@ def test_up_to_date_skips_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Local version matches bundled — subcommand runs normally."""
+    """Local version matches bundled - subcommand runs normally."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     from bmk.adapters.cli.commands.install_cmd import _BUNDLED_MAKEFILE
 

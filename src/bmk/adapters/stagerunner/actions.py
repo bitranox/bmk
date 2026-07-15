@@ -50,6 +50,11 @@ def run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
     child ``PATH`` first (see :func:`_resolve_executable`) so bmk's own toolchain is
     found on Windows. The child is tracked so a signal handler can terminate it
     mid-run.
+
+    The child is never left running: if reading its output raises, the ``finally``
+    kills and reaps it. Without that, an exception mid-stream abandons a live child -
+    ``text=True`` decodes strictly, so a tool emitting a single undecodable byte raises
+    ``UnicodeDecodeError`` here and would orphan the whole tool run (verified).
     """
     proc = subprocess.Popen(  # noqa: S603 - argv list, never shell=True
         _resolve_executable(argv, ctx.env),
@@ -66,6 +71,11 @@ def run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
                 sink.write(line)
         return normalize_returncode(proc.wait())
     finally:
+        # poll() is None only when the child outlived the try block, i.e. an exception
+        # skipped the wait() above. On the normal path this is a no-op.
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
         signals.unregister(proc)
 
 

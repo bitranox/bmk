@@ -2,91 +2,38 @@
 
 ## Make Targets
 
-| Target                  | Description                                                                                |
-|-------------------------|--------------------------------------------------------------------------------------------|
-| `help`                  | Show help                                                                                  |
-| `install`               | Install package editable                                                                   |
-| `dev`                   | Install package with dev extras                                                            |
-| `test`                  | Lint, type-check, run tests with coverage, upload to Codecov                               |
-| `test-human`            | Run test suite with human-readable output (alias: `th`)                                    |
-| `testintegration-human` | Run integration tests with human-readable output (alias: `tih`)                            |
-| `run`                   | Run module CLI (requires dev install or src on PYTHONPATH)                                 |
-| `version-current`       | Print current version from pyproject.toml                                                  |
-| `bump`                  | Bump version (updates pyproject.toml and CHANGELOG.md)                                     |
-| `bump-patch`            | Bump patch version (X.Y.Z -> X.Y.(Z+1))                                                    |
-| `bump-minor`            | Bump minor version (X.Y.Z -> X.(Y+1).0)                                                    |
-| `bump-major`            | Bump major version ((X+1).0.0)                                                             |
-| `clean`                 | Remove caches, build artifacts, and coverage                                               |
-| `push`                  | Run tests, prompt for/accept a commit message, create (allow-empty) commit, push to remote |
-| `build`                 | Build wheel/sdist artifacts via `python -m build`                                          |
-| `coverage`              | Generate coverage reports                                                                  |
-| `test-slow`             | Run slow integration tests (SMTP, external resources)                                      |
-| `dependencies`          | Check and list project dependencies                                                        |
-| `dependencies-update`   | Update dependencies to latest versions                                                     |
-| `menu`                  | Interactive TUI to run targets and edit parameters (requires dev dep: textual)             |
+Run `make help` for the authoritative list - it is generated from the Makefile itself, so it
+cannot go stale. [docs/make-targets.md](docs/make-targets.md) documents each target and the
+options it accepts; [docs/cli-reference.md](docs/cli-reference.md) covers the underlying `bmk`
+commands.
 
-### Target Parameters (env vars)
+The Makefile is a thin wrapper: each target calls the `bmk` command of the same name. Every stage
+is cross-OS Python (`src/bmk/adapters/stagerunner/`), invoked as an argv list - there are no shell
+or PowerShell stage scripts.
 
-- **Global**
-  - `PY` (default: `python3`) -- interpreter used to run scripts
-  - `PIP` (default: `pip`) -- pip executable used by bootstrap/install
+## Environment Variables
 
-- **install**
-  - No specific parameters (respects `PY`, `PIP`).
+These are the variables you can set. Anything not listed here is not consulted as input.
 
-- **dev**
-  - No specific parameters (respects `PY`, `PIP`).
+| Variable                 | Default  | Effect                                                                           |
+|--------------------------|----------|----------------------------------------------------------------------------------|
+| `BMK_OUTPUT_FORMAT`      | `json`   | `json` or `text`. JSON suppresses tool output on success. `--human` forces text. |
+| `UV_PROJECT_ENVIRONMENT` | `.venv`  | Project venv path, absolute or relative to the project.                          |
+| `BMK_NO_VENV_SYNC`       | unset    | `1` skips creating/syncing the project venv; use the environment as-is.          |
+| `BMK_COMMIT_MESSAGE`     | unset    | Commit message for `commit` / `push`. `MSG="..."` sets this for you.             |
+| `BMK_GIT_REMOTE`         | `origin` | Remote that `push` targets.                                                      |
+| `BMK_GIT_BRANCH`         | current  | Branch that `push` targets.                                                      |
+| `CODECOV_TOKEN`          | unset    | Token for Codecov upload; also read from `.env`.                                 |
+| `DEVELOPMENT_MODE`       | unset    | `1` re-raises unexpected exceptions in email commands with full tracebacks.      |
 
-- **test**
-  - `COVERAGE=on|auto|off` (default: `on`) -- controls pytest coverage run and Codecov upload
-  - `SKIP_BOOTSTRAP=1` -- skip auto-install of dev tools if missing
-  - `TEST_VERBOSE=1` -- echo each command executed by the test harness
-  - `BMK_OUTPUT_FORMAT=json|text` (default: `json`) -- output format; JSON mode suppresses tool output on success, auto-accepts Makefile updates, runs dependencies silently, and uses concise pytest flags; `--human` flag overrides to `text` for full verbose output
-  - `UV_PROJECT_ENVIRONMENT` (default: `.venv`) -- project venv path, absolute or relative to the project; set it when one checkout is used from more than one OS, since a single venv cannot serve both
-  - `BMK_NO_VENV_SYNC=1` -- skip creating and syncing the project venv; use the environment as-is
-  - Also respects `CODECOV_TOKEN` when uploading to Codecov
+Configuration settings additionally accept `BMK___<SECTION>__<KEY>` environment overrides and
+`.env` entries - see [docs/pyproject-reference.md](docs/pyproject-reference.md) and
+`src/bmk/adapters/config/`.
 
-- **run**
-  - No parameters via `make` (always shows `--help`). For custom args: `python scripts/run_cli.py -- <args>`.
-
-- **version-current**
-  - No parameters
-
-- **bump**
-  - `VERSION=X.Y.Z` -- explicit target version
-  - `PART=major|minor|patch` -- semantic part to bump (default if `VERSION` not set: `patch`)
-
-- **bump-patch** / **bump-minor** / **bump-major**
-  - No parameters; shorthand for `make bump PART=...`
-
-- **clean**
-  - No parameters
-
-- **push**
-  - `BMK_GIT_REMOTE=<name>` (default: `origin`) -- git remote to push to
-  - `BMK_GIT_BRANCH=<name>` (default: the current branch) -- branch to push
-  - `MSG="..."` -- commit message; the safe channel, passed through the environment, so any
-    punctuation and newlines survive. Equivalent to setting `BMK_COMMIT_MESSAGE` yourself.
-  - Resolution order is: trailing words / `ARGS` -> `BMK_COMMIT_MESSAGE` -> interactive prompt
-    -> `chores` when non-interactive.
-  - Do NOT put a message in `ARGS="..."`: it is re-parsed by bash, so `(`, `;`, `` ` `` and `$`
-    break or execute, and a newline is rejected by a guard in the Makefile.
-
-- **build**
-  - No parameters via `make`. Advanced: call the script directly, e.g. `python scripts/build.py --no-conda --no-nix`.
-
-- **release**
-  - `REMOTE=<name>` (default: `origin`) -- git remote to push to
-  - Advanced (via script): `python scripts/release.py --retries 5 --retry-wait 3.0`
-
-### Target Details
-
-- `test`: single entry point for local CI -- runs ruff lint + format check, pyright, pytest (including doctests) with coverage (enabled by default), and uploads coverage to Codecov if configured (reads `.env`). Tool output defaults to JSON mode, which suppresses all tool output when stages pass (only failures produce output). Dependency checking runs silently, Makefile version updates are auto-accepted, and pytest uses `--tb=short -q --no-header` with coverage report display suppressed. Use `bmk test --human` or `BMK_OUTPUT_FORMAT=text` for full verbose output showing all tool output, prompts, and reports.
-  - Auto-bootstrap: `make test` will try to install dev tools (`pip install -e .`) if `ruff`/`pyright`/`pytest` are missing. Set `SKIP_BOOTSTRAP=1` to skip this behavior.
-- `build`: creates wheel/sdist artifacts.
-- `version-current`: prints current version from `pyproject.toml`.
-- `bump`: updates `pyproject.toml` version and inserts a new section in `CHANGELOG.md`. Use `VERSION=X.Y.Z make bump` or `make bump-minor`/`bump-major`/`bump-patch`.
-- Additional scripts (`pipx-*`, `uv-*`, `which-cmd`, `verify-install`) provide install/run diagnostics.
+`BMK_PROJECT_DIR`, `BMK_PYTHON_CMD` and `BMK_COMMAND_PREFIX` are **set by** bmk into each stage's
+child environment (`stagerunner/context.py:150-153`), not read from yours - do not set them.
+`UV_OFFLINE` is uv's own; when it is set the Makefile drops `--refresh-package bmk`, which uv
+refuses to combine with offline mode.
 
 ## Test Markers and What Each Command Runs
 
@@ -134,46 +81,73 @@ def test_needs_a_local_resource(...):
 ## Development Workflow
 
 ```bash
-make test                 # ruff + pyright + pytest + coverage (JSON mode, default)
-make test-human           # same but with full verbose output (alias: make th)
-SKIP_BOOTSTRAP=1 make test  # skip auto-install of dev deps
-COVERAGE=off make test       # disable coverage locally
-COVERAGE=on make test        # force coverage and generate coverage.xml/codecov.xml
+make test                    # ruff + pyright + import-linter + bandit + pip-audit + pytest (JSON output)
+make test-human              # the same run with full verbose output (alias: make th)
+make testintegration         # only the integration lane (aliases: testi, ti)
+BMK_NO_VENV_SYNC=1 make test # use the current environment; skip venv provisioning
 ```
 
-**Note:** `make test --human` does not work because Make intercepts `--` flags.
-Use `make test-human` or `make th` instead.
+**Note:** `make test --human` does not work, because make intercepts `--` flags. Use
+`make test-human` or `make th`.
+
+`make test` is the single local gate. Note it **writes to your working tree before checking it** -
+the pipeline (`stagerunner/registry.py`) is ordered:
+
+| Order | Stage                                                                                                                       | Mutates? |
+|-------|-----------------------------------------------------------------------------------------------------------------------------|----------|
+| 10    | `update_deps` (delegates to the `deps_update` pipeline)                                                                     | yes      |
+| 20    | `ruff_format_apply`                                                                                                         | yes      |
+| 30    | `ruff_fix_apply`                                                                                                            | yes      |
+| 40    | `bandit`, `lint_imports`, `pip_audit`, `pyright`, `pytest`, `ruff_format_check`, `ruff_lint`, `psscriptanalyzer` (parallel) | no       |
+| 60    | `shellcheck`                                                                                                                | no       |
+
+So a `make test` run can leave your files reformatted and auto-fixed, and your `pyproject.toml`
+dependency floors bumped, even when it passes. Stages sharing an order run in parallel; the run
+fails fast between order batches.
+
+In JSON mode - the default - a passing stage prints nothing and only failures produce output;
+dependency checking runs silently and Makefile version updates are auto-accepted. Use `--human` /
+`BMK_OUTPUT_FORMAT=text` for the full verbose stream.
 
 **Automation notes**
 
-- `make push` runs the full test suite, checks pip and dependency versions, prompts for a commit message (or takes `MSG="..."`, i.e. the `BMK_COMMIT_MESSAGE` environment variable), and always pushes, creating an empty commit when there are no staged changes.
+- `make push` runs the full test suite, then commits and pushes, creating an empty commit when
+  there are no staged changes.
+- Pass a commit message with `MSG="..."` (equivalently `BMK_COMMIT_MESSAGE`), which travels through
+  the environment so punctuation and newlines survive. Resolution order: trailing words / `ARGS` ->
+  `BMK_COMMIT_MESSAGE` -> interactive prompt -> `chores` when non-interactive.
+- Do NOT put a message in `ARGS="..."`: make expands `ARGS` into the recipe text and bash re-parses
+  it, so `(`, `;`, `` ` `` and `$` break or execute. A newline in `ARGS` is rejected by a guard in
+  the Makefile.
 
 ### Versioning & Metadata
 
-- Single source of truth for package metadata is `pyproject.toml` (`[project]`).
-- The library reads its own metadata from static constants (see `src/bmk/__init__conf__.py`).
-- Do not duplicate the version in code; bump only `pyproject.toml` and update `CHANGELOG.md`.
-- Console script name is discovered from entry points; defaults to `bmk`.
+- Single source of truth for the version is `pyproject.toml` (`[project].version`).
+- Runtime metadata is served from static constants in `src/bmk/__init__conf__.py`; runtime code does
+  not query packaging metadata. `helpers/_sync_initconf.py` keeps those constants in sync with
+  `pyproject.toml` via the bump/push pipelines.
+- Do not hand-edit the version in code; bump `pyproject.toml` and update `CHANGELOG.md`.
+- The bundled Makefile template carries its own version on line 1 (`# BMK MAKEFILE X.Y.Z`), also
+  synced by `_sync_initconf.py`.
 
-### Virtual Environment Isolation (uvx)
+### The project venv
 
-When bmk is invoked via `uvx`, it runs in an ephemeral virtual environment that contains
-bmk's own dependencies (ruff, pyright, pytest, etc.) but not the target project's dependencies.
-This causes tools like pyright and pip-audit to fail if they resolve packages against bmk's venv
-instead of the project's.
+bmk's own environment holds bmk's toolchain and nothing of the target project - see
+[docs/adr/0002-bmk-env-holds-bmk-alone.md](docs/adr/0002-bmk-env-holds-bmk-alone.md). The project's
+dependencies live in the project's own venv, which bmk provisions and every gate resolves:
 
-bmk handles this automatically:
 - Before any pipeline that touches the Python environment, bmk creates the project's venv if it is
-  missing and syncs it to `pyproject.toml`, then points `VIRTUAL_ENV` at it
-- Broken venvs (stale NFS mounts, missing `pyvenv.cfg`) are detected and ignored
+  missing and syncs it to `pyproject.toml`, then points `VIRTUAL_ENV` at it.
+- pytest, pyright and pip-audit all resolve that same venv, so the tested, type-checked and audited
+  environment are one and the same.
+- Broken venvs (stale mounts, missing `pyvenv.cfg`) are detected and ignored.
 - If no valid venv exists (provisioning skipped or failed), bmk unsets `VIRTUAL_ENV` so tools fall
-  back to their own discovery (e.g., pyright reads `[tool.pyright]` from the project's
-  `pyproject.toml`) and pins pip-audit at bmk's own interpreter
+  back to their own discovery and pins pip-audit at bmk's own interpreter.
 
-The venv path comes from `UV_PROJECT_ENVIRONMENT` (absolute, or relative to the project;
-default `.venv`); `BMK_NO_VENV_SYNC=1` skips provisioning. Because the sync is exact and upgrading,
-packages installed into the venv by hand do not survive it. See `CLAUDE.md` for why both flags are
-needed and how the ordering interacts with the frozen `StageContext`.
+The venv path comes from `UV_PROJECT_ENVIRONMENT` (absolute, or relative to the project; default
+`.venv`); `BMK_NO_VENV_SYNC=1` skips provisioning. Because the sync is exact and upgrading, packages
+installed into the venv by hand do not survive it. See `CLAUDE.md` for why both flags are needed and
+how the ordering interacts with the frozen `StageContext`.
 
 ### Private Repository Dependencies
 
@@ -201,24 +175,51 @@ This keeps credentials out of project files and `.env` - git handles auth transp
 
 ### Dependency Auditing
 
-- `make test` invokes `pip-audit` to check for known vulnerabilities. If pip-audit reports vulnerabilities, address them by pinning fixed versions in `[project.optional-dependencies.dev]`.
+`make test` runs `pip-audit` against the project's venv. Fix a reported vulnerability at its root,
+in this order:
+
+1. Find what actually forces the vulnerable version (`uv pip compile --extra dev pyproject.toml`).
+   A CVE on a transitive package usually means another dependency CAPS it below the fix.
+2. Remove or disable the capper if there is one - that fixes it with no exclusion. Comment the line
+   out with the reason and the re-enable condition rather than deleting it.
+3. Only if no capper exists and no fixed release does, add the id to `[tool.pip-audit].ignore-vulns`
+   with an inline note. Note the tables are different vocabularies: `ignore-vulns` takes
+   PYSEC/GHSA/CVE ids, `[tool.bandit].skips` takes bandit check ids (`B###`). A PYSEC id in
+   `[tool.bandit].skips` is silently inert.
+
+bmk itself declares its whole toolchain as runtime dependencies and ships no `[dev]` extra, so a
+floor for bmk goes in `[project.dependencies]`. See the grouped rationale in `pyproject.toml`.
 
 ### CI & Publishing
 
-GitHub Actions workflows are included:
+GitHub Actions workflows:
 
-- `.github/workflows/ci.yml` -- lint/type/test, build wheel/sdist, and verify pipx and uv installs (CI-only; no local install required).
-- `.github/workflows/release.yml` -- on tags `v*.*.*`, builds artifacts and publishes to PyPI when `PYPI_API_TOKEN` secret is set.
+- `.github/workflows/default_cicd_public.yml` - lint, type-check, test across the OS/Python matrix,
+  and build artifacts.
+- `.github/workflows/default_release_public.yml` - on tags `v*.*.*`, builds artifacts and publishes
+  to PyPI.
+- `.github/workflows/codeql.yml` - CodeQL analysis.
+
+These files are managed by an external template. Do not edit them here; change them in the
+`default_cicd_public` template and redistribute.
+
+Publishing uses hybrid auth: the release workflow uses the `PYPI_API_TOKEN` secret when it is set,
+and otherwise publishes via an OIDC Trusted Publisher (the publish job has `id-token: write` and
+runs in the `pypi` environment). A project works on a token and migrates to OIDC with no workflow
+change; if PyPI reports a Trusted Publisher is configured but the upload still used a token, the
+secret is still present and must be deleted.
 
 To publish a release:
-1. Bump `pyproject.toml` version and update `CHANGELOG.md`.
-2. Tag the commit (`git tag v0.1.1 && git push --tags`).
-3. Ensure `PYPI_API_TOKEN` secret is configured in the repo.
-4. Release workflow uploads wheel/sdist to PyPI.
+
+1. `make bump-patch` (or `-minor` / `-major`) to update `pyproject.toml` and `CHANGELOG.md`.
+2. `make release` to tag `vX.Y.Z`, push, and create the GitHub release.
+3. Or `make ship` to push, wait for CI, release, and wait for the release workflow - CI-gated end to
+   end.
 
 ### Local Codecov uploads
 
-- `make test` (with coverage enabled) generates `coverage.xml` and `codecov.xml`, then attempts to upload via the Codecov CLI or the bash uploader.
-- For private repos, set `CODECOV_TOKEN` (see `.env.example`) or export it in your shell.
-- For public repos, a token is typically not required.
-- Because Codecov requires a revision, the test harness commits (allow-empty) immediately before uploading. Remove or amend that commit after the run if you do not intend to keep it.
+- `make test` generates `coverage.xml` (the name comes from `[tool.scripts.test]
+  .coverage-report-file`).
+- `make codecov` (aliases `coverage`, `cov`) uploads it.
+- For private repos, set `CODECOV_TOKEN` (see `.env.example`) or export it in your shell. Public
+  repos typically need no token.

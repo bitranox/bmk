@@ -19,7 +19,7 @@ System Role
 -----------
 Development automation helper executed by ``run_010_run.sh`` inside the
 stagerunner pipeline. Uses ``_toml_config`` for pyproject parsing and
-``subprocess.run`` for all operations — no external script imports.
+``subprocess.run`` for all operations - no external script imports.
 """
 
 from __future__ import annotations

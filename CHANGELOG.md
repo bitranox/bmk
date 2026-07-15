@@ -6,6 +6,70 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.9.0] 2026-07-15 22:27:01
+
+### Security
+- **`EmailConfig` no longer leaks the SMTP password on any export path.** Only `__repr__` was
+  redacted, while its own docstring promised protection for "logs, error messages, and debugging
+  output". Verified live: `str(config)`, `f"{config}"`, `logger.error("%s", config)`,
+  `model_dump()` and `model_dump_json()` all emitted the plaintext password. `f"{config}"` and
+  `%s`-logging are the most natural ways anyone logs an object, so this was one debug line away
+  from a credential in a log file. Redaction now happens in a `field_serializer` plus `__str__`,
+  which closes every export path at once.
+
+  A caller that round-trips the dump back into an `EmailConfig` must opt out explicitly with
+  `model_dump(context={REVEAL_SECRETS: True})` - `apply_validated_overrides` dumps and
+  re-validates, so a blanket redaction would have re-validated `"[REDACTED]"` as the real
+  password and broken SMTP auth with a credential that looks plausible in a log. That is the
+  only place the opt-out is used, and it is covered by a test.
+
+  The gap survived because the one test that existed pinned `repr()` - the single path that
+  already worked. There is now a test per leaking path.
+
+### Fixed
+- **A failed tool run no longer leaves the tool running.** `run_argv` is the path every tool,
+  git and pip-audit call takes. It reads the child's output with `text=True`, which decodes
+  strictly, so a tool emitting one undecodable byte raises `UnicodeDecodeError` mid-stream. The
+  `finally` only unregistered the signal handler, so the stage failed while the child kept
+  running, orphaned and unreaped. It is now killed and reaped on that path (a no-op on the
+  normal one). Reachable in practice wherever a tool's output is not valid UTF-8.
+- **Non-ASCII characters no longer reach the console.** Several user-facing strings carried
+  em-dashes, which raise `UnicodeEncodeError` on a Windows console under cp1252 when output is
+  redirected - in a tool whose whole premise is cross-OS, and next to a helper already commented
+  "ASCII-safe for Windows compatibility".
+
+### Changed
+- **The pyproject readers parse with Pydantic, so each default exists in exactly one place.**
+  The hand-rolled readers declared every default twice (once on the dataclass field, once in the
+  getter), which is how the `-vv`/`-v` verbosity default drifted apart. `_coverage.py` was primed
+  for the identical bug with six twice-declared defaults. Behaviour-preserving: the parser's
+  output was diffed byte-identical against real pyprojects, and the never-raise contract is
+  re-tested with a missing file, garbage TOML and wrong-typed values.
+- **`DependencyInfo.status` is a `DependencyStatus` enum** rather than a `str` whose five legal
+  values lived only in a trailing comment and were compared as bare literals at a dozen sites. It
+  subclasses `str`, so the wire format and the report tables are unchanged.
+- `ship_cmd` raises `ExitCode.GENERAL_ERROR` instead of a bare `SystemExit(1)`. The two engine
+  helpers keep their bare literal on purpose: `ExitCode` lives in the CLI layer, and `cli`
+  imports `stagerunner` and never the reverse, so importing it there would couple the engine to
+  the CLI to spell the same integer.
+- `is_windows()` / `is_macos()` are defined once in `_prerequisites.py` instead of being
+  duplicated verbatim across two modules.
+
+### Documentation
+- **`DEVELOPMENT.md` rewritten against the code.** It documented a pre-3.0.0 bmk: env vars that
+  do not exist (`SKIP_BOOTSTRAP`, `TEST_VERBOSE`, `COVERAGE`, `PY`, `PIP`), a `menu` and
+  `test-slow` target that do not exist, `scripts/build.py` and `scripts/release.py` in a
+  `scripts/` directory that does not exist, and the wrong CI workflow filenames. It now lists
+  only the variables bmk actually reads, and states plainly that `make test` **writes to your
+  working tree before checking it** (it applies ruff fixes and bumps dependency floors), which
+  was never documented.
+- `INSTALL.md` no longer shows `uv tool install --reinstall bmk --with .` as the command the
+  Makefile runs. It contradicted both the real command and the paragraph twenty lines above it,
+  which tells you never to add `--with .`.
+- `docs/pipelines.md` dropped two stale version floors and stopped calling bmk's toolchain "dev
+  dependencies" - bmk ships no `[dev]` extra by design, because the tools are the product.
+- `docs/make-targets.md` documents `ship`/`sh`, which existed but was listed nowhere.
+
 ## [3.8.2] 2026-07-15 19:54:07
 
 ### Removed

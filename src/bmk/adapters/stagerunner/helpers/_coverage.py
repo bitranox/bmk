@@ -31,11 +31,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import rtoml
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "prune_coverage_data_files",
@@ -51,17 +52,36 @@ __all__ = [
 # Configuration
 # ---------------------------------------------------------------------------
 
+# The single source for the coverage report filename default. CoverageConfig's
+# Field default and every other function default (remove_report_artifacts,
+# upload_coverage_report) point at this constant so the value exists exactly
+# once - this is the name that already drifted once (see CoverageConfig below).
+DEFAULT_COVERAGE_REPORT_FILE = "coverage.xml"
 
-@dataclass(frozen=True)
-class CoverageConfig:
-    """Configuration for coverage runs loaded from pyproject.toml."""
 
-    pytest_verbosity: str
-    coverage_report_file: str
-    src_path: str
-    fail_under: int
-    coverage_source: list[str]
-    exclude_markers: str
+class CoverageConfig(BaseModel):
+    """Configuration for coverage runs loaded from pyproject.toml.
+
+    A Pydantic model (not a dataclass) so each default is declared exactly once,
+    as a Field default here - never duplicated in a second reader. The previous
+    dataclass version hardcoded these same six defaults again in the "no
+    pyproject.toml" early return, and that second copy is exactly how a prior
+    version shipped a live drift bug (a "-vv" default in one reader while the
+    other used "-v"). model_construct is not used here: this model marshals
+    directly from parsed TOML, an external boundary, so full validation applies.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="ignore")
+
+    # Aliases are the hyphenated [tool.scripts.test] / [tool.coverage.run] TOML
+    # keys; field names stay underscored Python. fail_under keeps its TOML name
+    # unchanged (that key is coverage's own, already underscored, not a typo).
+    pytest_verbosity: str = Field(default="-v", alias="pytest-verbosity")
+    coverage_report_file: str = Field(default=DEFAULT_COVERAGE_REPORT_FILE, alias="coverage-report-file")
+    src_path: str = Field(default="src", alias="src-path")
+    fail_under: int = Field(default=80)
+    coverage_source: list[str] = Field(default_factory=lambda: ["src"], alias="source")
+    exclude_markers: str = Field(default="integration", alias="exclude-markers")
 
     @classmethod
     def from_pyproject(cls, project_dir: Path) -> CoverageConfig:
@@ -75,14 +95,9 @@ class CoverageConfig:
         """
         pyproject_path = project_dir / "pyproject.toml"
         if not pyproject_path.is_file():
-            return cls(
-                pytest_verbosity="-v",
-                coverage_report_file="coverage.xml",
-                src_path="src",
-                fail_under=80,
-                coverage_source=["src"],
-                exclude_markers="integration",
-            )
+            # No second copy of the defaults: the Field defaults above ARE the
+            # "file missing" answer.
+            return cls()
 
         # rtoml (not stdlib tomllib) so parsing works on Python 3.10, where
         # tomllib does not exist; rtoml is a declared dependency and fully typed.
@@ -95,14 +110,16 @@ class CoverageConfig:
         coverage_run = tool.get("coverage", {}).get("run", {})
         coverage_report = tool.get("coverage", {}).get("report", {})
 
-        return cls(
-            pytest_verbosity=scripts_test.get("pytest-verbosity", "-v"),
-            coverage_report_file=scripts_test.get("coverage-report-file", "coverage.xml"),
-            src_path=scripts_test.get("src-path", "src"),
-            fail_under=coverage_report.get("fail_under", 80),
-            coverage_source=coverage_run.get("source", ["src"]),
-            exclude_markers=scripts_test.get("exclude-markers", "integration"),
-        )
+        # scripts_test keys already match the model's aliases 1:1; merge the two
+        # other sections in under the alias each field declares (fail_under,
+        # source) so a single model_validate resolves every default exactly once.
+        merged: dict[str, Any] = dict(scripts_test)
+        if "fail_under" in coverage_report:
+            merged["fail_under"] = coverage_report["fail_under"]
+        if "source" in coverage_run:
+            merged["source"] = coverage_run["source"]
+
+        return cls.model_validate(merged)
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +148,7 @@ def prune_coverage_data_files(project_dir: Path | None = None) -> None:
 
 def remove_report_artifacts(
     project_dir: Path | None = None,
-    coverage_report_file: str = "coverage.xml",
+    coverage_report_file: str = DEFAULT_COVERAGE_REPORT_FILE,
 ) -> None:
     """Remove coverage reports that might lock the SQLite database on reruns.
 
@@ -293,7 +310,7 @@ def run_coverage_tests(
         if result.returncode != 0:
             return result.returncode
 
-        # Generate terminal report (skip in quiet mode — summary adds noise).
+        # Generate terminal report (skip in quiet mode - summary adds noise).
         # Same interpreter as the run above, necessarily: the data file was written by
         # THAT coverage, and a different coverage version may refuse to read it.
         report_cmd = [
@@ -430,7 +447,29 @@ def _resolve_git_branch() -> str | None:
     return candidate
 
 
-def _resolve_git_service(repo_host: str | None) -> str | None:
+class GitService(str, Enum):
+    """Codecov git service identifiers for a closed set of known hosts.
+
+    Inherits from str (the StrEnum pattern on Python 3.10, where the stdlib
+    ``enum.StrEnum`` does not exist yet - this project targets >=3.10) so a
+    member IS its value on the command line: ``str(GitService.GITHUB) ==
+    "github"`` and ``GitService.GITHUB == "github"``, byte-identical to what
+    codecovcli received before this was an enum.
+    """
+
+    GITHUB = "github"
+    GITLAB = "gitlab"
+    BITBUCKET = "bitbucket"
+
+
+_GIT_SERVICE_BY_HOST = {
+    "github.com": GitService.GITHUB,
+    "gitlab.com": GitService.GITLAB,
+    "bitbucket.org": GitService.BITBUCKET,
+}
+
+
+def _resolve_git_service(repo_host: str | None) -> GitService | None:
     """Map repository host to Codecov git service identifier.
 
     Args:
@@ -440,12 +479,7 @@ def _resolve_git_service(repo_host: str | None) -> str | None:
         Codecov service identifier or None.
     """
     host = (repo_host or "").lower()
-    mapping = {
-        "github.com": "github",
-        "gitlab.com": "gitlab",
-        "bitbucket.org": "bitbucket",
-    }
-    return mapping.get(host)
+    return _GIT_SERVICE_BY_HOST.get(host)
 
 
 def _get_repo_slug(repo_owner: str | None, repo_name: str | None) -> str | None:
@@ -507,7 +541,7 @@ def _get_repo_metadata_from_git() -> tuple[str | None, str | None, str | None]:
 def upload_coverage_report(
     *,
     project_dir: Path | None = None,
-    coverage_report_file: str = "coverage.xml",
+    coverage_report_file: str = DEFAULT_COVERAGE_REPORT_FILE,
     codecov_token: str | None = None,
 ) -> bool:
     """Upload coverage report via the official Codecov CLI when available.
@@ -563,7 +597,7 @@ def upload_coverage_report(
 
 def _check_codecov_prerequisites(
     project_dir: Path,
-    coverage_report_file: str = "coverage.xml",
+    coverage_report_file: str = DEFAULT_COVERAGE_REPORT_FILE,
     *,
     codecov_token: str | None = None,
 ) -> str | None:
@@ -602,7 +636,7 @@ def _build_codecov_args(
     *,
     uploader: str,
     commit_sha: str,
-    coverage_report_file: str = "coverage.xml",
+    coverage_report_file: str = DEFAULT_COVERAGE_REPORT_FILE,
     repo_host: str | None = None,
     repo_owner: str | None = None,
     repo_name: str | None = None,

@@ -60,9 +60,11 @@ You still need a `make` implementation installed (e.g. [GnuWin32 Make](https://g
 ### Python 3.10+ Baseline
 
 - The project targets **Python 3.10 and newer**.
-- Runtime dependencies require current stable releases (`rich-click>=1.9.6`
-  and `lib_cli_exit_tools>=2.2.4`). Dev dependencies (pytest, ruff, pyright,
-  bandit, etc.) specify minimum version constraints to ensure compatibility.
+- bmk declares its whole toolchain (pytest, ruff, pyright, bandit, ...) as **runtime**
+  dependencies, by design - it ships no `[dev]` extra, because those tools ARE the product.
+  See `docs/pyproject-reference.md` and the grouped rationale in `pyproject.toml`. Floors are
+  kept at current stable releases; consult `pyproject.toml` for the authoritative values
+  rather than repeating them here, where they go stale.
 - CI workflows exercise GitHub's rolling runner images (`ubuntu-latest`,
   `macos-latest`, `windows-latest`) and cover CPython 3.10 through 3.14
   alongside the latest available 3.x release provided by Actions.

@@ -27,7 +27,11 @@ class ToolCheck:
     install_hint: str
 
 
-def _is_macos() -> bool:
+def is_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
@@ -71,7 +75,7 @@ def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
 
 
 def _posix_tools() -> list[ToolCheck]:
-    macos = _is_macos()
+    macos = is_macos()
     tools: list[tuple[str, str]] = [
         ("git", "brew install git" if macos else "sudo apt install git"),
         (
@@ -117,7 +121,7 @@ def _windows_tools() -> list[ToolCheck]:
 
 def check_prerequisites() -> list[ToolCheck]:
     """Check all platform-appropriate external tool prerequisites."""
-    if sys.platform == "win32":
+    if is_windows():
         return _windows_tools()
     return _posix_tools()
 
@@ -129,7 +133,7 @@ def format_prerequisites_report(results: list[ToolCheck]) -> str:
         if tool.found:
             lines.append(f"  \u2713 {tool.name}")
         else:
-            lines.append(f"  \u2717 {tool.name} \u2014 not found")
+            lines.append(f"  \u2717 {tool.name} - not found")
             lines.append(f"      Install: {tool.install_hint}")
     return "\n".join(lines)
 
@@ -138,4 +142,6 @@ __all__ = [
     "ToolCheck",
     "check_prerequisites",
     "format_prerequisites_report",
+    "is_macos",
+    "is_windows",
 ]

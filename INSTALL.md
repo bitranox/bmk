@@ -60,14 +60,17 @@ Nothing needs installing by hand, before or after:
 # One-time: install the Makefile (installs nothing permanently)
 uvx bmk install
 
-# From now on, just use make - bmk + deps are re-resolved every time
+# From now on, just use make - bmk is re-resolved every time
 make test
 ```
 
 Behind the scenes, the Makefile runs before every target:
 ```bash
-uv tool install --reinstall bmk --with .
+uv tool install --reinstall --force --refresh-package bmk "bmk>=<BMK_MIN>"
 ```
+
+Note what is NOT in that command: your project. bmk is installed on its own, exactly as the
+paragraph above requires.
 
 ### Private repository dependencies
 

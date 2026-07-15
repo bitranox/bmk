@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.8.2"
+version = "3.9.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -215,7 +215,7 @@ markers = [
   "os_posix: test exercises behavior requiring POSIX semantics",
   "os_linux: test exercises Linux-only behavior",
   "local_only: tests that require the local dev environment (external resources, script composition); skipped in CI",
-  "integration: tests requiring external resources (SMTP, databases, APIs); run via 'bmk ti' or 'mktesti.sh'",
+  "integration: tests requiring external resources (SMTP, databases, APIs); run via 'make testintegration'",
 ]
 
 [tool.coverage.run]

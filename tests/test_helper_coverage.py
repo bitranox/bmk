@@ -43,7 +43,7 @@ def _make_completed(returncode: int, *, stdout: str = "", stderr: str = "") -> s
 
 
 # ---------------------------------------------------------------------------
-# CoverageConfig.from_pyproject — defaults when no file
+# CoverageConfig.from_pyproject - defaults when no file
 # ---------------------------------------------------------------------------
 
 
@@ -61,7 +61,7 @@ def test_coverage_config_returns_defaults_when_no_pyproject(tmp_path: Path) -> N
 
 
 # ---------------------------------------------------------------------------
-# CoverageConfig.from_pyproject — reads from pyproject.toml
+# CoverageConfig.from_pyproject - reads from pyproject.toml
 # ---------------------------------------------------------------------------
 
 
@@ -755,7 +755,7 @@ def test_get_repo_slug_returns_none_when_both_missing() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_metadata_from_git — SSH URLs
+# _get_repo_metadata_from_git - SSH URLs
 # ---------------------------------------------------------------------------
 
 
@@ -788,7 +788,7 @@ def test_get_repo_metadata_parses_ssh_url_without_git_suffix() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_metadata_from_git — HTTPS URLs
+# _get_repo_metadata_from_git - HTTPS URLs
 # ---------------------------------------------------------------------------
 
 
@@ -835,7 +835,7 @@ def test_get_repo_metadata_parses_http_url() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_metadata_from_git — error / edge cases
+# _get_repo_metadata_from_git - error / edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -1179,7 +1179,7 @@ def test_upload_coverage_report_defaults_to_cwd(tmp_path: Path, monkeypatch: pyt
 
 
 # ---------------------------------------------------------------------------
-# main — run_tests branch
+# main - run_tests branch
 # ---------------------------------------------------------------------------
 
 
@@ -1231,7 +1231,7 @@ def test_main_skips_upload_when_tests_fail(tmp_path: Path, monkeypatch: pytest.M
 
 
 # ---------------------------------------------------------------------------
-# main — upload branch
+# main - upload branch
 # ---------------------------------------------------------------------------
 
 

@@ -17,6 +17,7 @@ from lib_layered_config import Config
 from pydantic import ValidationError
 
 from bmk import __init__conf__
+from bmk.adapters.email.config import REVEAL_SECRETS
 from bmk.adapters.email.sender import EmailConfig
 from bmk.application.ports import LoadEmailConfigFromDict
 from bmk.domain.errors import ConfigurationError, DeliveryError
@@ -69,7 +70,10 @@ def apply_validated_overrides(base_config: EmailConfig, overrides: dict[str, Any
     """
     if not overrides:
         return base_config
-    base_dict = base_config.model_dump()
+    # REVEAL_SECRETS is required here and ONLY here: the dump is fed straight back into
+    # model_validate, so the default redaction would re-validate "[REDACTED]" as the real
+    # smtp_password and break SMTP auth. This value never leaves the round-trip.
+    base_dict = base_config.model_dump(context={REVEAL_SECRETS: True})
     merged = {**base_dict, **overrides}
     return EmailConfig.model_validate(merged)
 

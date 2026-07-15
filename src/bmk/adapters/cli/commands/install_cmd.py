@@ -103,7 +103,7 @@ def cli_install() -> None:
             if target.exists():
                 first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
                 if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
-                    click.echo("Makefile exists but is not managed by bmk — skipping", err=True)
+                    click.echo("Makefile exists but is not managed by bmk - skipping", err=True)
                     makefile_error = SystemExit(ExitCode.GENERAL_ERROR)
                 else:
                     logger.info("Updating existing bmk Makefile")

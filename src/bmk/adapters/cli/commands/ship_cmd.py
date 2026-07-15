@@ -3,9 +3,9 @@
 ``ship`` chains the existing ``push`` and ``release`` steps with GitHub CI
 gating in between:
 
-1. ``push`` — run tests, commit, push to the remote.
+1. ``push`` - run tests, commit, push to the remote.
 2. Wait for the push-triggered ``CI`` workflow run to finish; abort if it fails.
-3. ``release`` — create the version tag and GitHub release.
+3. ``release`` - create the version tag and GitHub release.
 4. Wait for the release/publish workflow run to finish; abort if it fails.
 
 CI gating is done via the GitHub CLI (``gh``); the run is matched to the just-
@@ -30,6 +30,7 @@ import orjson
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
+from ..exit_codes import ExitCode
 from ..typed_click import argument, option
 
 logger = logging.getLogger(__name__)
@@ -99,11 +100,11 @@ def _gate_on_ci(workflow: str, *, event: str | None, head_sha: str, label: str) 
             time.sleep(_POLL_SECONDS)
     if run_id is None:
         logger.error("No %s workflow run appeared within %ds", label, _FIND_RUN_TIMEOUT)
-        raise SystemExit(1)
+        raise SystemExit(ExitCode.GENERAL_ERROR)
     logger.info("Watching %s workflow run %s", label, run_id)
     if not _watch_run(run_id):
         logger.error("%s workflow run %s failed", label, run_id)
-        raise SystemExit(1)
+        raise SystemExit(ExitCode.GENERAL_ERROR)
     logger.info("%s workflow run %s succeeded", label, run_id)
 
 

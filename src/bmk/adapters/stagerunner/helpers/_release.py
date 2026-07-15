@@ -16,7 +16,7 @@ System Role
 -----------
 Development automation helper executed by ``rel_020_release.sh`` inside the
 stagerunner pipeline. Uses ``_toml_config`` for pyproject parsing and
-``subprocess.run`` for all git/gh operations — no external script imports.
+``subprocess.run`` for all git/gh operations - no external script imports.
 """
 
 from __future__ import annotations

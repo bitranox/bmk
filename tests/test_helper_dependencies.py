@@ -16,6 +16,7 @@ import pytest
 
 from bmk.adapters.stagerunner.helpers._dependencies import (
     DependencyInfo,
+    DependencyStatus,
     _build_updated_spec,
     _extract_all_dependencies,
     _extract_dependencies_from_list,
@@ -56,7 +57,7 @@ def _make_dep(
     constraint: str = ">=1.0.0",
     current_min: str = "1.0.0",
     latest: str = "2.0.0",
-    status: str = "outdated",
+    status: DependencyStatus = DependencyStatus.OUTDATED,
     original_spec: str = "pkg>=1.0.0",
     upper_bound: str = "",
 ) -> DependencyInfo:
@@ -90,7 +91,7 @@ def _mock_httpx_response(*, status_code: int = 200, content: bytes = b"{}") -> M
 
 
 # ---------------------------------------------------------------------------
-# _parse_version_constraint — extras handling and fallback
+# _parse_version_constraint - extras handling and fallback
 # ---------------------------------------------------------------------------
 
 
@@ -151,7 +152,7 @@ def test_parse_version_constraint_with_marker_and_extras() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_pypi_data — HTTP error cases
+# _fetch_pypi_data - HTTP error cases
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +215,7 @@ def test_fetch_pypi_data_returns_parsed_json_on_success(mock_get: MagicMock) -> 
 
 
 # ---------------------------------------------------------------------------
-# fetch_latest_version — success path, None path, non-dict info
+# fetch_latest_version - success path, None path, non-dict info
 # ---------------------------------------------------------------------------
 
 
@@ -263,7 +264,7 @@ def test_fetch_latest_version_returns_empty_when_version_missing(mock_pypi: Magi
 
 
 # ---------------------------------------------------------------------------
-# _fetch_latest_version_below — filtering, prerelease skip, sorting, empty
+# _fetch_latest_version_below - filtering, prerelease skip, sorting, empty
 # ---------------------------------------------------------------------------
 
 
@@ -356,7 +357,7 @@ def test_fetch_latest_version_below_returns_none_when_releases_not_dict(mock_pyp
 
 
 # ---------------------------------------------------------------------------
-# _extract_dependencies_from_list — empty dep skip, pinned within range
+# _extract_dependencies_from_list - empty dep skip, pinned within range
 # ---------------------------------------------------------------------------
 
 
@@ -375,7 +376,7 @@ def test_extract_dependencies_skips_empty_strings(mock_latest: MagicMock) -> Non
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version")
 def test_extract_dependencies_skips_direct_url_references(mock_latest: MagicMock) -> None:
-    """PEP 440 direct URL references (pkg @ git+https://...) are skipped — not on PyPI."""
+    """PEP 440 direct URL references (pkg @ git+https://...) are skipped - not on PyPI."""
     mock_latest.return_value = "1.0.0"
 
     results = _extract_dependencies_from_list(
@@ -403,7 +404,7 @@ def test_extract_dependencies_detects_pinned_within_range(mock_latest: MagicMock
     results = _extract_dependencies_from_list(["pytest>=8.4.2,<9"], "test-source")
 
     assert len(results) == 1
-    assert results[0].status == "pinned"
+    assert results[0].status == DependencyStatus.PINNED
     assert "pinned <9" in results[0].latest
 
 
@@ -418,7 +419,7 @@ def test_extract_dependencies_detects_outdated_within_range(mock_latest: MagicMo
     results = _extract_dependencies_from_list(["pytest>=8.4.2,<9"], "test-source")
 
     assert len(results) == 1
-    assert results[0].status == "outdated"
+    assert results[0].status == DependencyStatus.OUTDATED
     assert "8.5.0" in results[0].latest
 
 
@@ -433,11 +434,11 @@ def test_extract_dependencies_pinned_when_below_returns_none(mock_latest: MagicM
     results = _extract_dependencies_from_list(["pytest>=8.4.2,<9"], "test-source")
 
     assert len(results) == 1
-    assert results[0].status == "pinned"
+    assert results[0].status == DependencyStatus.PINNED
 
 
 # ---------------------------------------------------------------------------
-# _extract_all_dependencies — optional deps, build system, poetry, pdm, uv
+# _extract_all_dependencies - optional deps, build system, poetry, pdm, uv
 # ---------------------------------------------------------------------------
 
 
@@ -646,7 +647,7 @@ def test_extract_all_dependencies_uv_dev_dependencies(mock_below: MagicMock, moc
 
 
 # ---------------------------------------------------------------------------
-# check_dependencies — basic invocation
+# check_dependencies - basic invocation
 # ---------------------------------------------------------------------------
 
 
@@ -665,7 +666,7 @@ def test_check_dependencies_reads_pyproject(mock_below: MagicMock, mock_latest: 
 
 
 # ---------------------------------------------------------------------------
-# print_report — error count increment
+# print_report - error count increment
 # ---------------------------------------------------------------------------
 
 
@@ -673,7 +674,7 @@ def test_check_dependencies_reads_pyproject(mock_below: MagicMock, mock_latest: 
 def test_print_report_counts_errors(capsys: pytest.CaptureFixture[str]) -> None:
     """Error status dependencies are counted in the summary."""
     deps = [
-        _make_dep(name="broken-pkg", status="error", latest="not found"),
+        _make_dep(name="broken-pkg", status=DependencyStatus.ERROR, latest="not found"),
     ]
 
     exit_code = print_report(deps, verbose=True)
@@ -687,7 +688,7 @@ def test_print_report_counts_errors(capsys: pytest.CaptureFixture[str]) -> None:
 def test_print_report_returns_one_when_outdated(capsys: pytest.CaptureFixture[str]) -> None:
     """Returns exit code 1 when any dependency is outdated."""
     deps = [
-        _make_dep(name="old-pkg", status="outdated"),
+        _make_dep(name="old-pkg", status=DependencyStatus.OUTDATED),
     ]
 
     exit_code = print_report(deps, verbose=True)
@@ -701,7 +702,7 @@ def test_print_report_returns_one_when_outdated(capsys: pytest.CaptureFixture[st
 def test_print_report_returns_zero_when_all_up_to_date(capsys: pytest.CaptureFixture[str]) -> None:
     """Returns exit code 0 when all dependencies are up-to-date."""
     deps = [
-        _make_dep(name="good-pkg", status="up-to-date", latest="1.0.0"),
+        _make_dep(name="good-pkg", status=DependencyStatus.UP_TO_DATE, latest="1.0.0"),
     ]
 
     exit_code = print_report(deps, verbose=True)
@@ -720,7 +721,7 @@ def test_print_report_empty_deps(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _build_updated_spec — markers, extras, no constraint, extras re-add
+# _build_updated_spec - markers, extras, no constraint, extras re-add
 # ---------------------------------------------------------------------------
 
 
@@ -849,7 +850,7 @@ def test_build_updated_spec_preserves_upper_bound() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _installed_versions — reads the TARGET environment, not this process
+# _installed_versions - reads the TARGET environment, not this process
 # ---------------------------------------------------------------------------
 
 
@@ -899,7 +900,7 @@ def test_installed_versions_handles_missing_uv(_mock_run: MagicMock) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _find_packages_needing_install — installed None, outdated
+# _find_packages_needing_install - installed None, outdated
 # ---------------------------------------------------------------------------
 
 
@@ -1000,7 +1001,7 @@ def test_find_packages_needing_install_keeps_extras_and_marker_together() -> Non
 
 
 # ---------------------------------------------------------------------------
-# _run_pip_install — install target isolation
+# _run_pip_install - install target isolation
 # ---------------------------------------------------------------------------
 
 
@@ -1107,7 +1108,7 @@ def test_run_pip_install_handles_missing_uv(_mock_run: MagicMock) -> None:
 
 
 # ---------------------------------------------------------------------------
-# sync_installed_packages — dry run, actual run, no updates
+# sync_installed_packages - dry run, actual run, no updates
 # ---------------------------------------------------------------------------
 
 
@@ -1195,7 +1196,7 @@ def test_sync_installed_packages_no_updates_needed(
 
 
 # ---------------------------------------------------------------------------
-# update_dependencies — round-trip fidelity
+# update_dependencies - round-trip fidelity
 # ---------------------------------------------------------------------------
 
 
@@ -1220,7 +1221,11 @@ def test_update_dependencies_preserves_comments_and_formatting(tmp_path: Path) -
     )
     deps = [
         _make_dep(
-            name="requests", status="outdated", current_min="1.0.0", latest="2.0.0", original_spec="requests>=1.0.0"
+            name="requests",
+            status=DependencyStatus.OUTDATED,
+            current_min="1.0.0",
+            latest="2.0.0",
+            original_spec="requests>=1.0.0",
         )
     ]
 
@@ -1244,7 +1249,13 @@ def test_update_dependencies_ignores_matching_text_in_comments(tmp_path: Path) -
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "demo"\ndependencies = [\n    # "ghost>=1.0.0",\n]\n')
     deps = [
-        _make_dep(name="ghost", status="outdated", current_min="1.0.0", latest="2.0.0", original_spec="ghost>=1.0.0")
+        _make_dep(
+            name="ghost",
+            status=DependencyStatus.OUTDATED,
+            current_min="1.0.0",
+            latest="2.0.0",
+            original_spec="ghost>=1.0.0",
+        )
     ]
 
     updated = update_dependencies(deps, pyproject, quiet=True)
@@ -1254,7 +1265,7 @@ def test_update_dependencies_ignores_matching_text_in_comments(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
-# update_dependencies — dry run, actual update, not found in file
+# update_dependencies - dry run, actual update, not found in file
 # ---------------------------------------------------------------------------
 
 
@@ -1267,7 +1278,7 @@ def test_update_dependencies_dry_run(tmp_path: Path, capsys: pytest.CaptureFixtu
     deps = [
         _make_dep(
             name="requests",
-            status="outdated",
+            status=DependencyStatus.OUTDATED,
             original_spec="requests>=1.0.0",
             latest="2.31.0",
         ),
@@ -1292,7 +1303,7 @@ def test_update_dependencies_actual_update(tmp_path: Path, capsys: pytest.Captur
     deps = [
         _make_dep(
             name="requests",
-            status="outdated",
+            status=DependencyStatus.OUTDATED,
             original_spec="requests>=1.0.0",
             latest="2.31.0",
         ),
@@ -1316,7 +1327,7 @@ def test_update_dependencies_not_found_in_file(tmp_path: Path, capsys: pytest.Ca
     deps = [
         _make_dep(
             name="phantom",
-            status="outdated",
+            status=DependencyStatus.OUTDATED,
             original_spec="phantom>=1.0.0",
             latest="2.0.0",
         ),
@@ -1336,7 +1347,7 @@ def test_update_dependencies_no_outdated(tmp_path: Path, capsys: pytest.CaptureF
     pyproject.write_text('[project]\ndependencies = ["requests>=2.31.0"]\n')
 
     deps = [
-        _make_dep(name="requests", status="up-to-date"),
+        _make_dep(name="requests", status=DependencyStatus.UP_TO_DATE),
     ]
 
     count = update_dependencies(deps, pyproject)
@@ -1355,7 +1366,7 @@ def test_update_dependencies_with_single_quoted_spec(tmp_path: Path) -> None:
     deps = [
         _make_dep(
             name="click",
-            status="outdated",
+            status=DependencyStatus.OUTDATED,
             original_spec="click>=7.0.0",
             latest="8.1.0",
         ),
@@ -1369,7 +1380,7 @@ def test_update_dependencies_with_single_quoted_spec(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# main — with update flag, without
+# main - with update flag, without
 # ---------------------------------------------------------------------------
 
 
@@ -1387,7 +1398,7 @@ def test_main_without_update(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Without --update, reports but does not update."""
-    mock_check.return_value = [_make_dep(status="up-to-date")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.UP_TO_DATE)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1412,7 +1423,7 @@ def test_main_with_update(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """With --update, calls update_dependencies and sync_installed_packages."""
-    mock_check.return_value = [_make_dep(status="outdated")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.OUTDATED)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1441,7 +1452,7 @@ def test_main_with_update_skips_sync_without_a_target(
     Installing has no safe fallback: defaulting to the ambient interpreter is how
     a project ended up inflating a shared environment it did not own.
     """
-    mock_check.return_value = [_make_dep(status="outdated")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.OUTDATED)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1465,7 +1476,7 @@ def test_main_with_update_propagates_install_failure(
     tmp_path: Path,
 ) -> None:
     """A failed install is reported, not swallowed as success."""
-    mock_check.return_value = [_make_dep(status="outdated")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.OUTDATED)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1486,7 +1497,7 @@ def test_main_with_update_re_checks_after_changes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """After updating pyproject.toml, re-checks dependencies."""
-    mock_check.return_value = [_make_dep(status="outdated")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.OUTDATED)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1510,7 +1521,7 @@ def test_main_with_update_dry_run_does_not_recheck(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Dry run with update does not re-check dependencies after update."""
-    mock_check.return_value = [_make_dep(status="outdated")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.OUTDATED)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1534,7 +1545,7 @@ def test_main_returns_report_exit_code_without_update(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Without --update, returns the exit code from print_report."""
-    mock_check.return_value = [_make_dep(status="outdated")]
+    mock_check.return_value = [_make_dep(status=DependencyStatus.OUTDATED)]
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\nversion = "1.0.0"\n')
 
@@ -1544,7 +1555,7 @@ def test_main_returns_report_exit_code_without_update(
 
 
 # ---------------------------------------------------------------------------
-# compare_versions — basic checks
+# compare_versions - basic checks
 # ---------------------------------------------------------------------------
 
 
@@ -1569,7 +1580,7 @@ def test_compare_versions_unknown_on_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Remaining branch coverage — edge cases
+# Remaining branch coverage - edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -1645,7 +1656,7 @@ def test_update_dependencies_skips_empty_original_spec(tmp_path: Path, capsys: p
     pyproject.write_text('[project]\ndependencies = ["requests>=1.0.0"]\n')
 
     deps = [
-        _make_dep(name="ghost", status="outdated", original_spec="", latest="2.0.0"),
+        _make_dep(name="ghost", status=DependencyStatus.OUTDATED, original_spec="", latest="2.0.0"),
     ]
 
     count = update_dependencies(deps, pyproject)
@@ -1662,7 +1673,7 @@ def test_update_dependencies_skips_when_spec_unchanged(tmp_path: Path, capsys: p
     deps = [
         _make_dep(
             name="requests",
-            status="outdated",
+            status=DependencyStatus.OUTDATED,
             original_spec="requests>=2.0.0",
             latest="not found",  # _build_updated_spec returns original when latest="not found"
         ),

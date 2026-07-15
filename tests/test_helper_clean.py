@@ -67,7 +67,7 @@ def test_get_clean_patterns_reads_from_pyproject(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# clean — directory removal
+# clean - directory removal
 # ---------------------------------------------------------------------------
 
 
@@ -144,7 +144,7 @@ def test_clean_no_output_when_nothing_to_remove(tmp_path: Path, capsys: pytest.C
 
 
 # ---------------------------------------------------------------------------
-# clean — dry run
+# clean - dry run
 # ---------------------------------------------------------------------------
 
 
@@ -176,7 +176,7 @@ def test_clean_dry_run_prints_would_remove(tmp_path: Path, capsys: pytest.Captur
 
 
 # ---------------------------------------------------------------------------
-# clean — path containment (security)
+# clean - path containment (security)
 # ---------------------------------------------------------------------------
 
 
@@ -251,7 +251,7 @@ def test_clean_rejects_double_star_traversal(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# clean — glob wildcards
+# clean - glob wildcards
 # ---------------------------------------------------------------------------
 
 
@@ -269,7 +269,7 @@ def test_clean_handles_glob_patterns(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# clean — defaults to cwd and pyproject patterns
+# clean - defaults to cwd and pyproject patterns
 # ---------------------------------------------------------------------------
 
 

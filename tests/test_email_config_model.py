@@ -1,12 +1,15 @@
-"""Behaviour tests for EmailConfig model: validators, repr, and ConfMail conversion."""
+"""Behaviour tests for EmailConfig model: validators, redaction, and ConfMail conversion."""
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from bmk.adapters.email.config import EmailConfig, load_email_config_from_dict
+from bmk.adapters.cli.commands.email._common import apply_validated_overrides
+from bmk.adapters.email.config import REVEAL_SECRETS, EmailConfig, load_email_config_from_dict
 
 # ---------------------------------------------------------------------------
 # Validator: _coerce_string_to_list edge cases
@@ -75,6 +78,87 @@ def test_repr_shows_none_password_as_none() -> None:
     assert "smtp_password=None" in text
 
 
+# ---------------------------------------------------------------------------
+# Password redaction on EVERY export path, not just repr()
+#
+# repr() was redacted while str(), f"{config}", "%s"-logging, model_dump() and
+# model_dump_json() all emitted the plaintext password. Only repr() was tested, which is
+# exactly why the gap survived. One test per leaking path.
+# ---------------------------------------------------------------------------
+
+
+_EXPORT_PATHS: tuple[tuple[str, Callable[[EmailConfig], str]], ...] = (
+    ("str", str),
+    ("format", lambda c: f"{c}"),
+    ("model_dump", lambda c: str(c.model_dump())),
+    ("model_dump_json", lambda c: c.model_dump_json()),
+)
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(("path", "render"), _EXPORT_PATHS, ids=[name for name, _ in _EXPORT_PATHS])
+def test_password_is_redacted_on_every_export_path(path: str, render: Callable[[EmailConfig], str]) -> None:
+    """No export path emits the plaintext password."""
+    config = EmailConfig(smtp_hosts=["smtp.test.com:587"], smtp_password="secret123")
+
+    text = render(config)
+
+    assert "secret123" not in text, f"{path} leaked the plaintext password"
+    assert "[REDACTED]" in text
+
+
+@pytest.mark.os_agnostic
+def test_percent_s_logging_does_not_leak_password(caplog: pytest.LogCaptureFixture) -> None:
+    """`logger.error("%s", config)` renders via __str__ and must not leak."""
+    config = EmailConfig(smtp_password="secret123")
+
+    with caplog.at_level(logging.ERROR):
+        logging.getLogger(__name__).error("config=%s", config)
+
+    assert "secret123" not in caplog.text
+
+
+@pytest.mark.os_agnostic
+def test_model_dump_reveals_password_with_explicit_context() -> None:
+    """The opt-out context returns the real password for round-trip callers."""
+    config = EmailConfig(smtp_password="secret123")
+
+    revealed = config.model_dump(context={REVEAL_SECRETS: True})
+
+    assert revealed["smtp_password"] == "secret123"
+
+
+@pytest.mark.os_agnostic
+def test_none_password_serializes_as_none_not_redacted() -> None:
+    """An unset password stays None rather than becoming the redaction string."""
+    config = EmailConfig()
+
+    assert config.model_dump()["smtp_password"] is None
+
+
+@pytest.mark.os_agnostic
+def test_to_conf_mail_carries_the_real_password() -> None:
+    """Redaction must not reach the object that actually authenticates."""
+    config = EmailConfig(smtp_hosts=["smtp.test.com:587"], smtp_password="secret123")
+
+    assert config.to_conf_mail().smtp_password == "secret123"
+
+
+@pytest.mark.os_agnostic
+def test_override_round_trip_preserves_the_real_password() -> None:
+    """apply_validated_overrides dumps and re-validates; redaction must not break auth.
+
+    Without the explicit reveal context this returns "[REDACTED]" as the password and SMTP
+    auth fails with a credential that looks plausible in a log.
+    """
+    config = EmailConfig(smtp_hosts=["smtp.test.com:587"], smtp_username="u", smtp_password="secret123")
+
+    merged = apply_validated_overrides(config, {"timeout": 12.0})
+
+    assert merged.smtp_password == "secret123"
+    assert merged.timeout == 12.0
+
+
 @pytest.mark.os_agnostic
 def test_repr_includes_all_fields() -> None:
     """All fields appear in repr."""
@@ -88,7 +172,7 @@ def test_repr_includes_all_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# to_conf_mail — attachment security kwargs
+# to_conf_mail - attachment security kwargs
 # ---------------------------------------------------------------------------
 
 
@@ -179,7 +263,7 @@ def test_coerce_max_size_zero_becomes_none() -> None:
 
 
 # ---------------------------------------------------------------------------
-# load_email_config_from_dict — nested attachments
+# load_email_config_from_dict - nested attachments
 # ---------------------------------------------------------------------------
 
 

@@ -7,7 +7,7 @@ here behind explicit, fully-known signatures keeps the rest of the code
 strict-clean without disabling the rule. This module is the single boundary that
 touches the untyped surface, so the only ``# pyright: ignore`` for this gap lives here.
 
-Other click members (``command``, ``group``, ``Path``, ``UNPROCESSED`` …) type
+Other click members (``command``, ``group``, ``Path``, ``UNPROCESSED`` ...) type
 cleanly and are still used directly as ``click.X`` at call sites.
 """
 

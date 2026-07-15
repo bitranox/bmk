@@ -248,7 +248,7 @@ def _execute_deploy(
     perm_defaults = get_permission_defaults(cli_ctx.config)
 
     # CLI --permissions/--no-permissions overrides config enabled setting
-    effective_set_permissions = set_permissions if set_permissions is not None else bool(perm_defaults["enabled"])
+    effective_set_permissions = set_permissions if set_permissions is not None else perm_defaults.enabled
 
     try:
         deployed_paths = cli_ctx.services.deploy_configuration(

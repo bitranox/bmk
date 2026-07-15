@@ -25,7 +25,7 @@ def _config_with_dependencies(deps: list[str]) -> PyprojectConfig:
 
 
 # ---------------------------------------------------------------------------
-# _extract_dependency_names — normalisation
+# _extract_dependency_names - normalisation
 # ---------------------------------------------------------------------------
 
 
@@ -120,7 +120,7 @@ def test_extract_dependency_names_handles_bare_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _find_local_dependencies — no matches
+# _find_local_dependencies - no matches
 # ---------------------------------------------------------------------------
 
 
@@ -151,7 +151,7 @@ def test_find_local_dependencies_ignores_sibling_without_pyproject(tmp_path: Pat
 
 
 # ---------------------------------------------------------------------------
-# _find_local_dependencies — matching siblings
+# _find_local_dependencies - matching siblings
 # ---------------------------------------------------------------------------
 
 
@@ -271,7 +271,7 @@ def _make_completed(returncode: int) -> subprocess.CompletedProcess[bytes]:
 
 
 # ---------------------------------------------------------------------------
-# run_cli — successful invocation
+# run_cli - successful invocation
 # ---------------------------------------------------------------------------
 
 
@@ -308,7 +308,7 @@ def test_run_cli_propagates_nonzero_exit_code(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# run_cli — empty project name
+# run_cli - empty project name
 # ---------------------------------------------------------------------------
 
 
@@ -327,7 +327,7 @@ def test_run_cli_returns_one_when_project_name_empty(tmp_path: Path, capsys: pyt
 
 
 # ---------------------------------------------------------------------------
-# run_cli — default args
+# run_cli - default args
 # ---------------------------------------------------------------------------
 
 
@@ -349,7 +349,7 @@ def test_run_cli_defaults_to_help_when_args_empty(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# run_cli — command construction
+# run_cli - command construction
 # ---------------------------------------------------------------------------
 
 

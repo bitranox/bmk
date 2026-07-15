@@ -35,7 +35,7 @@ from enum import Enum
 import rich_click as click
 
 from ..exit_codes import ExitCode
-from ._prerequisites import ToolCheck, check_prerequisites
+from ._prerequisites import ToolCheck, check_prerequisites, is_macos, is_windows
 
 
 class InstallOutcome(str, Enum):
@@ -89,14 +89,6 @@ _LINUX_PKG_MANAGERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("pacman", ("-S", "--noconfirm")),
     ("zypper", ("install", "-y")),
 )
-
-
-def _is_windows() -> bool:
-    return sys.platform == "win32"
-
-
-def _is_macos() -> bool:
-    return sys.platform == "darwin"
 
 
 def _externally_managed() -> bool:
@@ -155,9 +147,9 @@ def _system_action(
     ``linux_pkg=None`` means the tool has no reliable default-repo package on
     Linux (e.g. pwsh), so it is skipped with ``skip_reason``.
     """
-    if _is_windows():
+    if is_windows():
         return _InstallAction(_InstallKind.ARGV, win_argv)
-    if _is_macos():
+    if is_macos():
         return _InstallAction(_InstallKind.ARGV, mac_argv)
     if linux_pkg is None:
         return _InstallAction(_InstallKind.NONE, reason=skip_reason)
