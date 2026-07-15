@@ -24,6 +24,50 @@ Two rules before the tables:
 (`pytest`, `pytest-cov`) must be declared there**, because the suite runs in your venv, not
 in bmk's. bmk's environment holds bmk's toolchain and nothing of yours.
 
+## The Python version of your venv
+
+| Key                                          | Type | What bmk does                                                                                                    | Missing?                                     |
+|----------------------------------------------|------|------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
+| `[project].classifiers` (`:: Python :: X.Y`) | list | Picks the **highest** `X.Y` you declare, keeps it installed and on its latest patch, and builds `.venv` with it. | uv chooses the interpreter, as it always did |
+
+bmk builds your `.venv` on the **newest Python your project says it supports**, at that
+version's **latest patch**:
+
+```toml
+[project]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3",       # ignored: no minor
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.14",    # <- bmk builds .venv on 3.14, latest patch
+]
+```
+
+**Why the classifiers and not `requires-python`.** `requires-python` is a floor. `>=3.10` says
+nothing about the newest version you support, so it cannot answer "which Python should the venv
+be". The classifiers are where you state that - and your CI workflow already builds its test
+matrix from exactly these entries. Reading the same key keeps your venv and your CI matrix
+agreeing about the newest supported Python instead of quietly drifting apart.
+
+Only entries with a dotted `X.Y` count, so the conventional bare `:: Python :: 3` and
+`:: Python :: 3 :: Only` are skipped. The highest is chosen numerically, so `3.14` beats `3.9`
+(a lexical sort would get that backwards).
+
+**What this costs, and when.** Before a command that touches the environment, bmk runs
+`uv python install <X.Y>` and `uv python upgrade <X.Y>`. Both are needed: `install` fetches a
+version you have just added to the classifiers, and `upgrade` is what moves an already-installed
+minor onto a newer patch - `install` alone will not, it keeps the version it already has. When
+you are current this costs about 0.1s and works offline.
+
+If your `.venv` was built on a different version, it is **rebuilt** - an interpreter cannot be
+upgraded in place. The path never changes, so nothing that points at the venv breaks; the cost is
+one full re-resolve, and only when the version actually moves. If uv cannot say what it would
+provide (offline with the version absent, uv not installed), your existing venv is left exactly
+as it is: bmk never rebuilds on a guess.
+
+**Declaring nothing is a valid choice.** With no `:: Python :: X.Y` classifier, bmk picks no
+version and uv's own default stands - bmk will not invent a version you never claimed to support.
+
 ### Package name derivation
 
 Tried in order, first hit wins:

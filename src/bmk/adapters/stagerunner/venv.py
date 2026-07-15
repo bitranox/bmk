@@ -15,13 +15,16 @@ that follow it in the same run.
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
+import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 # Sync targets, tried in order: a project with no ``[dev]`` extra (bmk itself is
 # one - all its tooling is a runtime dependency by design) must still sync.
@@ -50,6 +53,98 @@ def venv_python(venv: Path) -> Path:
     return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+_PY_CLASSIFIER = "Programming Language :: Python :: "
+
+
+def desired_python_minor(cwd: Path) -> str | None:
+    """Highest ``X.Y`` the project's Python classifiers declare, or None.
+
+    The trove classifiers are the only place a project states which Python versions it
+    supports. ``requires-python`` cannot answer this: it is a floor (``>=3.10``) with no
+    upper bound, so it never names the newest supported version.
+
+    This is deliberately the SAME key the CI workflow reads to build its test matrix
+    (``Programming Language :: Python :: X.Y``, dotted entries only, so a bare
+    ``:: Python :: 3`` is skipped). Reading anything else here would let the local venv and
+    the CI matrix disagree about the newest supported Python.
+
+    Compared numerically, not lexically: ``"3.9" > "3.14"`` as strings.
+
+    Returns None when the project declares nothing (or cannot be read), which leaves uv's
+    own interpreter choice untouched - bmk should not invent a version the project never
+    claimed to support.
+    """
+    manifest = cwd / "pyproject.toml"
+    if not manifest.is_file():
+        return None
+    try:
+        config = load_pyproject_config(manifest)
+    except Exception:  # an unreadable manifest degrades, never aborts
+        return None
+
+    best: tuple[tuple[int, ...], str] | None = None
+    for classifier in config.project.classifiers:
+        if not classifier.startswith(_PY_CLASSIFIER):
+            continue
+        version = classifier[len(_PY_CLASSIFIER) :].strip()
+        if "." not in version:
+            continue
+        try:
+            parts = tuple(int(p) for p in version.split("."))
+        except ValueError:
+            continue
+        if best is None or parts > best[0]:
+            best = (parts, version)
+    return best[1] if best else None
+
+
+def latest_installed_patch(minor: str, cwd: Path) -> str | None:
+    """Newest installed patch of ``minor`` (e.g. ``3.14`` -> ``3.14.5``), or None.
+
+    Asks uv rather than reading its store layout. ``uv python find`` is NOT usable for
+    this: it answers with the interpreter for the current CONTEXT (an active venv, or the
+    cwd's own ``.venv``), not the one uv would provision.
+    """
+    raw = _run_capture(["uv", "python", "list", "--only-installed", "--output-format", "json"], cwd)
+    if not raw:
+        return None
+    try:
+        entries = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(entries, list):
+        return None
+
+    best: tuple[int, str] | None = None
+    for entry in cast("list[dict[str, Any]]", entries):
+        parts = entry.get("version_parts")
+        version = entry.get("version")
+        if not isinstance(parts, dict) or not isinstance(version, str):
+            continue
+        typed = cast("dict[str, Any]", parts)
+        if f"{typed.get('major')}.{typed.get('minor')}" != minor:
+            continue
+        patch = typed.get("patch")
+        if not isinstance(patch, int):
+            continue
+        if best is None or patch > best[0]:
+            best = (patch, version)
+    return best[1] if best else None
+
+
+def venv_version(venv: Path) -> str | None:
+    """``X.Y.Z`` of an existing venv, from its ``pyvenv.cfg``, or None."""
+    cfg = venv / "pyvenv.cfg"
+    if not cfg.is_file():
+        return None
+    for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() == "version_info":
+            # uv writes a bare X.Y.Z; CPython's own venv writes X.Y.Z.final.0.
+            return ".".join(value.strip().split(".")[:3]) or None
+    return None
+
+
 def is_venv(venv: Path) -> bool:
     """Whether ``venv`` is a usable virtual environment.
 
@@ -70,6 +165,16 @@ def _run(argv: list[str], cwd: Path, *, quiet: bool) -> int:
         # uv missing from PATH. Degrade to the caller's fallback rather than
         # breaking a run that may not have needed the venv at all.
         return 1
+
+
+def _run_capture(argv: list[str], cwd: Path) -> str | None:
+    """Run ``argv`` in ``cwd`` and return stdout, or None if it could not run."""
+    try:
+        # argv is built from literals; no shell, no user input.
+        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    return result.stdout if result.returncode == 0 else None
 
 
 def _git(argv: list[str], cwd: Path) -> tuple[int, str]:
@@ -267,11 +372,61 @@ def ensure_venv_typecheck_excluded(cwd: Path, venv: Path) -> None:
     print(f"[bmk] excluded from pyright: {', '.join(missing)} (its 'exclude' replaces the **/.* default)")
 
 
+def _ensure_python_available(cwd: Path, *, quiet: bool) -> str | None:
+    """Make the project's declared Python available to uv; return that ``X.Y``, or None.
+
+    BOTH commands are needed, and neither substitutes for the other:
+
+    * ``uv python install`` covers a minor that is not present at all - the classifiers can
+      change (a project adds ``:: Python :: 3.15``) and the version must then be fetched.
+    * ``uv python upgrade`` covers a minor that IS present but behind on patches. ``install``
+      will NOT do this: given an installed 3.14.0 it reports "Installed Python 3.14.0" and
+      keeps the stale one (measured), which is how every venv on a box can sit on 3.14.0
+      while 3.14.5 is a download away.
+
+    Both are best-effort: a failure leaves uv's own interpreter choice in place rather than
+    breaking a command that may not have needed a new Python at all. When already current
+    this costs ~0.1s and works offline ("already on the latest supported patch release").
+    """
+    minor = desired_python_minor(cwd)
+    if not minor:
+        return None
+    _run(["uv", "python", "install", minor], cwd, quiet=quiet)
+    _run(["uv", "python", "upgrade", minor], cwd, quiet=quiet)
+    return minor
+
+
+def _discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, quiet: bool) -> None:
+    """Remove an existing venv built on the wrong Python, so it gets recreated.
+
+    A venv's interpreter cannot be upgraded in place, so matching the declared version means
+    rebuilding. The path does not change, so the pins derived from it stay valid - and this
+    runs before ``build_context`` freezes them.
+
+    Only fires on a real mismatch against a target uv actually reports; if uv cannot answer
+    (offline, absent, unexpected output) the existing venv is left exactly as it was. The
+    rebuild costs a full re-resolve, so it must never be triggered by a guess.
+    """
+    if not minor or not is_venv(venv):
+        return
+    target = latest_installed_patch(minor, cwd)
+    current = venv_version(venv)
+    if not target or not current or current == target:
+        return
+    if not quiet:
+        print(f"[venv] python {current} -> {target}: rebuilding {venv.name}")
+    shutil.rmtree(venv, ignore_errors=True)
+
+
 def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True) -> Path | None:
     """Create the project venv if absent, then sync it to ``pyproject.toml``.
 
-    An existing venv is updated in place and never recreated, so its path - and
-    therefore the pins derived from it - stay stable across the run.
+    An existing venv is updated in place, so its path - and therefore the pins
+    derived from it - stay stable across the run. The one exception is the Python
+    version: an interpreter cannot be upgraded in place, so a venv built on a
+    version other than the one the project's classifiers declare is rebuilt at the
+    same path (see ``_discard_venv_on_wrong_python``). That happens here, before
+    ``build_context`` freezes the pins, so nothing downstream sees a stale path.
 
     The sync needs ``--exact`` *and* ``--upgrade``; either alone leaves the venv
     lying about what the project resolves, in a different way:
@@ -304,7 +459,11 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
         return None
 
     venv = resolve_project_venv(cwd, env)
-    if not is_venv(venv) and _run(["uv", "venv", str(venv)], cwd, quiet=quiet) != 0:
+    minor = _ensure_python_available(cwd, quiet=quiet)
+    _discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
+
+    create = ["uv", "venv", *(["--python", minor] if minor else []), str(venv)]
+    if not is_venv(venv) and _run(create, cwd, quiet=quiet) != 0:
         return None
     if not is_venv(venv):
         return None

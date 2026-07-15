@@ -6,6 +6,40 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.10.0] 2026-07-16 00:49:30
+
+### Added
+- **The project venv is built on the newest Python your project declares, at its latest patch.**
+  bmk read no version at all: it ran a bare `uv venv`, so uv used whatever interpreter it happened
+  to prefer. In practice that is a uv-managed install refreshed only when someone remembers to,
+  which is how a whole machine ends up with every venv on 3.14.0 while 3.14.5 is a download away.
+
+  The version comes from the **`Programming Language :: Python :: X.Y` classifiers** - the highest
+  one, compared numerically (`3.14` beats `3.9`; a lexical sort inverts that). Dotted entries only,
+  so the conventional bare `:: Python :: 3` is skipped.
+
+  `requires-python` deliberately does NOT decide this. It is a floor: `>=3.10` says nothing about
+  the newest version you support. The classifiers are where a project states that, and the CI
+  workflow already builds its test matrix from exactly those entries - so reading the same key
+  keeps your venv and your CI matrix agreeing about "newest supported" instead of drifting apart.
+  Declare no `:: Python :: X.Y` and bmk chooses nothing: uv's own default stands, unchanged.
+
+  Before a command that touches the environment, bmk runs `uv python install <X.Y>` **and**
+  `uv python upgrade <X.Y>`. Both are needed and neither substitutes for the other: `install`
+  fetches a minor just added to the classifiers, while `upgrade` is the only one that moves an
+  already-installed minor onto a newer patch - given an installed 3.14.0, `install` reports
+  "Installed Python 3.14.0" and keeps the stale one. Current and offline, the pair costs ~0.1s.
+
+  A venv built on a different version is **rebuilt**, because an interpreter cannot be upgraded in
+  place. The path never changes, so the pins derived from it stay valid, and it happens before
+  `build_context` freezes them. It fires only on a real mismatch against a target uv actually
+  reports: if uv cannot answer (offline with the version absent, uv missing), the existing venv is
+  left exactly as it is. A rebuild costs a full re-resolve and must never run on a guess.
+
+  Expect one rebuild per repo the first time this runs, wherever the venv is behind.
+
+  Documented in `docs/pyproject-reference.md`, the `devops-bmk` skill, and `CLAUDE.md`.
+
 ## [3.9.1] 2026-07-16 00:13:38
 
 ### Fixed

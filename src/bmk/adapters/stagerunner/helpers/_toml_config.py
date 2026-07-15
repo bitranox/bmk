@@ -324,6 +324,12 @@ class ProjectSection(BaseModel):
     optional_dependencies: Annotated[dict[str, tuple[str, ...]], BeforeValidator(_coerce_str_tuple_dict)] = Field(
         default_factory=dict, validation_alias="optional-dependencies"
     )
+    # The trove classifiers, read for the `Programming Language :: Python :: X.Y` entries:
+    # they are what declares the Python versions a project supports, and the CI workflow
+    # already builds its test matrix from them. `requires-python` cannot serve that purpose
+    # - it is a floor (`>=3.10`) with no upper bound, so it never names the newest supported
+    # version. See `venv.desired_python_minor`.
+    classifiers: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
 
 
 class BuildSystemSection(BaseModel):
