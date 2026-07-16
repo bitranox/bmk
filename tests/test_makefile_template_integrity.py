@@ -279,6 +279,21 @@ def _recipe_lines(text: str, target: str) -> list[str]:
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize("target", ["test-all", "clean-all"])
+def test_matrix_and_purge_targets_call_bmk(target: str) -> None:
+    """The matrix (`test-all`) and purge (`clean-all`) targets must reach bmk, and ride
+    _ensure_bmk like every other target so bmk is installed first."""
+    text = _template_text()
+    assert f"{target}: _ensure_bmk" in text, f"{target} must depend on _ensure_bmk"
+    assert any(f"$(BMK) {target}" in line for line in _recipe_lines(text, target)), (
+        f"{target} must invoke `$(BMK) {target}`"
+    )
+    assert target in text.split("_BMK_TARGETS :=", 1)[1].split("\n\n", 1)[0], (
+        f"{target} must be in _BMK_TARGETS so trailing words forward as $(ARGS)"
+    )
+
+
+@pytest.mark.os_agnostic
 @pytest.mark.parametrize("target", ["commit", "c", "push", "psh p"])
 def test_message_targets_quote_args(target: str) -> None:
     """commit/push pass "$(ARGS)" quoted, so bash cannot parse the message as code.

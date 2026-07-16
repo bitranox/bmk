@@ -26,8 +26,6 @@ import tomlkit
 
 from bmk.adapters.stagerunner.venv import ensure_venv_typecheck_excluded
 
-VENVS = (".venv", ".venv-bmk", ".venv-win")
-
 
 def _write(project: Path, body: str) -> None:
     (project / "pyproject.toml").write_text(body, encoding="utf-8")
@@ -47,16 +45,31 @@ def project(tmp_path: Path) -> Path:
 
 
 @pytest.mark.os_agnostic
-def test_explicit_exclude_gains_the_venv_dirs(project: Path) -> None:
-    """The template's own config is the broken case, so it must be repaired."""
+def test_glob_exclude_is_idempotent_across_matrix_venvs(project: Path) -> None:
+    """The `.venv*` entry is added once and recognised as covering every concrete venv.
+
+    Runs for several different matrix venvs must not grow the exclude list - which pins that
+    an existing `.venv*` counts as covering `.venv-3.10`, `.venv-3.14`, etc.
+    """
+    _write(project, '[tool.pyright]\nexclude = ["scripts/menu.py"]\n')
+
+    ensure_venv_typecheck_excluded(project, project / ".venv")
+    ensure_venv_typecheck_excluded(project, project / ".venv-3.10")
+    ensure_venv_typecheck_excluded(project, project / ".venv-3.14")
+
+    assert _exclude(project).count(".venv*") == 1
+
+
+@pytest.mark.os_agnostic
+def test_explicit_exclude_gains_the_venv_glob(project: Path) -> None:
+    """One `.venv*` entry keeps every venv (default, siblings, and .venv-<minor>) out of strict pyright."""
     _write(project, '[tool.pyright]\nexclude = ["scripts/menu.py"]\n')
 
     ensure_venv_typecheck_excluded(project, project / ".venv")
 
     excluded = _exclude(project)
     assert "scripts/menu.py" in excluded, "must not drop what the project already excluded"
-    for name in VENVS:
-        assert name in excluded, f"{name} would be type-checked in strict mode"
+    assert ".venv*" in excluded, "the .venv* glob covers every venv, including the matrix"
 
 
 @pytest.mark.os_agnostic
@@ -174,17 +187,29 @@ def test_wildcard_default_alone_is_enough(project: Path) -> None:
 
 
 @pytest.mark.os_agnostic
-def test_custom_uv_project_environment_is_excluded(project: Path) -> None:
-    """UV_PROJECT_ENVIRONMENT can name a venv outside the standard set."""
+def test_custom_venv_matching_the_glob_needs_no_extra_entry(project: Path) -> None:
+    """A `.venv-custom` path is already covered by `.venv*` - no separate entry."""
     _write(project, '[tool.pyright]\nexclude = ["scripts/menu.py"]\n')
 
     ensure_venv_typecheck_excluded(project, project / ".venv-custom")
 
-    assert ".venv-custom" in _exclude(project)
+    assert ".venv*" in _exclude(project)
 
 
 @pytest.mark.os_agnostic
-def test_venv_outside_the_repo_adds_only_the_standard_names(project: Path, tmp_path: Path) -> None:
+def test_non_venv_named_environment_gets_its_own_entry(project: Path) -> None:
+    """UV_PROJECT_ENVIRONMENT can name a venv OUTSIDE the `.venv*` pattern (e.g. `env`)."""
+    _write(project, '[tool.pyright]\nexclude = ["scripts/menu.py"]\n')
+
+    ensure_venv_typecheck_excluded(project, project / "env")
+
+    excluded = _exclude(project)
+    assert ".venv*" in excluded
+    assert "env" in excluded, "a non-.venv* venv is not covered by the glob, so it needs its own entry"
+
+
+@pytest.mark.os_agnostic
+def test_venv_outside_the_repo_adds_only_the_glob(project: Path, tmp_path: Path) -> None:
     """A venv that is not inside the project cannot be walked by pyright."""
     _write(project, '[tool.pyright]\nexclude = ["scripts/menu.py"]\n')
     outside = tmp_path.parent / "elsewhere-venv"
@@ -193,5 +218,4 @@ def test_venv_outside_the_repo_adds_only_the_standard_names(project: Path, tmp_p
 
     excluded = _exclude(project)
     assert "elsewhere-venv" not in excluded
-    for name in VENVS:
-        assert name in excluded
+    assert ".venv*" in excluded

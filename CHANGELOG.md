@@ -6,7 +6,42 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
-## [3.10.1] 2026-07-16 01:15:25
+## [3.11.0] 2026-07-16 14:34:33
+
+### Added
+- **`make test-all`: run the suite and type-check on EVERY declared Python version, in parallel.**
+  `make test` gates against one venv - the newest declared Python. CI runs the whole matrix, but
+  there was no way to reproduce it locally, so a break that only shows on 3.10 stayed invisible
+  until CI. `test-all` provisions one `.venv-<minor>` per `Programming Language :: Python :: X.Y`
+  classifier (by minor, not patch - the dir stays stable while uv auto-follows patch upgrades),
+  runs `pytest` and `pyright --pythonpath <that venv>` in each concurrently, and reports per
+  version with the actual patch it ran on:
+
+  ```
+  test-all:
+    3.10     3.10.20   PASS
+    3.14     3.14.5    PASS
+  ```
+
+  Only pytest and pyright are repeated - they are the version-sensitive gates (pyright's typeshed
+  has per-version conditionals); ruff/bandit are AST-only and pip-audit is env-based, so running
+  them per version buys nothing. A version whose venv cannot be provisioned (a dep dropped that
+  Python) is reported ERROR, distinct from a test FAIL; any non-PASS fails the run, and every
+  version still runs. With no `:: Python :: X.Y` classifier, `test-all` tests the default
+  interpreter once and prints a WARNING naming the version so a green run is not mistaken for
+  full-matrix coverage. `make test` is unchanged (newest version, under coverage). The same
+  classifiers already drive CI's matrix, so local and CI cannot disagree about the supported set.
+
+- **`make clean-all`: everything `clean` removes, plus every `.venv*`.** Plain `clean` keeps the
+  venvs on purpose (deleting one forces a full re-resolve on the next command). `clean-all` is the
+  explicit "remove it all" - the whole matrix (`.venv-3.10` .. `.venv-3.14`) plus `.venv` and
+  `.venv-bmk` - for reclaiming disk or forcing a from-scratch rebuild.
+
+### Changed
+- **The venv `.gitignore` entry is now a single `.venv*` glob** instead of listing `.venv`,
+  `.venv-win`, `.venv-bmk` individually. One glob covers those and every `.venv-<minor>` the matrix
+  creates, so no per-version line is ever needed. An existing rule (however spelled) is respected;
+  a repo with only the old literal `.venv/` gains the glob so its matrix venvs are covered too.
 
 ### Fixed
 - **A new Python patch no longer rebuilds every venv for nothing.** 3.10.0 decided whether the

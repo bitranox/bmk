@@ -37,6 +37,72 @@ def _pyproject(tmp_path: Path, classifiers: list[str]) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# all_python_minors: every X.Y the classifiers declare, ascending
+#
+# The full matrix `test-all` runs. desired_python_minor is now just its last element.
+# Same key and rules as CI's matrix parse (dotted entries only, numeric order).
+# ---------------------------------------------------------------------------
+
+
+def test_all_python_minors_ascending(tmp_path: Path) -> None:
+    _pyproject(
+        tmp_path,
+        [
+            "Programming Language :: Python :: 3.14",
+            "Programming Language :: Python :: 3.10",
+            "Programming Language :: Python :: 3.12",
+        ],
+    )
+    assert venv_mod.all_python_minors(tmp_path) == ["3.10", "3.12", "3.14"]
+
+
+def test_all_python_minors_orders_numerically_not_lexically(tmp_path: Path) -> None:
+    """3.9 must sort BELOW 3.14, which a string sort gets backwards."""
+    _pyproject(
+        tmp_path,
+        ["Programming Language :: Python :: 3.14", "Programming Language :: Python :: 3.9"],
+    )
+    assert venv_mod.all_python_minors(tmp_path) == ["3.9", "3.14"]
+
+
+def test_all_python_minors_skips_bare_major_and_unrelated(tmp_path: Path) -> None:
+    _pyproject(
+        tmp_path,
+        [
+            "Programming Language :: Python :: 3",
+            "Programming Language :: Python :: 3 :: Only",
+            "License :: OSI Approved :: MIT License",
+            "Programming Language :: Python :: 3.11",
+        ],
+    )
+    assert venv_mod.all_python_minors(tmp_path) == ["3.11"]
+
+
+def test_all_python_minors_empty_when_none_declared(tmp_path: Path) -> None:
+    _pyproject(tmp_path, ["License :: OSI Approved :: MIT License"])
+    assert venv_mod.all_python_minors(tmp_path) == []
+
+
+def test_all_python_minors_empty_without_pyproject(tmp_path: Path) -> None:
+    assert venv_mod.all_python_minors(tmp_path) == []
+
+
+def test_all_python_minors_empty_on_unparseable(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("!!! not toml [[[", encoding="utf-8")
+    assert venv_mod.all_python_minors(tmp_path) == []
+
+
+def test_desired_python_minor_is_the_last_of_all(tmp_path: Path) -> None:
+    """desired_python_minor and all_python_minors must never disagree."""
+    _pyproject(
+        tmp_path,
+        ["Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.14"],
+    )
+    minors = venv_mod.all_python_minors(tmp_path)
+    assert venv_mod.desired_python_minor(tmp_path) == minors[-1]
+
+
+# ---------------------------------------------------------------------------
 # desired_python_minor: the highest X.Y the classifiers declare
 # ---------------------------------------------------------------------------
 

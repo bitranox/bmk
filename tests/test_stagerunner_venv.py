@@ -12,6 +12,7 @@ import pytest
 
 from bmk.adapters.stagerunner.venv import (
     ensure_project_venv,
+    ensure_project_venv_at,
     ensure_venv_ignored,
     is_venv,
     resolve_project_venv,
@@ -98,6 +99,81 @@ def test_is_venv_accepts_a_real_venv(tmp_path: Path) -> None:
 def test_is_venv_false_when_absent(tmp_path: Path) -> None:
     """A missing path is not a venv."""
     assert is_venv(tmp_path / "nope") is False
+
+
+# ---------------------------------------------------------------------------
+# ensure_project_venv_at - provisioning at an explicit path on an explicit minor
+# (the matrix building block; `test-all` calls it once per declared version)
+# ---------------------------------------------------------------------------
+
+
+def _run_that_creates_venv_on_uv_venv() -> MagicMock:
+    """A `_run` mock that materializes the venv when it sees `uv venv <path>`.
+
+    Without this the create path returns None (is_venv stays False under a pure mock),
+    so the install/sync argv is never reached. The side effect makes the flow realistic.
+    """
+
+    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True) -> int:
+        _ = quiet  # matches _run's real signature; the code calls quiet=...
+        if argv[:2] == ["uv", "venv"]:
+            _make_venv(Path(argv[-1]))
+        return 0
+
+    mock = MagicMock(side_effect=side_effect)
+    return mock
+
+
+@pytest.mark.os_agnostic
+def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    target = tmp_path / ".venv-3.12"
+    mock_run = _run_that_creates_venv_on_uv_venv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        result = ensure_project_venv_at(tmp_path, target, "3.12")
+
+    assert result == target
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    create = next(c for c in cmds if c[:2] == ["uv", "venv"])
+    assert "--python" in create and "3.12" in create and str(target) in create
+    assert ["uv", "python", "install", "3.12"] in cmds
+    assert ["uv", "python", "upgrade", "3.12"] in cmds
+    install = next(c for c in cmds if c[:3] == ["uv", "pip", "install"])
+    assert str(venv_python(target)) in install
+
+
+@pytest.mark.os_agnostic
+def test_ensure_at_without_a_minor_omits_the_python_pin(tmp_path: Path) -> None:
+    """minor=None (no classifiers) -> uv picks the interpreter; the default-venv path."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    target = tmp_path / ".venv"
+    mock_run = _run_that_creates_venv_on_uv_venv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        ensure_project_venv_at(tmp_path, target, None)
+
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    create = next(c for c in cmds if c[:2] == ["uv", "venv"])
+    assert "--python" not in create
+    assert not any(c[:3] == ["uv", "python", "install"] for c in cmds), "no minor -> nothing to install"
+
+
+@pytest.mark.os_agnostic
+def test_ensure_project_venv_delegates_to_ensure_at(tmp_path: Path) -> None:
+    """ensure_project_venv is now a thin caller: default path, desired (highest) minor."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nclassifiers = ["Programming Language :: Python :: 3.13"]\n'
+    )
+    mock_run = _run_that_creates_venv_on_uv_venv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        result = ensure_project_venv(tmp_path, {})
+
+    assert result == tmp_path / ".venv"
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    create = next(c for c in cmds if c[:2] == ["uv", "venv"])
+    assert "3.13" in create and str(tmp_path / ".venv") in create
 
 
 # ---------------------------------------------------------------------------
@@ -241,48 +317,63 @@ def test_ensure_venv_ignored_is_a_noop_outside_a_git_repo(tmp_path: Path) -> Non
 
 @pytest.mark.os_agnostic
 @pytest.mark.local_only
-def test_ensure_venv_ignored_adds_missing_entries(tmp_path: Path) -> None:
-    """Adds the managed venv plus the standard pair when nothing ignores them."""
+def test_ensure_venv_ignored_adds_one_venv_glob(tmp_path: Path) -> None:
+    """One `.venv*/` glob covers .venv, .venv-win, .venv-bmk AND every .venv-<minor>.
+
+    A single glob is what makes the version matrix work: `test-all` creates .venv-3.10 ..
+    .venv-3.14 and none of them needs its own line.
+    """
     if not _git_repo(tmp_path):
         pytest.skip("git unavailable")
 
     ensure_venv_ignored(tmp_path, tmp_path / ".venv")
 
     content = (tmp_path / ".gitignore").read_text()
-    assert ".venv/" in content
-    assert ".venv-win/" in content
+    assert ".venv*/" in content
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_ensure_venv_ignored_glob_covers_matrix_and_siblings(tmp_path: Path) -> None:
+    """After the glob is written, git itself ignores every venv name we care about."""
+    if not _git_repo(tmp_path):
+        pytest.skip("git unavailable")
+
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+
+    for name in (".venv", ".venv-win", ".venv-bmk", ".venv-3.10", ".venv-3.14"):
+        code = subprocess.run(
+            ["git", "-C", str(tmp_path), "check-ignore", "-q", "--", f"{name}/"], check=False
+        ).returncode
+        assert code == 0, f"{name}/ must be ignored by the .venv* glob"
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.local_only
 def test_ensure_venv_ignored_is_idempotent(tmp_path: Path) -> None:
-    """Repeated runs must not append the same entry again.
+    """Repeated runs, for different matrix venvs, keep exactly one glob line.
 
-    Entries are written as `dir/`, and a `dir/` rule only matches a path git KNOWS
-    is a directory - which it cannot for one that does not exist yet. So the check
-    must ask about `.venv-win/`, not `.venv-win`; asking about the bare name makes
-    an existing rule look absent and .gitignore grows without bound.
+    The presence check probes a synthetic name only the glob covers, so an existing
+    `.venv*/` is recognised however the individual venv is named.
     """
     if not _git_repo(tmp_path):
         pytest.skip("git unavailable")
 
-    for _ in range(3):
-        ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv")
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv-3.10")
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv-3.14")
 
-    content = (tmp_path / ".gitignore").read_text()
-    assert content.count(".venv-win/") == 1
-    assert content.count(".venv/") == 1
+    assert (tmp_path / ".gitignore").read_text().count(".venv*/") == 1
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.local_only
-def test_ensure_venv_ignored_declares_a_name_uv_only_self_ignores(tmp_path: Path) -> None:
-    """uv's own nested .gitignore does not count as the repo declaring the name.
+def test_ensure_venv_ignored_declares_the_glob_not_uvs_self_ignore(tmp_path: Path) -> None:
+    """uv's own nested .gitignore (`*`) does not count as the repo declaring the venv.
 
-    `uv venv` writes a .gitignore containing `*` INSIDE every venv it creates, so
-    the venv reports as ignored by its own file. That is uv hiding its artifact,
-    not the repo declaring the name - and taking it as declared would leave
-    `.venv` undeclared while its `.venv-win` sibling got written.
+    `uv venv` writes `*` INSIDE every venv, so a venv reports as ignored by its own file.
+    That is uv hiding its artifact, not the repo declaring it - taking it as declared would
+    leave the matrix venvs uncovered.
     """
     if not _git_repo(tmp_path):
         pytest.skip("git unavailable")
@@ -292,19 +383,13 @@ def test_ensure_venv_ignored_declares_a_name_uv_only_self_ignores(tmp_path: Path
 
     ensure_venv_ignored(tmp_path, venv)
 
-    content = (tmp_path / ".gitignore").read_text()
-    assert ".venv/" in content, "the repo must declare the name, not lean on uv's self-ignore"
-    assert ".venv-win/" in content
+    assert ".venv*/" in (tmp_path / ".gitignore").read_text()
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.local_only
-def test_ensure_venv_ignored_respects_an_existing_rule(tmp_path: Path) -> None:
-    """An already-ignored name is not appended again.
-
-    git check-ignore is the authority, so a rule that covers the name by wildcard
-    counts - a text search for the exact string would not see it.
-    """
+def test_ensure_venv_ignored_respects_an_existing_glob(tmp_path: Path) -> None:
+    """An existing `.venv*` rule is left exactly as it is - not duplicated."""
     if not _git_repo(tmp_path):
         pytest.skip("git unavailable")
     (tmp_path / ".gitignore").write_text(".venv*\n")
@@ -316,14 +401,20 @@ def test_ensure_venv_ignored_respects_an_existing_rule(tmp_path: Path) -> None:
 
 @pytest.mark.os_agnostic
 @pytest.mark.local_only
-def test_ensure_venv_ignored_adds_a_custom_venv_name(tmp_path: Path) -> None:
-    """A venv at a non-default path is ignored under its own name."""
+def test_ensure_venv_ignored_adds_the_glob_alongside_a_stale_literal(tmp_path: Path) -> None:
+    """A repo with only the old literal `.venv/` gains the glob, so matrix venvs are covered.
+
+    Old bmk wrote literal names; the literal does NOT cover .venv-3.14, so the glob must be
+    added. The stale literal is left in place (bmk does not rewrite the user's file).
+    """
     if not _git_repo(tmp_path):
         pytest.skip("git unavailable")
+    (tmp_path / ".gitignore").write_text(".venv/\n")
 
-    ensure_venv_ignored(tmp_path, tmp_path / ".venv-custom")
+    ensure_venv_ignored(tmp_path, tmp_path / ".venv-3.14")
 
-    assert ".venv-custom/" in (tmp_path / ".gitignore").read_text()
+    content = (tmp_path / ".gitignore").read_text()
+    assert ".venv*/" in content
 
 
 @pytest.mark.os_agnostic

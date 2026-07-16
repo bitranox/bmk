@@ -15,7 +15,7 @@ from bmk.domain.enums import ToolOutputFormat
 from . import git_ops, tools
 from .actions import HelperAction, PipAuditAction, PipelineAction, ToolAction
 from .context import resolve_audit_python
-from .helpers import _clean, _dependencies
+from .helpers import _clean, _dependencies, _matrix
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
 from .venv import is_venv, resolve_project_venv, venv_python
@@ -27,6 +27,32 @@ def clean_action(ctx: StageContext) -> int:
         project_dir=ctx.project_dir,
         dry_run=False,
         verbose=False,
+        quiet=ctx.output_format is not ToolOutputFormat.TEXT,
+    )
+
+
+def purge_action(ctx: StageContext) -> int:
+    """Everything ``clean`` removes, PLUS every ``.venv*`` (the ``clean-all`` target).
+
+    ``clean`` deliberately keeps the venv (deleting it forces a full re-resolve; see
+    ``_clean``). ``clean-all`` is the explicit "remove it all" - the whole version matrix
+    (``.venv-3.10`` .. ``.venv-3.14``) plus ``.venv`` / ``.venv-bmk``. Not in
+    ``VENV_PIPELINES``, so no venv is provisioned just to delete it.
+    """
+    patterns = (*_clean.get_clean_patterns(ctx.project_dir / "pyproject.toml"), ".venv*")
+    return _clean.clean(
+        project_dir=ctx.project_dir,
+        patterns=patterns,
+        dry_run=False,
+        verbose=False,
+        quiet=ctx.output_format is not ToolOutputFormat.TEXT,
+    )
+
+
+def matrix_action(ctx: StageContext) -> int:
+    """Run pytest + pyright on every Python version the classifiers declare (``test-all``)."""
+    return _matrix.main(
+        project_dir=ctx.project_dir,
         quiet=ctx.output_format is not ToolOutputFormat.TEXT,
     )
 
@@ -133,6 +159,8 @@ PIPELINES: dict[str, tuple[Stage, ...]] = {
     "deps": (Stage("deps", 10, HelperAction(deps_action)),),
     "deps_update": (Stage("deps_update", 10, HelperAction(deps_update_action)),),
     "test": _TEST_PIPELINE,
+    "test_all": (Stage("test_all", 10, HelperAction(matrix_action)),),
+    "clean_all": (Stage("clean_all", 10, HelperAction(purge_action)),),
     "cov": _COV_PIPELINE,
     "test_integration": _TEST_INTEGRATION_PIPELINE,
     "bump_major": _bump_pipeline("major"),

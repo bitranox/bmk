@@ -195,3 +195,6 @@ CLAUDE.local.md
 
 # Python virtual environments (managed by bmk)
 .venv-bmk/
+
+# Python virtual environments (managed by bmk)
+.venv*/

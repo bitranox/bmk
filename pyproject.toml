@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.10.1"
+version = "3.11.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"

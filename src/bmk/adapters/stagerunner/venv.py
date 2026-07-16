@@ -56,33 +56,29 @@ def venv_python(venv: Path) -> Path:
 _PY_CLASSIFIER = "Programming Language :: Python :: "
 
 
-def desired_python_minor(cwd: Path) -> str | None:
-    """Highest ``X.Y`` the project's Python classifiers declare, or None.
+def all_python_minors(cwd: Path) -> list[str]:
+    """Every ``X.Y`` the project's Python classifiers declare, ascending numerically.
 
     The trove classifiers are the only place a project states which Python versions it
-    supports. ``requires-python`` cannot answer this: it is a floor (``>=3.10``) with no
-    upper bound, so it never names the newest supported version.
+    supports; ``requires-python`` is a floor and names none of them. This reads the SAME key
+    the CI workflow parses for its test matrix (``Programming Language :: Python :: X.Y``,
+    dotted entries only - a bare ``:: Python :: 3`` is skipped), so the local matrix
+    (``test-all``) and the CI matrix cannot disagree about which versions are supported.
 
-    This is deliberately the SAME key the CI workflow reads to build its test matrix
-    (``Programming Language :: Python :: X.Y``, dotted entries only, so a bare
-    ``:: Python :: 3`` is skipped). Reading anything else here would let the local venv and
-    the CI matrix disagree about the newest supported Python.
+    Sorted numerically, not lexically: as strings ``"3.9" > "3.14"``, which is backwards.
 
-    Compared numerically, not lexically: ``"3.9" > "3.14"`` as strings.
-
-    Returns None when the project declares nothing (or cannot be read), which leaves uv's
-    own interpreter choice untouched - bmk should not invent a version the project never
-    claimed to support.
+    Returns ``[]`` when the project declares nothing or cannot be read - a degrade, never a
+    raise, since provisioning is best-effort.
     """
     manifest = cwd / "pyproject.toml"
     if not manifest.is_file():
-        return None
+        return []
     try:
         config = load_pyproject_config(manifest)
     except Exception:  # an unreadable manifest degrades, never aborts
-        return None
+        return []
 
-    best: tuple[tuple[int, ...], str] | None = None
+    found: list[tuple[tuple[int, ...], str]] = []
     for classifier in config.project.classifiers:
         if not classifier.startswith(_PY_CLASSIFIER):
             continue
@@ -93,9 +89,19 @@ def desired_python_minor(cwd: Path) -> str | None:
             parts = tuple(int(p) for p in version.split("."))
         except ValueError:
             continue
-        if best is None or parts > best[0]:
-            best = (parts, version)
-    return best[1] if best else None
+        found.append((parts, version))
+    return [version for _, version in sorted(found)]
+
+
+def desired_python_minor(cwd: Path) -> str | None:
+    """Highest ``X.Y`` the project's Python classifiers declare, or None.
+
+    The single newest version, used to build the default ``.venv``. It is exactly the last
+    of :func:`all_python_minors`; the two never disagree. See that function for why the
+    classifiers (not ``requires-python``) are the source and why the order is numeric.
+    """
+    minors = all_python_minors(cwd)
+    return minors[-1] if minors else None
 
 
 def latest_installed_patch(minor: str, cwd: Path) -> str | None:
@@ -230,24 +236,31 @@ def _untrack(cwd: Path, name: str) -> bool:
     return True
 
 
+_VENV_GLOB = ".venv*"
+# A synthetic name ONLY the `.venv*` glob covers - not the old literal `.venv/`. `git
+# check-ignore` needs a concrete path, not a pattern, so probing this is how we ask "is the
+# glob declared" without matching a stale literal.
+_VENV_IGNORE_PROBE = ".venv-bmkignoreprobe"
+
+
 def _ignore_entries(cwd: Path, venv: Path) -> list[str]:
-    """Names that should be gitignored: the managed venv plus the usual set.
+    """Names to gitignore: one ``.venv*`` glob, plus a non-matching custom venv path.
 
-    ``.venv-win`` earns its place even on Linux: one checkout reached from two
-    operating systems needs a venv each, and the sibling's directory is
-    otherwise permanently untracked noise in `git status`.
+    A single ``.venv*`` covers ``.venv``, ``.venv-win`` (the Windows sibling on a
+    cross-OS checkout), ``.venv-bmk`` (the Makefile's own bmk env), and every
+    ``.venv-<minor>`` the version matrix creates - so the matrix needs no per-version line.
 
-    ``.venv-bmk`` is the per-project environment the Makefile installs bmk into.
-    bmk does not create it (the Makefile does, before bmk exists), so listing it
-    here is the only place that can keep it out of git.
+    A venv placed OUTSIDE that pattern via ``UV_PROJECT_ENVIRONMENT`` (e.g. ``env``) is not
+    covered by the glob, so its own name is added too.
     """
-    names = [".venv", ".venv-win", ".venv-bmk"]
+    entries = [_VENV_GLOB]
     try:
-        relative = venv.resolve().relative_to(cwd.resolve())
+        managed = venv.resolve().relative_to(cwd.resolve()).parts[0]
     except ValueError:
-        return names  # venv lives outside the repo; nothing to ignore for it
-    managed = relative.parts[0]
-    return names if managed in names else [managed, *names]
+        return entries  # venv lives outside the repo; the glob is all that is relevant
+    if not fnmatch.fnmatch(managed, _VENV_GLOB):
+        entries.append(managed)
+    return entries
 
 
 def _is_declared(cwd: Path, name: str) -> bool:
@@ -283,10 +296,21 @@ def _append_to_gitignore(cwd: Path, missing: list[str]) -> None:
     print(f"[bmk] added to .gitignore: {', '.join(missing)}")
 
 
-def ensure_venv_ignored(cwd: Path, venv: Path) -> None:
-    """Keep the venv out of git: untrack it if tracked, gitignore it if not ignored.
+def _covered(cwd: Path, name: str) -> bool:
+    """Whether the repo already ignores ``name``.
 
-    bmk creates this directory, so bmk is responsible for it not polluting the
+    For the ``.venv*`` glob, ``git check-ignore`` cannot be asked about a pattern - only a
+    concrete path - so a synthetic probe name only the glob covers stands in for it. A stale
+    literal ``.venv/`` does NOT match the probe, so the glob is still (correctly) added.
+    """
+    probe = _VENV_IGNORE_PROBE if name == _VENV_GLOB else name
+    return _is_declared(cwd, probe)
+
+
+def ensure_venv_ignored(cwd: Path, venv: Path) -> None:
+    """Keep every venv out of git: untrack any tracked one, gitignore via a ``.venv*`` glob.
+
+    bmk creates these directories, so bmk is responsible for them not polluting the
     repository. Never raises: a git problem must not fail a build.
     """
     if not _is_git_worktree(cwd):
@@ -294,12 +318,11 @@ def ensure_venv_ignored(cwd: Path, venv: Path) -> None:
 
     entries = _ignore_entries(cwd, venv)
     for name in entries:
-        _untrack(cwd, name)
+        _untrack(cwd, name)  # `.venv*` untracks every venv in one pass (git glob pathspec)
 
-    # git decides what is already covered, so an existing rule - a wildcard, a
-    # nested .gitignore, a global excludesFile - is respected rather than
-    # duplicated. A text search over .gitignore would see none of those.
-    missing = [n for n in entries if not _is_declared(cwd, n)]
+    # git decides what is already covered, so an existing rule - a wildcard, a nested
+    # .gitignore, a global excludesFile - is respected rather than duplicated.
+    missing = [n for n in entries if not _covered(cwd, n)]
     if missing:
         _append_to_gitignore(cwd, missing)
 
@@ -388,8 +411,8 @@ def ensure_venv_typecheck_excluded(cwd: Path, venv: Path) -> None:
     print(f"[bmk] excluded from pyright: {', '.join(missing)} (its 'exclude' replaces the **/.* default)")
 
 
-def _ensure_python_available(cwd: Path, *, quiet: bool) -> str | None:
-    """Make the project's declared Python available to uv; return that ``X.Y``, or None.
+def _ensure_minor_installed(minor: str, cwd: Path, *, quiet: bool) -> None:
+    """Make ``minor`` available to uv at its latest patch.
 
     BOTH commands are needed, and neither substitutes for the other:
 
@@ -404,12 +427,8 @@ def _ensure_python_available(cwd: Path, *, quiet: bool) -> str | None:
     breaking a command that may not have needed a new Python at all. When already current
     this costs ~0.1s and works offline ("already on the latest supported patch release").
     """
-    minor = desired_python_minor(cwd)
-    if not minor:
-        return None
     _run(["uv", "python", "install", minor], cwd, quiet=quiet)
     _run(["uv", "python", "upgrade", minor], cwd, quiet=quiet)
-    return minor
 
 
 def _discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, quiet: bool) -> None:
@@ -473,9 +492,30 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
     """
     if not (cwd / "pyproject.toml").is_file():
         return None
-
     venv = resolve_project_venv(cwd, env)
-    minor = _ensure_python_available(cwd, quiet=quiet)
+    return ensure_project_venv_at(cwd, venv, desired_python_minor(cwd), quiet=quiet)
+
+
+def ensure_project_venv_at(cwd: Path, venv: Path, minor: str | None, *, quiet: bool = True) -> Path | None:
+    """Provision a venv at an EXPLICIT path on an EXPLICIT Python minor, then sync it.
+
+    The building block behind both the default ``.venv`` (via :func:`ensure_project_venv`,
+    ``minor`` = the highest classifier) and the per-version matrix (``test-all`` calls this
+    once per declared minor with ``venv = .venv-<minor>``). Every step is a pure function of
+    ``(venv, minor)``, so nothing here assumes the default path or the newest version.
+
+    ``minor=None`` means "no declared version": uv's own interpreter choice stands and no
+    ``--python`` pin is passed - the historical default-venv behaviour.
+
+    The sync needs ``--exact`` AND ``--upgrade``; each covers a distinct way a venv drifts
+    (a dropped dep lingering; an unconstrained transitive never moving off a vulnerable
+    release). Packages installed by hand do not survive it. See :func:`ensure_project_venv`.
+
+    Returns the venv path, or ``None`` if it could not be provisioned. Never raises: a
+    failure degrades rather than aborting the command.
+    """
+    if minor:
+        _ensure_minor_installed(minor, cwd, quiet=quiet)
     _discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
 
     create = ["uv", "venv", *(["--python", minor] if minor else []), str(venv)]

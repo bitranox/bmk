@@ -27,6 +27,7 @@ from __future__ import annotations
 from .build_cmd import cli_bld, cli_build
 from .bump_cmd import cli_b, cli_bmp, cli_bump
 from .clean_cmd import cli_cl, cli_clean, cli_cln
+from .cleanall_cmd import cli_clean_all
 from .commit_cmd import cli_c, cli_commit
 from .config import cli_config, cli_config_deploy, cli_config_generate_examples
 from .cov_cmd import cli_codecov, cli_cov, cli_coverage
@@ -42,6 +43,7 @@ from .release_cmd import cli_r, cli_rel, cli_release
 from .run_cmd import cli_run
 from .ship_cmd import cli_sh, cli_ship
 from .test_integration_cmd import cli_testi, cli_testintegration, cli_ti
+from .testall_cmd import cli_test_all
 from .testsuite_cmd import cli_t, cli_test
 
 __all__ = [
@@ -53,6 +55,7 @@ __all__ = [
     "cli_c",
     "cli_cl",
     "cli_clean",
+    "cli_clean_all",
     "cli_cln",
     "cli_codecov",
     "cli_commit",
@@ -83,6 +86,7 @@ __all__ = [
     "cli_send_notification",
     "cli_t",
     "cli_test",
+    "cli_test_all",
     "cli_testintegration",
     "cli_testi",
     "cli_ti",

@@ -53,6 +53,11 @@ Only entries with a dotted `X.Y` count, so the conventional bare `:: Python :: 3
 `:: Python :: 3 :: Only` are skipped. The highest is chosen numerically, so `3.14` beats `3.9`
 (a lexical sort would get that backwards).
 
+The same classifiers drive **`make test-all`**: it provisions one `.venv-<minor>` per declared
+version and runs pytest + pyright in each, in parallel, so you can reproduce CI's version matrix
+locally before you push. Plain `make test` stays on the newest version only. With no classifier,
+`test-all` tests the default interpreter once and warns.
+
 **What this costs, and when.** Before a command that touches the environment, bmk runs
 `uv python install <X.Y>` and `uv python upgrade <X.Y>`. Both are needed: `install` fetches a
 version you have just added to the classifiers, and `upgrade` is what moves an already-installed
