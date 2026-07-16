@@ -6,6 +6,51 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.11.1] 2026-07-16 18:40:48
+
+### Security
+- **PowerShell command injection via `pyproject.toml` closed.** `_psscriptanalyzer.py` was the one
+  place that built a `pwsh -Command` string instead of an argv list, and it interpolated
+  `[tool.psscriptanalyzer].exclude-rules` and the project path unescaped. A hostile `pyproject.toml`
+  (a reviewed PR branch, a cloned repo) could run arbitrary PowerShell during a plain `bmk test`
+  when pwsh and a `.ps1` file were present. Fixed at two layers: the config boundary now drops any
+  rule id that is not `^PS[A-Za-z0-9]+$`, and the path and rules are PowerShell-escaped
+  (single-quoted with doubled quotes; rules emitted as a quoted array, or omitted when empty).
+
+### Fixed
+- **Perpetual venv rebuild on hosts with a non-CPython interpreter.** `latest_installed_patch` took
+  the highest patch across all implementations, but bmk only ever provisions CPython. With PyPy (or
+  another impl) installed for the same `X.Y` at an equal-or-higher patch, the reported "newest"
+  never matched the CPython venv, so `test`/`push`/`cov`/`deps`/`bld` rebuilt it on every run. It now
+  filters to CPython.
+- **Unattributed, interleaved `--human` output.** Concurrent stages in a batch streamed to the same
+  stream and tore each other's lines mid-write with no way to tell which tool a line came from.
+  Text-mode concurrent batches now use a lock-guarded, `[stage]`-prefixed sink, so lines stay whole
+  and attributed. JSON mode is unchanged.
+- **PyPI metadata fetch is now streamed with a size cap**, so a broken or hostile endpoint cannot
+  make bmk buffer an unbounded body into memory.
+
+### Changed
+- **Missing email configuration now exits `78` (`CONFIG_ERROR`), not `2`.** A missing `from_address`
+  or missing recipients raised `ValueError` (mapped to exit 2, an argument error) while missing SMTP
+  hosts already raised `ConfigurationError` (exit 78). All three now raise `ConfigurationError` for
+  a consistent diagnosis; a malformed recipient override still raises the argument-level error.
+- **`--smtp-password` help discourages the flag** in favour of the `BMK___EMAIL__SMTP_PASSWORD` env
+  var or a `.env` file (a CLI password is visible in the process list and shell history).
+- **Strict data-architecture pass (internal).** `output_format` is typed `ToolOutputFormat` end to
+  end in the shell/PSScriptAnalyzer/coverage helpers; a `ToolName` enum centralises the ensure and
+  prerequisite tool vocabulary; a `BumpPart` enum types the version-bump part; `ToolOutputFormat.from_env`
+  is the single `BMK_OUTPUT_FORMAT` decoder; `uv python list` and `gh run list` JSON are parsed into
+  Pydantic models; the in-memory `EmailSpy` records are typed dataclasses; and `custom` reads
+  `[tool.bmk]` settings via dotted `config.get` instead of dumping the whole config.
+
+### Added
+- **Root dev `Makefile` gains `test-all` and `clean-all`**, mirroring the template Makefile so
+  `make test-all` (per-version matrix) and `make clean-all` (purge every `.venv*`) work here too.
+- **Expanded test coverage** for the injection defences, `ship` orchestration and CI gate, the
+  config-deploy return path, the new Pydantic models' malformed-entry skip paths, `test-all` CLI
+  dispatch, and previously untested `_toml_config` / `PoetryDepSpec` / `_sync_initconf` branches.
+
 ## [3.11.0] 2026-07-16 14:34:33
 
 ### Added

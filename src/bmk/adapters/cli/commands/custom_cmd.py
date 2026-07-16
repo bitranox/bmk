@@ -67,14 +67,13 @@ def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> Non
     """
     validate_command_name(command_name)
     cwd = Path.cwd()
-    bmk_config = config.as_dict().get("bmk", {})
 
     exit_code = run_command(
         cwd,
         args,
         command_prefix=command_name,
-        package_name=bmk_config.get("package_name", ""),
-        show_warnings=bmk_config.get("show_warnings", True),
+        package_name=config.get("bmk.package_name", default=""),
+        show_warnings=config.get("bmk.show_warnings", default=True),
     )
 
     if exit_code != 0:

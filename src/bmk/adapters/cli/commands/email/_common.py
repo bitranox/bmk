@@ -93,7 +93,14 @@ def smtp_config_options(func: Callable[..., Any]) -> Callable[..., Any]:
             help="Override SMTP host (can specify multiple; format host:port)",
         ),
         option("--smtp-username", default=None, help="Override SMTP authentication username"),
-        option("--smtp-password", default=None, help="Override SMTP authentication password"),
+        option(
+            "--smtp-password",
+            default=None,
+            help=(
+                "Override SMTP authentication password (discouraged: visible in the process list "
+                "and shell history; prefer BMK___EMAIL__SMTP_PASSWORD or a .env file)"
+            ),
+        ),
         option("--use-starttls/--no-use-starttls", default=None, help="Override STARTTLS setting"),
         option("--timeout", "timeout", type=float, default=None, help="Override socket timeout in seconds"),
         option(

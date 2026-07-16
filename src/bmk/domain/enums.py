@@ -41,6 +41,40 @@ class ToolOutputFormat(str, Enum):
     TEXT = "text"
     JSON = "json"
 
+    @classmethod
+    def from_env(cls, value: str | None) -> ToolOutputFormat:
+        """Decode a raw ``BMK_OUTPUT_FORMAT`` value to a member.
+
+        ``TEXT`` only when the value is exactly ``"text"``; unset or anything else is the
+        ``JSON`` default. The single place that env var's string is interpreted, so the
+        ``BMK_OUTPUT_FORMAT`` rule cannot drift between call sites.
+        """
+        return cls.TEXT if value == cls.TEXT.value else cls.JSON
+
+
+class BumpPart(str, Enum):
+    """Semantic-version component to increment on a version bump.
+
+    Inherits from str so the value crosses the CLI/subprocess boundary unchanged
+    (argparse ``choices`` and the ``_bump_version`` helper argv both use the wire
+    strings) while business logic dispatches on typed members.
+
+    Attributes:
+        MAJOR: Increment the major component (X+1.0.0).
+        MINOR: Increment the minor component (X.Y+1.0).
+        PATCH: Increment the patch component (X.Y.Z+1).
+
+    Example:
+        >>> BumpPart.MINOR.value
+        'minor'
+        >>> BumpPart.PATCH == "patch"
+        True
+    """
+
+    MAJOR = "major"
+    MINOR = "minor"
+    PATCH = "patch"
+
 
 class DeployTarget(str, Enum):
     """Configuration deployment target layers.
@@ -66,6 +100,7 @@ class DeployTarget(str, Enum):
 
 
 __all__ = [
+    "BumpPart",
     "DeployTarget",
     "OutputFormat",
     "ToolOutputFormat",

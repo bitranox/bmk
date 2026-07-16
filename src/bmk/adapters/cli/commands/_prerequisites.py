@@ -16,6 +16,26 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from enum import Enum
+
+
+class ToolName(str, Enum):
+    """External tools bmk probes for and, where possible, installs.
+
+    The single definition of the tool vocabulary that ``_prerequisites`` and
+    ``_ensure`` dispatch on. Inherits from str so a member equals its wire name:
+    for every tool except :attr:`PSSCRIPTANALYZER` (a PowerShell module) the value
+    is the executable looked up on ``PATH``, and it is also the label shown in the
+    reports.
+    """
+
+    GIT = "git"
+    PWSH = "pwsh"
+    SHELLCHECK = "shellcheck"
+    SHFMT = "shfmt"
+    BASHATE = "bashate"
+    WINGET = "winget"
+    PSSCRIPTANALYZER = "PSScriptAnalyzer"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,15 +79,15 @@ def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
 
     Only probes the module when pwsh is already found in *results*.
     """
-    pwsh_result = next(r for r in results if r.name == "pwsh")
+    pwsh_result = next(r for r in results if r.name == ToolName.PWSH)
     if pwsh_result.found:
-        pwsh_path = shutil.which("pwsh") or "pwsh"
+        pwsh_path = shutil.which(ToolName.PWSH.value) or ToolName.PWSH.value
         found = _check_psscriptanalyzer(pwsh_path)
     else:
         found = False
     results.append(
         ToolCheck(
-            name="PSScriptAnalyzer",
+            name=ToolName.PSSCRIPTANALYZER.value,
             found=found,
             install_hint="Install-Module PSScriptAnalyzer -Force -Scope CurrentUser (requires pwsh)",
         )
@@ -77,16 +97,16 @@ def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
 def _posix_tools() -> list[ToolCheck]:
     macos = is_macos()
     tools: list[tuple[str, str]] = [
-        ("git", "brew install git" if macos else "sudo apt install git"),
+        (ToolName.GIT.value, "brew install git" if macos else "sudo apt install git"),
         (
-            "pwsh",
+            ToolName.PWSH.value,
             "brew install powershell/tap/powershell"
             if macos
             else "https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-linux",
         ),
-        ("shellcheck", "brew install shellcheck" if macos else "sudo apt install shellcheck"),
-        ("shfmt", "brew install shfmt" if macos else "sudo apt install shfmt"),
-        ("bashate", "pip install bashate"),
+        (ToolName.SHELLCHECK.value, "brew install shellcheck" if macos else "sudo apt install shellcheck"),
+        (ToolName.SHFMT.value, "brew install shfmt" if macos else "sudo apt install shfmt"),
+        (ToolName.BASHATE.value, "pip install bashate"),
     ]
     results: list[ToolCheck] = []
     for name, hint in tools:
@@ -98,20 +118,20 @@ def _posix_tools() -> list[ToolCheck]:
 def _windows_tools() -> list[ToolCheck]:
     results: list[ToolCheck] = [
         ToolCheck(
-            name="winget",
-            found=_check_tool_on_path("winget"),
+            name=ToolName.WINGET.value,
+            found=_check_tool_on_path(ToolName.WINGET.value),
             install_hint=(
                 'Pre-installed on Windows 11. For Windows 10: install "App Installer" from the Microsoft Store'
             ),
         ),
         ToolCheck(
-            name="git",
-            found=_check_tool_on_path("git"),
+            name=ToolName.GIT.value,
+            found=_check_tool_on_path(ToolName.GIT.value),
             install_hint="winget install Git.Git",
         ),
         ToolCheck(
-            name="pwsh",
-            found=_check_tool_on_path("pwsh"),
+            name=ToolName.PWSH.value,
+            found=_check_tool_on_path(ToolName.PWSH.value),
             install_hint="winget install Microsoft.PowerShell",
         ),
     ]
@@ -140,6 +160,7 @@ def format_prerequisites_report(results: list[ToolCheck]) -> str:
 
 __all__ = [
     "ToolCheck",
+    "ToolName",
     "check_prerequisites",
     "format_prerequisites_report",
     "is_macos",

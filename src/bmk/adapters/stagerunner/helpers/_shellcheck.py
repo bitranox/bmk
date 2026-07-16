@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.domain.enums import ToolOutputFormat
 
 _FALLBACK_BASHATE_MAX_LINE_LENGTH: int = 120
 _FALLBACK_BASHATE_IGNORES: tuple[str, ...] = ("E003",)
@@ -110,19 +111,21 @@ def find_sh_files(project_dir: Path) -> list[Path]:
     return sorted(files)
 
 
-def run_shellcheck(*, files: list[Path], verbose: bool = False, output_format: str = "text") -> int:
+def run_shellcheck(
+    *, files: list[Path], verbose: bool = False, output_format: ToolOutputFormat = ToolOutputFormat.TEXT
+) -> int:
     """Invoke shellcheck against the given files.
 
     Args:
         files: List of ``.sh`` files to lint.
         verbose: If True, print the command being run.
-        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
+        output_format: ``JSON`` for machine-readable output, ``TEXT`` for human-readable.
 
     Returns:
         Exit code (0 = clean, non-zero = violations found).
     """
     cmd = ["shellcheck", "-S", "warning", "-x"]
-    if output_format == "json":
+    if output_format is ToolOutputFormat.JSON:
         cmd.extend(["-f", "json1"])
     cmd.extend(str(f) for f in files)
     if verbose:
@@ -190,13 +193,15 @@ def run_bashate(
     return result.returncode
 
 
-def main(*, project_dir: Path | None = None, verbose: bool = False, output_format: str = "text") -> int:
+def main(
+    *, project_dir: Path | None = None, verbose: bool = False, output_format: ToolOutputFormat = ToolOutputFormat.TEXT
+) -> int:
     """Orchestrate the full shell lint flow.
 
     Args:
         project_dir: Root directory to lint. Defaults to cwd.
         verbose: If True, print additional diagnostic output.
-        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
+        output_format: ``JSON`` for machine-readable output, ``TEXT`` for human-readable.
 
     Returns:
         Exit code (0 on success, 1 on lint violations).
@@ -256,4 +261,6 @@ if __name__ == "__main__":  # pragma: no cover
         help="Output format: json for machine-readable, text for human-readable (default: text)",
     )
     args, _unknown = parser.parse_known_args()
-    sys.exit(main(project_dir=args.project_dir, verbose=args.verbose, output_format=args.output_format))
+    sys.exit(
+        main(project_dir=args.project_dir, verbose=args.verbose, output_format=ToolOutputFormat(args.output_format))
+    )

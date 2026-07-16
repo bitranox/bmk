@@ -198,3 +198,4 @@ CLAUDE.local.md
 
 # Python virtual environments (managed by bmk)
 .venv*/
+EXECUTION-USER-REVIEW.md

@@ -72,8 +72,8 @@ def test_when_send_email_is_invoked_with_valid_config_it_sends(
     assert result.exit_code == 0
     assert "Email sent successfully" in result.output
     assert len(ctx.spy.sent_emails) == 1
-    assert ctx.spy.sent_emails[0]["subject"] == "Test Subject"
-    assert ctx.spy.sent_emails[0]["recipients"] == ["recipient@test.com"]
+    assert ctx.spy.sent_emails[0].subject == "Test Subject"
+    assert ctx.spy.sent_emails[0].recipients == ["recipient@test.com"]
 
 
 @pytest.mark.os_agnostic
@@ -106,7 +106,7 @@ def test_when_send_email_receives_multiple_recipients_it_accepts_them(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["recipients"] == ["user1@test.com", "user2@test.com"]
+    assert ctx.spy.sent_emails[0].recipients == ["user1@test.com", "user2@test.com"]
 
 
 @pytest.mark.os_agnostic
@@ -139,7 +139,7 @@ def test_when_send_email_includes_html_body_it_sends(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["body_html"] == "<h1>HTML</h1>"
+    assert ctx.spy.sent_emails[0].body_html == "<h1>HTML</h1>"
 
 
 @pytest.mark.os_agnostic
@@ -178,7 +178,7 @@ def test_when_send_email_has_attachments_it_sends(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["attachments"] == [Path(attachment)]
+    assert ctx.spy.sent_emails[0].attachments == [Path(attachment)]
 
 
 @pytest.mark.os_agnostic
@@ -269,8 +269,8 @@ def test_when_send_notification_is_invoked_with_valid_config_it_sends(
     assert result.exit_code == 0
     assert "Notification sent successfully" in result.output
     assert len(ctx.spy.sent_notifications) == 1
-    assert ctx.spy.sent_notifications[0]["subject"] == "Alert"
-    assert ctx.spy.sent_notifications[0]["message"] == "System notification"
+    assert ctx.spy.sent_notifications[0].subject == "Alert"
+    assert ctx.spy.sent_notifications[0].message == "System notification"
 
 
 @pytest.mark.os_agnostic
@@ -303,7 +303,7 @@ def test_when_send_notification_receives_multiple_recipients_it_accepts_them(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_notifications[0]["recipients"] == ["admin1@test.com", "admin2@test.com"]
+    assert ctx.spy.sent_notifications[0].recipients == ["admin1@test.com", "admin2@test.com"]
 
 
 @pytest.mark.os_agnostic
@@ -371,7 +371,7 @@ def test_when_send_email_receives_smtp_host_override_it_uses_it(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["config"].smtp_hosts == ["smtp.override.com:465"]
+    assert ctx.spy.sent_emails[0].config.smtp_hosts == ["smtp.override.com:465"]
 
 
 @pytest.mark.os_agnostic
@@ -404,7 +404,7 @@ def test_when_send_email_receives_timeout_override_it_uses_it(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["config"].timeout == 60.0
+    assert ctx.spy.sent_emails[0].config.timeout == 60.0
 
 
 @pytest.mark.os_agnostic
@@ -436,7 +436,7 @@ def test_when_send_email_receives_no_use_starttls_override_it_applies_it(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["config"].use_starttls is False
+    assert ctx.spy.sent_emails[0].config.use_starttls is False
 
 
 @pytest.mark.os_agnostic
@@ -471,8 +471,8 @@ def test_when_send_email_receives_credential_overrides_it_uses_them(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_emails[0]["config"].smtp_username == "myuser"
-    assert ctx.spy.sent_emails[0]["config"].smtp_password == "mypass"
+    assert ctx.spy.sent_emails[0].config.smtp_username == "myuser"
+    assert ctx.spy.sent_emails[0].config.smtp_password == "mypass"
 
 
 @pytest.mark.os_agnostic
@@ -505,7 +505,7 @@ def test_when_send_notification_receives_from_override_it_uses_it(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_notifications[0]["from_address"] == "override@test.com"
+    assert ctx.spy.sent_notifications[0].from_address == "override@test.com"
 
 
 @pytest.mark.os_agnostic
@@ -538,7 +538,7 @@ def test_when_send_notification_receives_smtp_host_override_it_uses_it(
     )
 
     assert result.exit_code == 0
-    assert ctx.spy.sent_notifications[0]["config"].smtp_hosts == ["smtp.override.com:465"]
+    assert ctx.spy.sent_notifications[0].config.smtp_hosts == ["smtp.override.com:465"]
 
 
 # ======================== Attachment path validation ========================

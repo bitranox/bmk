@@ -18,6 +18,8 @@ from pathlib import Path
 import lib_log_rich.runtime
 import rich_click as click
 
+from bmk.domain.enums import ToolOutputFormat
+
 from ..constants import CLICK_CONTEXT_SETTINGS
 from ..exit_codes import ExitCode
 
@@ -65,7 +67,7 @@ def check_makefile_update() -> bool:
 
     import os
 
-    auto_accept = os.environ.get("BMK_OUTPUT_FORMAT", "json") != "text"
+    auto_accept = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
 
     if not auto_accept and not click.confirm(
         f"Makefile is outdated ({local_ver} \u2192 {bundled_ver}). Update?",

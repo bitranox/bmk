@@ -172,9 +172,24 @@ def test_none_on_unparseable_pyproject(tmp_path: Path) -> None:
 
 _UV_JSON = json.dumps(
     [
-        {"key": "cpython-3.14.5-linux", "version": "3.14.5", "version_parts": {"major": 3, "minor": 14, "patch": 5}},
-        {"key": "cpython-3.14.0-linux", "version": "3.14.0", "version_parts": {"major": 3, "minor": 14, "patch": 0}},
-        {"key": "cpython-3.13.13-linux", "version": "3.13.13", "version_parts": {"major": 3, "minor": 13, "patch": 13}},
+        {
+            "key": "cpython-3.14.5-linux",
+            "version": "3.14.5",
+            "version_parts": {"major": 3, "minor": 14, "patch": 5},
+            "implementation": "cpython",
+        },
+        {
+            "key": "cpython-3.14.0-linux",
+            "version": "3.14.0",
+            "version_parts": {"major": 3, "minor": 14, "patch": 0},
+            "implementation": "cpython",
+        },
+        {
+            "key": "cpython-3.13.13-linux",
+            "version": "3.13.13",
+            "version_parts": {"major": 3, "minor": 13, "patch": 13},
+            "implementation": "cpython",
+        },
     ]
 )
 
@@ -206,6 +221,50 @@ def test_latest_installed_patch_none_when_uv_fails(monkeypatch: pytest.MonkeyPat
 def test_latest_installed_patch_none_on_garbage_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns("not json at all"))
     assert venv_mod.latest_installed_patch("3.14", tmp_path) is None
+
+
+def test_latest_installed_patch_ignores_non_cpython_even_with_higher_patch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only CPython counts: uv provisions CPython, so a higher-patch PyPy must not win.
+
+    Otherwise the reported "newest" never matches the CPython venv and it rebuilds every run.
+    """
+    mixed = json.dumps(
+        [
+            {
+                "key": "cpython-3.11.15-linux",
+                "version": "3.11.15",
+                "version_parts": {"major": 3, "minor": 11, "patch": 15},
+                "implementation": "cpython",
+            },
+            {
+                "key": "pypy-3.11.20-linux",
+                "version": "3.11.20",
+                "version_parts": {"major": 3, "minor": 11, "patch": 20},
+                "implementation": "pypy",
+            },
+        ]
+    )
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(mixed))
+    assert venv_mod.latest_installed_patch("3.11", tmp_path) == "3.11.15"
+
+
+def test_latest_installed_patch_skips_malformed_entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An entry missing version_parts (or typed oddly) is skipped, not fatal."""
+    partial = json.dumps(
+        [
+            {"key": "broken", "version": "3.12.9"},  # no version_parts -> ValidationError -> skipped
+            {
+                "key": "cpython-3.12.7-linux",
+                "version": "3.12.7",
+                "version_parts": {"major": 3, "minor": 12, "patch": 7},
+                "implementation": "cpython",
+            },
+        ]
+    )
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(partial))
+    assert venv_mod.latest_installed_patch("3.12", tmp_path) == "3.12.7"
 
 
 # ---------------------------------------------------------------------------

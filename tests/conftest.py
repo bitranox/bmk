@@ -595,7 +595,7 @@ def email_cli_context(
                 obj=ctx.factory,
             )
             assert result.exit_code == 0
-            assert ctx.spy.sent_notifications[0]["subject"] == "Hi"
+            assert ctx.spy.sent_notifications[0].subject == "Hi"
     """
     from bmk.adapters.memory import load_email_config_from_dict_in_memory
     from bmk.adapters.memory.email import EmailSpy as EmailSpyImpl

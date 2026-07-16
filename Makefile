@@ -130,6 +130,10 @@ test: _ensure_bmk  ## Run test suite [alias: t]
 t: _ensure_bmk
 	$(BMK) test $(ARGS)
 
+.PHONY: test-all
+test-all: _ensure_bmk  ## Run pytest + pyright on every declared Python version (matrix)
+	$(BMK) test-all $(ARGS)
+
 .PHONY: test-human th
 test-human: _ensure_bmk  ## Run test suite with human-readable output [alias: th]
 	$(BMK) test --human $(ARGS)
@@ -169,6 +173,10 @@ clean: _ensure_bmk  ## Remove build artifacts and caches [aliases: cln, cl]
 	$(BMK) clean $(ARGS)
 cln cl: _ensure_bmk
 	$(BMK) clean $(ARGS)
+
+.PHONY: clean-all
+clean-all: _ensure_bmk  ## Remove build artifacts, caches AND every virtual environment (.venv*)
+	$(BMK) clean-all $(ARGS)
 
 # ──────────────────────────────────────────────────────────────
 # Run

@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.11.0"
+version = "3.11.1"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,7 +30,7 @@ dependencies = [
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.15.21",
+    "ruff>=0.15.22",
     "pyright[nodejs]>=1.1.411",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",

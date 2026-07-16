@@ -77,11 +77,11 @@ def _resolve_sender(config: EmailConfig, from_address: str | None) -> str:
         Resolved sender address.
 
     Raises:
-        ValueError: When neither override nor config provides a from_address.
+        ConfigurationError: When neither override nor config provides a from_address.
     """
     sender = from_address if from_address is not None else config.from_address
     if sender is None:
-        raise ValueError("No from_address configured and no override provided")
+        raise ConfigurationError("No from_address configured and no override provided")
     return sender
 
 
@@ -99,7 +99,7 @@ def _resolve_recipients(
         Non-empty list of recipient addresses.
 
     Raises:
-        ValueError: When no recipients are available from either source.
+        ConfigurationError: When no recipients are available from either source.
         InvalidRecipientError: When a runtime recipient has invalid email format.
     """
     if recipients is not None:
@@ -110,7 +110,7 @@ def _resolve_recipients(
         recipient_list = list(config.recipients)
 
     if not recipient_list:
-        raise ValueError("No recipients configured and no override provided")
+        raise ConfigurationError("No recipients configured and no override provided")
     return recipient_list
 
 

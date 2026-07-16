@@ -74,11 +74,16 @@ def _make_dep(
     )
 
 
-def _mock_httpx_response(*, status_code: int = 200, content: bytes = b"{}") -> MagicMock:
-    """Build a mock httpx2.Response with controllable status and content."""
+def _mock_httpx_stream(*, status_code: int = 200, content: bytes = b"{}") -> MagicMock:
+    """Build a mock ``httpx2.stream`` context manager yielding a controllable response.
+
+    ``_fetch_pypi_data`` streams the body (``with httpx2.stream(...) as response`` then
+    ``response.iter_bytes()``), so the mock is the context manager; entering it returns the
+    response whose ``iter_bytes`` yields ``content`` in a single chunk.
+    """
     resp = MagicMock(spec=httpx2.Response)
     resp.status_code = status_code
-    resp.content = content
+    resp.iter_bytes = MagicMock(return_value=[content])
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         http_error = httpx2.HTTPStatusError(
@@ -87,7 +92,10 @@ def _mock_httpx_response(*, status_code: int = 200, content: bytes = b"{}") -> M
             response=resp,
         )
         resp.raise_for_status.side_effect = http_error
-    return resp
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=resp)
+    cm.__exit__ = MagicMock(return_value=False)
+    return cm
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +165,10 @@ def test_parse_version_constraint_with_marker_and_extras() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.get")
-def test_fetch_pypi_data_returns_none_on_404(mock_get: MagicMock) -> None:
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_none_on_404(mock_stream: MagicMock) -> None:
     """Returns None when PyPI responds with 404."""
-    mock_get.return_value = _mock_httpx_response(status_code=404)
+    mock_stream.return_value = _mock_httpx_stream(status_code=404)
 
     result = _fetch_pypi_data("nonexistent-pkg")
 
@@ -168,10 +176,10 @@ def test_fetch_pypi_data_returns_none_on_404(mock_get: MagicMock) -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.get")
-def test_fetch_pypi_data_returns_none_on_connection_error(mock_get: MagicMock) -> None:
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_none_on_connection_error(mock_stream: MagicMock) -> None:
     """Returns None when httpx2 raises a ConnectError."""
-    mock_get.side_effect = httpx2.ConnectError("connection refused")
+    mock_stream.side_effect = httpx2.ConnectError("connection refused")
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -179,10 +187,10 @@ def test_fetch_pypi_data_returns_none_on_connection_error(mock_get: MagicMock) -
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.get")
-def test_fetch_pypi_data_returns_none_on_timeout(mock_get: MagicMock) -> None:
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_none_on_timeout(mock_stream: MagicMock) -> None:
     """Returns None when httpx2 raises a TimeoutException."""
-    mock_get.side_effect = httpx2.TimeoutException("read timeout")
+    mock_stream.side_effect = httpx2.TimeoutException("read timeout")
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -190,11 +198,11 @@ def test_fetch_pypi_data_returns_none_on_timeout(mock_get: MagicMock) -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.get")
-def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_get: MagicMock) -> None:
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_stream: MagicMock) -> None:
     """Returns None when response body is not valid JSON."""
-    resp = _mock_httpx_response(status_code=200, content=b"not json{{{")
-    mock_get.return_value = resp
+    resp = _mock_httpx_stream(status_code=200, content=b"not json{{{")
+    mock_stream.return_value = resp
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -202,12 +210,12 @@ def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_get: MagicMock) 
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.get")
-def test_fetch_pypi_data_returns_parsed_json_on_success(mock_get: MagicMock) -> None:
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_parsed_json_on_success(mock_stream: MagicMock) -> None:
     """Returns parsed dict on successful response."""
     payload = {"info": {"version": "3.0.0"}}
-    resp = _mock_httpx_response(status_code=200, content=orjson.dumps(payload))
-    mock_get.return_value = resp
+    resp = _mock_httpx_stream(status_code=200, content=orjson.dumps(payload))
+    mock_stream.return_value = resp
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -1610,10 +1618,10 @@ def test_parse_version_constraint_only_upper_bound() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.get")
-def test_fetch_pypi_data_returns_none_on_non_404_http_error(mock_get: MagicMock) -> None:
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_none_on_non_404_http_error(mock_stream: MagicMock) -> None:
     """Returns None on non-404 HTTP errors (e.g. 500 server error)."""
-    mock_get.return_value = _mock_httpx_response(status_code=500)
+    mock_stream.return_value = _mock_httpx_stream(status_code=500)
 
     result = _fetch_pypi_data("some-pkg")
 

@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.domain.enums import BumpPart
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -53,36 +54,30 @@ def parse_version(version_str: str) -> tuple[int, int, int]:
     return int(parts[0]), int(parts[1]), int(parts[2])
 
 
-def bump_version(current: tuple[int, int, int], part: str) -> str:
+def bump_version(current: tuple[int, int, int], part: BumpPart) -> str:
     """Bump version by specified part.
 
     Args:
         current: Current version as (major, minor, patch) tuple.
-        part: Which part to bump: "major", "minor", or "patch".
+        part: Which component to increment.
 
     Returns:
         New version string in X.Y.Z format.
 
-    Raises:
-        ValueError: If part is not "major", "minor", or "patch".
-
     Example:
-        >>> bump_version((1, 2, 3), "major")
+        >>> bump_version((1, 2, 3), BumpPart.MAJOR)
         '2.0.0'
-        >>> bump_version((1, 2, 3), "minor")
+        >>> bump_version((1, 2, 3), BumpPart.MINOR)
         '1.3.0'
-        >>> bump_version((1, 2, 3), "patch")
+        >>> bump_version((1, 2, 3), BumpPart.PATCH)
         '1.2.4'
     """
     major, minor, patch = current
-    if part == "major":
+    if part is BumpPart.MAJOR:
         return f"{major + 1}.0.0"
-    if part == "minor":
+    if part is BumpPart.MINOR:
         return f"{major}.{minor + 1}.0"
-    if part == "patch":
-        return f"{major}.{minor}.{patch + 1}"
-    msg = f"Invalid part: {part}"
-    raise ValueError(msg)
+    return f"{major}.{minor}.{patch + 1}"
 
 
 def update_pyproject(project_dir: Path, new_version: str) -> str:
@@ -206,7 +201,7 @@ def main() -> int:
         Exit code: 0 on success, 1 on error.
     """
     parser = argparse.ArgumentParser(description="Bump version in pyproject.toml and CHANGELOG.md")
-    parser.add_argument("part", choices=["major", "minor", "patch"], help="Version part to bump")
+    parser.add_argument("part", choices=[p.value for p in BumpPart], help="Version part to bump")
     parser.add_argument("--project-dir", type=Path, default=Path.cwd(), help="Project directory")
     args, _unknown = parser.parse_known_args()
 
@@ -221,7 +216,7 @@ def main() -> int:
             return 1
 
         current = parse_version(current_version)
-        new_version = bump_version(current, args.part)
+        new_version = bump_version(current, BumpPart(args.part))
 
         # Update files
         old_version = update_pyproject(args.project_dir, new_version)

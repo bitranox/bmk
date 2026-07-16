@@ -35,7 +35,7 @@ from enum import Enum
 import rich_click as click
 
 from ..exit_codes import ExitCode
-from ._prerequisites import ToolCheck, check_prerequisites, is_macos, is_windows
+from ._prerequisites import ToolCheck, ToolName, check_prerequisites, is_macos, is_windows
 
 
 class InstallOutcome(str, Enum):
@@ -77,9 +77,9 @@ class EnsureResult:
 # --- platform / environment probes -----------------------------------------
 
 _PIP_PACKAGES: dict[str, str] = {
-    "shellcheck": "shellcheck-py",
-    "shfmt": "shfmt-py",
-    "bashate": "bashate",
+    ToolName.SHELLCHECK.value: "shellcheck-py",
+    ToolName.SHFMT.value: "shfmt-py",
+    ToolName.BASHATE.value: "bashate",
 }
 
 # Ordered by preference; the first whose executable is on PATH wins.
@@ -168,16 +168,16 @@ def _action_for(check: ToolCheck) -> _InstallAction:
     name = check.name
     if name in _PIP_PACKAGES:
         return _InstallAction(_InstallKind.ARGV, _pip_install_argv(_PIP_PACKAGES[name]))
-    if name == "PSScriptAnalyzer":
+    if name == ToolName.PSSCRIPTANALYZER:
         return _InstallAction(_InstallKind.MODULE)
-    if name == "git":
+    if name == ToolName.GIT:
         return _system_action(
             linux_pkg="git",
             mac_argv=("brew", "install", "git"),
             win_argv=("winget", "install", "--id", "Git.Git", "-e", "--source", "winget"),
             skip_reason=check.install_hint,
         )
-    if name == "pwsh":
+    if name == ToolName.PWSH:
         return _system_action(
             linux_pkg=None,  # not in default Linux repos; MS-repo setup is out of scope
             mac_argv=("brew", "install", "--cask", "powershell"),

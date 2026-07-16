@@ -35,6 +35,7 @@ import orjson
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.domain.enums import ToolOutputFormat
 
 if TYPE_CHECKING:
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
@@ -68,6 +69,9 @@ class DependencyStatus(str, Enum):
 
 # HTTP status codes
 _HTTP_NOT_FOUND = 404
+# A PyPI package's JSON metadata is at most a few MB; anything past this cap is treated as a
+# broken/hostile response rather than buffered into memory.
+_MAX_PYPI_BYTES = 32 * 1024 * 1024
 
 # Precompiled regex patterns for version parsing and dependency matching
 _RE_NAME_SEPARATOR = re.compile(r"[-_.]+")
@@ -153,14 +157,26 @@ def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
 
 
 def _fetch_pypi_data(package_name: str) -> dict[str, Any] | None:
-    """Fetch package data from PyPI."""
+    """Fetch package data from PyPI.
+
+    Streamed with a hard byte cap so a broken or hostile endpoint cannot make bmk buffer an
+    unbounded body into memory; a response past the cap is treated as unavailable (``None``).
+    The URL is fixed to pypi.org, so this is defence-in-depth, not the primary trust boundary.
+    """
     normalized = _normalize_name(package_name)
     url = f"https://pypi.org/pypi/{normalized}/json"
 
     try:
-        response = httpx2.get(url, timeout=10.0)
-        response.raise_for_status()
-        return orjson.loads(response.content)  # type: ignore[no-any-return]
+        with httpx2.stream("GET", url, timeout=10.0) as response:
+            response.raise_for_status()
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_bytes():
+                total += len(chunk)
+                if total > _MAX_PYPI_BYTES:
+                    return None
+                chunks.append(chunk)
+        return orjson.loads(b"".join(chunks))  # type: ignore[no-any-return]
     except httpx2.HTTPStatusError as exc:
         if exc.response.status_code == _HTTP_NOT_FOUND:
             return None
@@ -391,6 +407,51 @@ def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[Depende
     return _extract_all_dependencies(config)
 
 
+def _group_by_source(deps: list[DependencyInfo]) -> dict[str, list[DependencyInfo]]:
+    """Index dependencies by their ``source`` (a section name), preserving order."""
+    by_source: dict[str, list[DependencyInfo]] = {}
+    for dep in deps:
+        by_source.setdefault(dep.source, []).append(dep)
+    return by_source
+
+
+def _render_source_block(source: str, source_deps: list[DependencyInfo], *, verbose: bool) -> None:
+    """Print one source's dependency rows, aligned; nothing when there is nothing to show.
+
+    Non-verbose hides up-to-date rows, so a fully-current source prints no block at all.
+    """
+    display_deps = source_deps if verbose else [d for d in source_deps if d.status != DependencyStatus.UP_TO_DATE]
+    if not display_deps:
+        return
+
+    print(f"\n{source}:")
+    print("-" * len(source) + "-")
+
+    name_width = max(len(d.name) for d in display_deps)
+    constraint_width = max(len(d.constraint) for d in display_deps)
+    latest_width = max(len(d.latest) for d in display_deps)
+
+    for dep in sorted(display_deps, key=lambda d: d.name.lower()):
+        status_icon = _get_status_icon(dep.status)
+        constraint_display = dep.constraint if dep.constraint else "(any)"
+        print(
+            f"  {status_icon} {dep.name:<{name_width}}"
+            f"  {constraint_display:<{constraint_width}}"
+            f"  -> {dep.latest:<{latest_width}}  [{dep.status}]"
+        )
+
+
+def _print_summary(deps: list[DependencyInfo]) -> None:
+    """Print the per-status tally across all dependencies."""
+    count = {status: sum(1 for d in deps if d.status == status) for status in DependencyStatus}
+    print(f"\nSummary: {len(deps)} dependencies checked")
+    print(f"  Up-to-date: {count[DependencyStatus.UP_TO_DATE]}")
+    print(f"  Pinned:     {count[DependencyStatus.PINNED]}")
+    print(f"  Outdated:   {count[DependencyStatus.OUTDATED]}")
+    print(f"  Unknown:    {count[DependencyStatus.UNKNOWN]}")
+    print(f"  Errors:     {count[DependencyStatus.ERROR]}")
+
+
 def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
     """Print a formatted dependency status report.
 
@@ -405,58 +466,12 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
         print("No dependencies found in pyproject.toml")
         return 0
 
-    # Group by source
-    by_source: dict[str, list[DependencyInfo]] = {}
-    for dep in deps:
-        by_source.setdefault(dep.source, []).append(dep)
+    for source, source_deps in sorted(_group_by_source(deps).items()):
+        _render_source_block(source, source_deps, verbose=verbose)
 
-    outdated_count = 0
-    error_count = 0
+    _print_summary(deps)
 
-    for source, source_deps in sorted(by_source.items()):
-        # Filter if not verbose
-        display_deps = source_deps if verbose else [d for d in source_deps if d.status != DependencyStatus.UP_TO_DATE]
-
-        if not display_deps:
-            continue
-
-        print(f"\n{source}:")
-        print("-" * len(source) + "-")
-
-        # Calculate column widths
-        name_width = max(len(d.name) for d in display_deps)
-        constraint_width = max(len(d.constraint) for d in display_deps) if display_deps else 0
-        latest_width = max(len(d.latest) for d in display_deps)
-
-        for dep in sorted(display_deps, key=lambda d: d.name.lower()):
-            status_icon = _get_status_icon(dep.status)
-            constraint_display = dep.constraint if dep.constraint else "(any)"
-
-            print(
-                f"  {status_icon} {dep.name:<{name_width}}"
-                f"  {constraint_display:<{constraint_width}}"
-                f"  -> {dep.latest:<{latest_width}}  [{dep.status}]"
-            )
-
-            if dep.status == DependencyStatus.OUTDATED:
-                outdated_count += 1
-            elif dep.status == DependencyStatus.ERROR:
-                error_count += 1
-
-    # Summary
-    total = len(deps)
-    up_to_date = sum(1 for d in deps if d.status == DependencyStatus.UP_TO_DATE)
-    pinned = sum(1 for d in deps if d.status == DependencyStatus.PINNED)
-    unknown = sum(1 for d in deps if d.status == DependencyStatus.UNKNOWN)
-
-    print(f"\nSummary: {total} dependencies checked")
-    print(f"  Up-to-date: {up_to_date}")
-    print(f"  Pinned:     {pinned}")
-    print(f"  Outdated:   {outdated_count}")
-    print(f"  Unknown:    {unknown}")
-    print(f"  Errors:     {error_count}")
-
-    if outdated_count > 0:
+    if any(d.status == DependencyStatus.OUTDATED for d in deps):
         print("\nRun with --verbose to see all dependencies")
         return 1
     return 0
@@ -886,7 +901,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     args, _unknown = parser.parse_known_args()
     pyproject = args.project_dir / "pyproject.toml"
-    quiet = os.environ.get("BMK_OUTPUT_FORMAT", "json") != "text"
+    quiet = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
 
     # Same rule as the stage path: install only into the project's own venv.
     project_venv = resolve_project_venv(args.project_dir, os.environ)

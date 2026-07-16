@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import re
 import sys
+import threading
 from typing import Protocol
 
 from bmk.domain.stages import PipelineSummary, StageResult
@@ -82,6 +83,44 @@ class PassthroughSink:
         self._target.write(text)
 
     def getvalue(self) -> str:
+        return ""
+
+
+class PrefixedLockedSink:
+    """Passthrough for a concurrent TEXT-mode batch: whole, attributed lines.
+
+    Several stages in a batch run at once and, in text mode, stream to the same
+    stream. Writing straight through interleaves their output mid-line with no way to
+    tell which tool a line came from. This sink buffers a partial line until its
+    newline, then, under a lock shared across the batch, writes each complete line with
+    a ``[stage] `` prefix - so lines are never torn and always attributed.
+
+    ``getvalue`` doubles as the end-of-stage flush (it is called exactly once, when the
+    stage finishes): any trailing text with no newline is emitted then. Like
+    :class:`PassthroughSink` it captures nothing, so it returns ``""`` and the
+    failure/success reporting paths behave exactly as they do for a live text stream.
+    """
+
+    def __init__(self, target: SupportsWrite, lock: threading.Lock, prefix: str) -> None:
+        self._target = target
+        self._lock = lock
+        self._prefix = prefix
+        self._pending = ""
+
+    def write(self, text: str) -> None:
+        self._pending += text
+        if "\n" not in self._pending:
+            return
+        head, self._pending = self._pending.rsplit("\n", 1)
+        with self._lock:
+            for line in head.split("\n"):
+                self._target.write(f"{self._prefix}{line}\n")
+
+    def getvalue(self) -> str:
+        if self._pending:
+            with self._lock:
+                self._target.write(f"{self._prefix}{self._pending}\n")
+            self._pending = ""
         return ""
 
 

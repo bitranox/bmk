@@ -93,9 +93,9 @@ def resolve_output_format(*, human: bool) -> ToolOutputFormat:
     """
     import os
 
-    if human or os.environ.get("BMK_OUTPUT_FORMAT") == ToolOutputFormat.TEXT.value:
+    if human:
         return ToolOutputFormat.TEXT
-    return ToolOutputFormat.JSON
+    return ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT"))
 
 
 __all__ = ["normalize_returncode", "resolve_output_format", "run_command"]

@@ -518,3 +518,48 @@ def test_deploy_configuration_passes_mode_overrides_to_library(
     assert len(captured_kwargs) == 1
     assert captured_kwargs[0]["dir_mode"] == 0o750
     assert captured_kwargs[0]["file_mode"] == 0o640
+
+
+@pytest.mark.os_agnostic
+def test_deploy_configuration_filters_and_flattens_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """deploy_configuration keeps only CREATED/OVERWRITTEN paths and flattens dot_d_results.
+
+    deploy_config() returns one DeployResult per top-level destination, each optionally
+    carrying nested dot_d_results for companion .d files. The result-processing loop must
+    both filter out SKIPPED entries and descend into dot_d_results, so this exercises both
+    behaviours against the real DeployAction/DeployResult types rather than an empty stub.
+    """
+    from lib_layered_config.examples.deploy import DeployAction, DeployResult
+
+    from bmk.adapters.config import deploy as deploy_mod
+
+    created_path = tmp_path / "app" / "config.toml"
+    skipped_path = tmp_path / "host" / "config.toml"
+    parent_overwritten_path = tmp_path / "user" / "config.toml"
+    nested_overwritten_path = tmp_path / "user" / "config.d" / "10-extra.toml"
+    nested_skipped_path = tmp_path / "user" / "config.d" / "20-extra.toml"
+
+    fake_results = [
+        DeployResult(destination=created_path, action=DeployAction.CREATED),
+        DeployResult(destination=skipped_path, action=DeployAction.SKIPPED),
+        DeployResult(
+            destination=parent_overwritten_path,
+            action=DeployAction.OVERWRITTEN,
+            dot_d_results=[
+                DeployResult(destination=nested_overwritten_path, action=DeployAction.OVERWRITTEN),
+                DeployResult(destination=nested_skipped_path, action=DeployAction.SKIPPED),
+            ],
+        ),
+    ]
+
+    def mock_deploy_config(**kwargs: Any) -> list[DeployResult]:
+        return fake_results
+
+    monkeypatch.setattr(deploy_mod, "deploy_config", mock_deploy_config)
+
+    paths = deploy_mod.deploy_configuration(targets=[DeployTarget.USER])
+
+    assert paths == [created_path, parent_overwritten_path, nested_overwritten_path]

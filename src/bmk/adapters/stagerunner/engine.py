@@ -9,6 +9,7 @@ the GIL while waiting on its child.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import traceback
 from collections.abc import Sequence
@@ -27,6 +28,7 @@ from .output import (
     CapturingSink,
     OutputSink,
     PassthroughSink,
+    PrefixedLockedSink,
     SupportsWrite,
     report_batch_failures,
     report_success_summary,
@@ -34,14 +36,24 @@ from .output import (
 from .signals import install_signal_handlers
 
 
-def _sink_for(stage: Stage, ctx: StageContext, out: SupportsWrite) -> OutputSink:
-    """Capture output for later (JSON mode) unless the stage is interactive."""
+def _sink_for(stage: Stage, ctx: StageContext, out: SupportsWrite, *, lock: threading.Lock | None) -> OutputSink:
+    """Pick the output sink for a stage.
+
+    JSON mode captures each non-interactive stage for show-on-failure. Text mode streams
+    live: a lone or interactive stage passes straight through, but a stage sharing a
+    concurrent batch (``lock`` set) goes through a lock-guarded, ``[stage]``-prefixed sink
+    so parallel stages do not interleave mid-line.
+    """
     if ctx.output_format is not ToolOutputFormat.TEXT and not stage.interactive:
         return CapturingSink()
+    if lock is not None and not stage.interactive:
+        return PrefixedLockedSink(out, lock, f"[{stage.name}] ")
     return PassthroughSink(out)
 
 
-def run_stage(stage: Stage, ctx: StageContext, out: SupportsWrite) -> StageResult:
+def run_stage(
+    stage: Stage, ctx: StageContext, out: SupportsWrite, *, lock: threading.Lock | None = None
+) -> StageResult:
     """Run one stage, returning its normalized result and captured output.
 
     An exception from the action (e.g. a crash in an in-process helper) is
@@ -50,7 +62,7 @@ def run_stage(stage: Stage, ctx: StageContext, out: SupportsWrite) -> StageResul
     ``SystemExit`` (raised by the signal handler) is a ``BaseException`` and is
     intentionally not caught here.
     """
-    sink = _sink_for(stage, ctx, out)
+    sink = _sink_for(stage, ctx, out, lock=lock)
     start = time.monotonic()
     try:
         returncode = normalize_returncode(stage.action(ctx, sink))
@@ -70,8 +82,12 @@ def run_batch(batch: list[Stage], ctx: StageContext, out: SupportsWrite) -> list
     if len(batch) == 1:
         return [run_stage(batch[0], ctx, out)]
 
+    # Text mode streams live, so a concurrent batch needs a shared lock to keep parallel
+    # stages' lines whole and attributed; JSON mode captures per stage and needs none.
+    lock = threading.Lock() if ctx.output_format is ToolOutputFormat.TEXT else None
+
     def run_one(stage: Stage) -> StageResult:
-        return run_stage(stage, ctx, out)
+        return run_stage(stage, ctx, out, lock=lock)
 
     with ThreadPoolExecutor(max_workers=len(batch)) as pool:
         return list(pool.map(run_one, batch))

@@ -114,6 +114,8 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
 
             check_makefile_update()
         except (OSError, click.Abort):
+            # Best-effort convenience check; an I/O error or a declined prompt
+            # (non-interactive Abort) must never block the command the user actually ran.
             pass
 
     if ctx.invoked_subcommand is None:

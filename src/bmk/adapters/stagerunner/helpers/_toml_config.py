@@ -10,6 +10,7 @@ field's declared default - see the module-level `_coerce_*` helpers - and
 
 from __future__ import annotations
 
+import re
 import sys
 from enum import Enum
 from pathlib import Path
@@ -85,6 +86,19 @@ def _coerce_str_tuple(v: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in cast("tuple[Any, ...]", v) if item is not None)
 
 
+# A real PSScriptAnalyzer rule id is always ``PS`` followed by alphanumerics (e.g.
+# ``PSAvoidUsingWriteHost``). This value is interpolated into a ``pwsh -Command`` string
+# in ``_psscriptanalyzer.py``, so anything with a space, quote, semicolon, or other
+# metacharacter is not a rule id and could break out of the command - drop it here, at the
+# project-authored-config boundary, so a hostile ``pyproject.toml`` cannot inject PowerShell.
+_PSSCRIPT_RULE_RE = re.compile(r"^PS[A-Za-z0-9]+$")
+
+
+def _coerce_psscript_rules(v: Any) -> tuple[str, ...]:
+    """Keep only well-formed PSScriptAnalyzer rule ids; silently drop anything else."""
+    return tuple(rule for rule in _coerce_str_tuple(v) if _PSSCRIPT_RULE_RE.match(rule))
+
+
 def _coerce_str_tuple_dict(v: Any) -> dict[str, tuple[str, ...]]:
     """A TOML table of arrays ([project.optional-dependencies], [dependency-groups],
     [tool.pdm.dev-dependencies]): an entry whose value is not itself an array (list or,
@@ -134,7 +148,7 @@ class PSScriptAnalyzerConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    exclude_rules: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = Field(
+    exclude_rules: Annotated[tuple[str, ...], BeforeValidator(_coerce_psscript_rules)] = Field(
         default=(), validation_alias="exclude-rules"
     )
 

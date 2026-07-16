@@ -85,6 +85,19 @@ def test_sync_initconf_version_false_when_file_missing(tmp_path: Path) -> None:
     assert sync_initconf_version(tmp_path) is False
 
 
+@pytest.mark.os_agnostic
+def test_sync_initconf_version_warns_and_false_when_no_version(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # No [project].version key at all -> ProjectSection.version defaults to "", which
+    # is the same falsy value the guard checks for a present-but-empty `version = ""`.
+    # The guard fires before package-name derivation, so no package layout is needed.
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "my_pkg"\n', encoding="utf-8")
+
+    assert sync_initconf_version(tmp_path) is False
+    assert "Warning: no [project].version in pyproject.toml" in capsys.readouterr().err
+
+
 # --- sync_makefile_version --------------------------------------------------
 
 
@@ -97,6 +110,30 @@ def test_sync_makefile_version_updates_sentinel(tmp_path: Path) -> None:
 
     assert sync_makefile_version(tmp_path) is True
     assert makefile.read_text(encoding="utf-8").startswith("# BMK MAKEFILE 2.0.0")
+
+
+@pytest.mark.os_agnostic
+def test_sync_makefile_version_updates_bmk_min_sentinel(tmp_path: Path) -> None:
+    # test_sync_makefile_version_updates_sentinel's fixture has no BMK_MIN line, so the
+    # _MAKEFILE_MIN_RE substitution never actually runs there. This fixture carries one,
+    # so the BMK_MIN update itself is exercised.
+    _write_project(tmp_path, version="2.0.0")
+    makefile = tmp_path / "src" / "my_pkg" / "makefile" / "Makefile"
+    makefile.parent.mkdir(parents=True)
+    makefile.write_text("# BMK MAKEFILE 1.0.0\nBMK_MIN := 1.0.0\nall:\n\techo hi\n", encoding="utf-8")
+
+    assert sync_makefile_version(tmp_path) is True
+    assert "BMK_MIN := 2.0.0" in makefile.read_text(encoding="utf-8")
+
+
+@pytest.mark.os_agnostic
+def test_sync_makefile_version_warns_and_false_when_no_version(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "my_pkg"\n', encoding="utf-8")
+
+    assert sync_makefile_version(tmp_path) is False
+    assert "Warning: no [project].version in pyproject.toml" in capsys.readouterr().err
 
 
 @pytest.mark.os_agnostic

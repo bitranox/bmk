@@ -38,6 +38,8 @@ from typing import Any
 import rtoml
 from pydantic import BaseModel, ConfigDict, Field
 
+from bmk.domain.enums import ToolOutputFormat
+
 __all__ = [
     "prune_coverage_data_files",
     "remove_report_artifacts",
@@ -867,7 +869,7 @@ Examples:
             upload=not args.no_upload,
             verbose=args.verbose,
             include_integration=args.integration,
-            quiet=args.output_format == "json",
+            quiet=ToolOutputFormat(args.output_format) is ToolOutputFormat.JSON,
             python=args.python,
         )
     )

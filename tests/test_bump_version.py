@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from bmk.domain.enums import BumpPart
+
 
 # Import the module under test
 @pytest.fixture
@@ -66,38 +68,38 @@ class TestBumpVersion:
 
     def test_bump_major(self, bump_module: Any) -> None:
         """Major bump resets minor and patch to zero."""
-        result = bump_module.bump_version((1, 2, 3), "major")
+        result = bump_module.bump_version((1, 2, 3), BumpPart.MAJOR)
         assert result == "2.0.0"
 
     def test_bump_major_from_zero(self, bump_module: Any) -> None:
         """Major bump from 0.x.y produces 1.0.0."""
-        result = bump_module.bump_version((0, 5, 10), "major")
+        result = bump_module.bump_version((0, 5, 10), BumpPart.MAJOR)
         assert result == "1.0.0"
 
     def test_bump_minor(self, bump_module: Any) -> None:
         """Minor bump resets patch to zero."""
-        result = bump_module.bump_version((1, 2, 3), "minor")
+        result = bump_module.bump_version((1, 2, 3), BumpPart.MINOR)
         assert result == "1.3.0"
 
     def test_bump_minor_from_zero(self, bump_module: Any) -> None:
         """Minor bump from x.0.y produces x.1.0."""
-        result = bump_module.bump_version((1, 0, 5), "minor")
+        result = bump_module.bump_version((1, 0, 5), BumpPart.MINOR)
         assert result == "1.1.0"
 
     def test_bump_patch(self, bump_module: Any) -> None:
         """Patch bump increments only the patch number."""
-        result = bump_module.bump_version((1, 2, 3), "patch")
+        result = bump_module.bump_version((1, 2, 3), BumpPart.PATCH)
         assert result == "1.2.4"
 
     def test_bump_patch_from_zero(self, bump_module: Any) -> None:
         """Patch bump from x.y.0 produces x.y.1."""
-        result = bump_module.bump_version((1, 2, 0), "patch")
+        result = bump_module.bump_version((1, 2, 0), BumpPart.PATCH)
         assert result == "1.2.1"
 
-    def test_bump_invalid_part(self, bump_module: Any) -> None:
-        """Invalid bump part raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid part"):
-            bump_module.bump_version((1, 2, 3), "invalid")
+    def test_bumppart_rejects_unknown_value(self) -> None:
+        """An unknown bump part is rejected at the enum boundary, not in bump_version."""
+        with pytest.raises(ValueError, match="is not a valid BumpPart"):
+            BumpPart("invalid")
 
 
 # =============================================================================

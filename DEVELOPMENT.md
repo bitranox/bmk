@@ -31,7 +31,7 @@ Configuration settings additionally accept `BMK___<SECTION>__<KEY>` environment 
 `src/bmk/adapters/config/`.
 
 `BMK_PROJECT_DIR`, `BMK_PYTHON_CMD` and `BMK_COMMAND_PREFIX` are **set by** bmk into each stage's
-child environment (`stagerunner/context.py:150-153`), not read from yours - do not set them.
+child environment (`build_context()` in `stagerunner/context.py`), not read from yours - do not set them.
 `UV_OFFLINE` is uv's own; when it is set the Makefile drops `--refresh-package bmk`, which uv
 refuses to combine with offline mode.
 

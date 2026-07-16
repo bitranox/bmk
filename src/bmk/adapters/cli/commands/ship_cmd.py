@@ -28,6 +28,7 @@ import time
 import lib_log_rich.runtime
 import orjson
 import rich_click as click
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..constants import CLICK_CONTEXT_SETTINGS
 from ..exit_codes import ExitCode
@@ -47,6 +48,22 @@ def _git_head() -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+class _WorkflowRun(BaseModel):
+    """One run from ``gh run list --json``; only the fields this module matches on.
+
+    ``extra="ignore"`` drops the requested-but-unused ``status``/``conclusion``.
+    A run that is missing a field or types it oddly fails validation and is
+    skipped, matching the previous tolerant ``.get()`` reads.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    database_id: int = Field(alias="databaseId")
+    workflow_name: str = Field(alias="workflowName")
+    event: str
+    head_sha: str = Field(alias="headSha")
+
+
 def _find_run_id(workflow: str, *, event: str | None, head_sha: str) -> str | None:
     """Find the most recent workflow run id matching workflow/event/head_sha."""
     fields = "databaseId,workflowName,event,headSha,status,conclusion"
@@ -59,17 +76,21 @@ def _find_run_id(workflow: str, *, event: str | None, head_sha: str) -> str | No
     if result.returncode != 0:
         return None
     try:
-        runs = orjson.loads(result.stdout)
+        raw_runs = orjson.loads(result.stdout)
     except orjson.JSONDecodeError:
         return None
-    for run in runs:
-        if run.get("workflowName") != workflow:
+    for raw_run in raw_runs:
+        try:
+            run = _WorkflowRun.model_validate(raw_run)
+        except ValidationError:
             continue
-        if event is not None and run.get("event") != event:
+        if run.workflow_name != workflow:
             continue
-        if head_sha and run.get("headSha") and run["headSha"] != head_sha:
+        if event is not None and run.event != event:
             continue
-        return str(run["databaseId"])
+        if head_sha and run.head_sha and run.head_sha != head_sha:
+            continue
+        return str(run.database_id)
     return None
 
 

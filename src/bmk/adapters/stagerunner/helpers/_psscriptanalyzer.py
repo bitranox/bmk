@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.domain.enums import ToolOutputFormat
 
 _FALLBACK_EXCLUDED_RULES: tuple[str, ...] = (
     "PSAvoidUsingWriteHost",
@@ -160,13 +161,36 @@ def find_ps1_files(project_dir: Path) -> list[Path]:
     return sorted(files)
 
 
+def _ps_single_quote(value: str) -> str:
+    """Wrap ``value`` in a PowerShell single-quoted string literal.
+
+    PowerShell single-quoted strings take everything verbatim; the only escape is a
+    doubled ``''`` for an embedded quote. So this is injection-safe for interpolating an
+    arbitrary path or token into a ``-Command`` string.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _exclude_rule_fragment(exclude_rules: tuple[str, ...]) -> str:
+    """Build ``-ExcludeRule 'A','B'`` (each element PS-escaped), or ``""`` when empty.
+
+    Each rule is emitted as its own single-quoted array element rather than an unquoted
+    CSV, so a metacharacter in a rule name (blocked at the config boundary, but this is
+    the defence-in-depth layer) cannot break out of the command.
+    """
+    if not exclude_rules:
+        return ""
+    array = ",".join(_ps_single_quote(rule) for rule in exclude_rules)
+    return f" -ExcludeRule {array}"
+
+
 def run_psscriptanalyzer(
     *,
     pwsh: str,
     project_dir: Path,
     exclude_rules: tuple[str, ...],
     verbose: bool = False,
-    output_format: str = "text",
+    output_format: ToolOutputFormat = ToolOutputFormat.TEXT,
 ) -> int:
     """Invoke PSScriptAnalyzer via subprocess.
 
@@ -175,26 +199,24 @@ def run_psscriptanalyzer(
         project_dir: Project root to scan.
         exclude_rules: Rule names to exclude.
         verbose: If True, print additional diagnostic output.
-        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
+        output_format: ``JSON`` for machine-readable output, ``TEXT`` for human-readable.
 
     Returns:
         Exit code from PSScriptAnalyzer (0 = clean, >0 = violation count).
     """
-    exclude_csv = ",".join(exclude_rules)
-    if output_format == "json":
+    path_lit = _ps_single_quote(str(project_dir))
+    exclude_fragment = _exclude_rule_fragment(exclude_rules)
+    if output_format is ToolOutputFormat.JSON:
         command = (
-            f"$results = Invoke-ScriptAnalyzer -Path '{project_dir}' -Recurse"
+            f"$results = Invoke-ScriptAnalyzer -Path {path_lit} -Recurse"
             f" -Severity Error,Warning"
-            f" -ExcludeRule {exclude_csv};"
+            f"{exclude_fragment};"
             f" $results | ConvertTo-Json -Depth 5;"
             f" if ($results) {{ exit $results.Count }} else {{ exit 0 }}"
         )
     else:
         command = (
-            f"Invoke-ScriptAnalyzer -Path '{project_dir}' -Recurse"
-            f" -Severity Error,Warning"
-            f" -ExcludeRule {exclude_csv}"
-            f" -EnableExit"
+            f"Invoke-ScriptAnalyzer -Path {path_lit} -Recurse -Severity Error,Warning{exclude_fragment} -EnableExit"
         )
     if verbose:
         print(f'Running: pwsh -NoProfile -Command "{command}"')
@@ -206,13 +228,15 @@ def run_psscriptanalyzer(
     return result.returncode
 
 
-def main(*, project_dir: Path | None = None, verbose: bool = False, output_format: str = "text") -> int:
+def main(
+    *, project_dir: Path | None = None, verbose: bool = False, output_format: ToolOutputFormat = ToolOutputFormat.TEXT
+) -> int:
     """Orchestrate the full PSScriptAnalyzer lint flow.
 
     Args:
         project_dir: Root directory to lint. Defaults to cwd.
         verbose: If True, print additional diagnostic output.
-        output_format: ``"json"`` for machine-readable output, ``"text"`` for human-readable.
+        output_format: ``JSON`` for machine-readable output, ``TEXT`` for human-readable.
 
     Returns:
         Exit code (0 on success, non-zero on lint violations or skip).
@@ -274,4 +298,6 @@ if __name__ == "__main__":  # pragma: no cover
         help="Output format: json for machine-readable, text for human-readable (default: text)",
     )
     args, _unknown = parser.parse_known_args()
-    sys.exit(main(project_dir=args.project_dir, verbose=args.verbose, output_format=args.output_format))
+    sys.exit(
+        main(project_dir=args.project_dir, verbose=args.verbose, output_format=ToolOutputFormat(args.output_format))
+    )

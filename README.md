@@ -52,7 +52,7 @@ Requires [uv](https://docs.astral.sh/uv/) (there is no pip fallback) and Python 
   stage fails, otherwise you get one summary line. Pass `--human` when you want the noise.
 - **Batteries included.** Formatting and linting, type-checking, security and vulnerability
   audits, import-contract checks, tests with coverage, shell and PowerShell linting, version
-  bumping, tagging, PyPI release, and Codecov upload.
+  bumping, tagging, GitHub releases (CI publishes to PyPI), and Codecov upload.
 
 ## Documentation
 

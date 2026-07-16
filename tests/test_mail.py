@@ -683,12 +683,12 @@ def test_send_email_raises_when_no_smtp_hosts() -> None:
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_no_recipients() -> None:
-    """Empty recipients sequence raises ValueError before attempting delivery."""
+    """Empty recipients sequence raises ConfigurationError before attempting delivery."""
     config = EmailConfig(
         smtp_hosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
-    with pytest.raises(ValueError, match="No recipients configured and no override provided"):
+    with pytest.raises(ConfigurationError, match="No recipients configured and no override provided"):
         send_email(
             config=config,
             recipients=[],
@@ -699,10 +699,10 @@ def test_send_email_raises_when_no_recipients() -> None:
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_no_from_address() -> None:
-    """Missing from_address in both config and override raises ValueError."""
+    """Missing from_address in both config and override raises ConfigurationError."""
     config = EmailConfig(smtp_hosts=["smtp.test.com:587"])
 
-    with pytest.raises(ValueError, match="No from_address configured"):
+    with pytest.raises(ConfigurationError, match="No from_address configured"):
         send_email(
             config=config,
             recipients="recipient@test.com",
@@ -952,13 +952,13 @@ def test_send_email_parameter_overrides_config_recipients() -> None:
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_no_recipients_configured_and_none_provided() -> None:
-    """Both config and parameter missing recipients raises ValueError."""
+    """Both config and parameter missing recipients raises ConfigurationError."""
     config = EmailConfig(
         smtp_hosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
-    with pytest.raises(ValueError, match="No recipients configured and no override provided"):
+    with pytest.raises(ConfigurationError, match="No recipients configured and no override provided"):
         send_email(
             config=config,
             subject="Test",
@@ -968,14 +968,14 @@ def test_send_email_raises_when_no_recipients_configured_and_none_provided() -> 
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_config_recipients_empty_and_none_provided() -> None:
-    """Explicit empty config recipients with None parameter raises ValueError."""
+    """Explicit empty config recipients with None parameter raises ConfigurationError."""
     config = EmailConfig(
         smtp_hosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         recipients=[],
     )
 
-    with pytest.raises(ValueError, match="No recipients configured and no override provided"):
+    with pytest.raises(ConfigurationError, match="No recipients configured and no override provided"):
         send_email(
             config=config,
             recipients=None,
@@ -986,14 +986,14 @@ def test_send_email_raises_when_config_recipients_empty_and_none_provided() -> N
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_parameter_is_empty_list() -> None:
-    """Explicit empty list parameter raises ValueError even with config recipients."""
+    """Explicit empty list parameter raises ConfigurationError even with config recipients."""
     config = EmailConfig(
         smtp_hosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         recipients=["config@test.com"],
     )
 
-    with pytest.raises(ValueError, match="No recipients configured and no override provided"):
+    with pytest.raises(ConfigurationError, match="No recipients configured and no override provided"):
         send_email(
             config=config,
             recipients=[],
@@ -1026,13 +1026,13 @@ def test_send_notification_uses_config_recipients_when_parameter_is_none() -> No
 
 @pytest.mark.os_agnostic
 def test_send_notification_raises_when_no_recipients_anywhere() -> None:
-    """Notification with no recipients in config or parameter raises ValueError."""
+    """Notification with no recipients in config or parameter raises ConfigurationError."""
     config = EmailConfig(
         smtp_hosts=["smtp.test.com:587"],
         from_address="alerts@test.com",
     )
 
-    with pytest.raises(ValueError, match="No recipients configured and no override provided"):
+    with pytest.raises(ConfigurationError, match="No recipients configured and no override provided"):
         send_notification(
             config=config,
             subject="Alert",

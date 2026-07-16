@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import BaseModel, ConfigDict, ValidationError
+
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
@@ -104,6 +106,37 @@ def desired_python_minor(cwd: Path) -> str | None:
     return minors[-1] if minors else None
 
 
+class _UvVersionParts(BaseModel):
+    """The ``version_parts`` object of one ``uv python list`` JSON entry."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    major: int
+    minor: int
+    patch: int
+
+
+class _UvPythonEntry(BaseModel):
+    """One entry of ``uv python list --output-format json``.
+
+    Only the fields this module needs are declared; ``extra="ignore"`` drops the
+    rest (``key``, ``path``, ...). An entry that lacks these or types them oddly
+    fails validation and is skipped, exactly as the previous hand-written guards did.
+
+    ``implementation`` matters: several implementations (CPython, PyPy, ...) can be
+    installed for the same ``X.Y``. ``uv venv --python <minor>`` provisions CPython, so
+    the patch comparison must only consider CPython - otherwise a PyPy build whose patch
+    happens to exceed the installed CPython's would be reported as "newest", never match
+    the CPython venv, and rebuild it on every run.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    version: str
+    version_parts: _UvVersionParts
+    implementation: str
+
+
 def latest_installed_patch(minor: str, cwd: Path) -> str | None:
     """Newest installed patch of ``minor`` (e.g. ``3.14`` -> ``3.14.5``), or None.
 
@@ -122,19 +155,18 @@ def latest_installed_patch(minor: str, cwd: Path) -> str | None:
         return None
 
     best: tuple[int, str] | None = None
-    for entry in cast("list[dict[str, Any]]", entries):
-        parts = entry.get("version_parts")
-        version = entry.get("version")
-        if not isinstance(parts, dict) or not isinstance(version, str):
+    for raw_entry in cast("list[Any]", entries):
+        try:
+            entry = _UvPythonEntry.model_validate(raw_entry)
+        except ValidationError:
             continue
-        typed = cast("dict[str, Any]", parts)
-        if f"{typed.get('major')}.{typed.get('minor')}" != minor:
+        if entry.implementation != "cpython":
             continue
-        patch = typed.get("patch")
-        if not isinstance(patch, int):
+        if f"{entry.version_parts.major}.{entry.version_parts.minor}" != minor:
             continue
+        patch = entry.version_parts.patch
         if best is None or patch > best[0]:
-            best = (patch, version)
+            best = (patch, entry.version)
     return best[1] if best else None
 
 
