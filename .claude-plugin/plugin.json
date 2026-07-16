@@ -1,7 +1,7 @@
 {
   "name": "bmk",
   "description": "Install, configure and use bmk - the bitranox cross-OS build/test/release task runner. Ships the devops-bmk skill: bootstrap with uv, deploy the Makefile (bmk install), run make test/push/bump/release/ship, fix missing tools (bmk ensure), layered config, and custom pipelines.",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "author": {
     "name": "bitranox"
   },
