@@ -1,5 +1,7 @@
 """Tests for project venv resolution and provisioning."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import json
