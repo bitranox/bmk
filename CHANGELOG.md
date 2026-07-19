@@ -6,6 +6,24 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.11.2] 2026-07-19 14:07:59
+
+### Fixed
+- **`config-deploy` no longer crashes on a legacy Windows console codepage (cp1252).** It printed a
+  Unicode checkmark per deployed path, which raised `UnicodeEncodeError` and exited 1 even though the
+  files had already been written, misreporting a successful deploy as a failure. It now prints a
+  plain ASCII marker.
+- **Venv provisioning no longer inherits a foreign `VIRTUAL_ENV`.** When an unrelated venv (an IDE's,
+  say) was active, uv printed `VIRTUAL_ENV=... does not match the project environment path ... and
+  will be ignored` on every provisioning call. Provisioning now runs with `VIRTUAL_ENV` stripped; bmk
+  already targets the venv explicitly, so nothing else changes.
+- **Quickstart notebook installs its package with uv**, so a fresh CI kernel can import it.
+
+### Changed
+- The CI pytest marker exclusion is now configurable via the distributed CI template.
+- `devops-bmk` skill: Windows `make install` uses winget instead of choco, and `make release` skips
+  the GitHub step cleanly when `gh` is not on PATH.
+
 ## [3.11.1] 2026-07-16 18:40:48
 
 ### Security

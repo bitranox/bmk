@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.11.1"
+version = "3.11.2"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,7 +22,7 @@ dependencies = [
     "pydantic>=2.13.4",            # the pipeline-overlay and email schemas
     "orjson>=3.11.9",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
-    "tomlkit>=0.15.0",             # TOML round-trip EDIT: preserves comments when bmk writes back
+    "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
     "httpx2>=2.7.0",               # PyPI version lookups
     "python-dotenv>=1.2.2",        # reads CODECOV_TOKEN from .env
 
@@ -40,7 +40,7 @@ dependencies = [
     "bashate>=2.1.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",           # a pytest PLUGIN, activated by CI's --cov flags
-    "hypothesis>=6.156.6",         # property tests in bmk's own suite
+    "hypothesis>=6.157.0",         # property tests in bmk's own suite
     # Floor stays at 1.5.0, NOT 1.5.1: PyPI yanked 1.5.1 (upstream shipped unintended breaking
     # changes and will re-release them as a new major). A yanked release is invisible to a range
     # resolve, and nothing newer exists, so a >=1.5.1 floor has ZERO candidates and makes bmk
