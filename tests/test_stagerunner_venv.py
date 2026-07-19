@@ -236,6 +236,44 @@ def test_ensure_project_venv_sync_is_exact_and_upgrading(mock_run: MagicMock, tm
 
 
 @pytest.mark.os_agnostic
+def test_uv_env_drops_virtual_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provisioning uv calls must not inherit an active VIRTUAL_ENV.
+
+    Provisioning runs before the pipeline pins VIRTUAL_ENV at the project venv, so a uv
+    call here would otherwise inherit the caller's shell venv (an IDE's, say) and uv prints
+    a "does not match the project environment path ... will be ignored" warning on every
+    call. Everything else in the environment is preserved.
+    """
+    from bmk.adapters.stagerunner.venv import _uv_env
+
+    monkeypatch.setenv("VIRTUAL_ENV", "/home/user/ide-venv")
+    monkeypatch.setenv("BMK_PROBE_MARKER", "keep-me")
+    env = _uv_env()
+    assert "VIRTUAL_ENV" not in env
+    assert env["BMK_PROBE_MARKER"] == "keep-me"
+
+
+@pytest.mark.os_agnostic
+def test_run_passes_uv_env_without_virtual_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """_run hands uv an explicit environment with VIRTUAL_ENV stripped."""
+    from bmk.adapters.stagerunner import venv as venv_mod
+
+    monkeypatch.setenv("VIRTUAL_ENV", "/home/user/ide-venv")
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        captured["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(venv_mod.subprocess, "run", fake_run)
+    venv_mod._run(["uv", "venv", str(tmp_path / ".venv")], tmp_path, quiet=True)
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "VIRTUAL_ENV" not in env
+
+
+@pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.venv._run")
 def test_ensure_project_venv_falls_back_when_no_dev_extra(mock_run: MagicMock, tmp_path: Path) -> None:
     """Falls back to `.` when the project has no [dev] extra.

@@ -208,13 +208,27 @@ def is_venv(venv: Path) -> bool:
     return venv.is_dir() and (venv / "pyvenv.cfg").is_file()
 
 
+def _uv_env() -> dict[str, str]:
+    """The ambient environment minus ``VIRTUAL_ENV`` for a provisioning uv call.
+
+    Provisioning runs BEFORE :func:`context.build_context` pins ``VIRTUAL_ENV`` at the
+    project venv, so a uv call here would otherwise inherit whatever venv the caller's
+    shell activated (an IDE's, say). uv then prints
+    ``warning: VIRTUAL_ENV=... does not match the project environment path ... and will
+    be ignored`` on every provisioning call. bmk targets the venv explicitly
+    (``uv venv <path>``, ``uv pip install --python <path>``), so ``VIRTUAL_ENV`` is pure
+    noise here - drop it so the output stays clean and uv cannot prefer a foreign env.
+    """
+    return {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
+
+
 def _run(argv: list[str], cwd: Path, *, quiet: bool) -> int:
     """Run ``argv`` in ``cwd``, silencing output when quiet."""
     output = subprocess.DEVNULL if quiet else None
     try:
         # argv is built from literals and a resolved path, never from user
         # input, and runs without a shell.
-        return subprocess.run(argv, cwd=cwd, stdout=output, stderr=output, check=False).returncode
+        return subprocess.run(argv, cwd=cwd, stdout=output, stderr=output, env=_uv_env(), check=False).returncode
     except OSError:
         # uv missing from PATH. Degrade to the caller's fallback rather than
         # breaking a run that may not have needed the venv at all.
@@ -225,7 +239,7 @@ def _run_capture(argv: list[str], cwd: Path) -> str | None:
     """Run ``argv`` in ``cwd`` and return stdout, or None if it could not run."""
     try:
         # argv is built from literals; no shell, no user input.
-        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
+        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=_uv_env(), check=False)
     except OSError:
         return None
     return result.stdout if result.returncode == 0 else None
