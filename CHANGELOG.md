@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.12.2] 2026-07-20 14:04:50
+
 ### Fixed
 - **PSScriptAnalyzer no longer lints vendored `.ps1` files inside the project venv.**
   `find_ps1_files` excluded `.venv` and `node_modules`, but the scan itself was handed the project
@@ -17,10 +19,6 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **A violation count of exactly 256 no longer reports success.** The helper exits with the number
   of violations, and a POSIX exit status is taken mod 256, so 256 findings wrapped to 0. The count
   is now capped at 255.
-
-## [3.12.1] 2026-07-20 13:34:26
-
-### Fixed
 - **The Quickstart notebook's CI job now actually gates.** CI executes the notebook with
   `allow_errors=False`, which only catches exceptions raised in the kernel - `!cmd` goes through
   IPython's `system()` and never raises, so a broken command printed its error and the run stayed
