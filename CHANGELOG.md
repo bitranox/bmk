@@ -6,6 +6,40 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.13.0] 2026-07-20 14:46:40
+
+### Fixed
+- **The Makefile no longer rebuilds bmk's shared environment before every target.** bmk's env lives
+  in uv's machine-wide tool dir, and `_ensure_bmk` ran `uv tool install --reinstall --force` on
+  every single make, which tore that env down and rebuilt it in place. Any bmk already RUNNING out
+  of it, in any other repo, lost its `site-packages` mid-run. The symptom was an ImportError inside
+  bmk's own dependencies rather than in project code (a vanished `pip_api._hash`, a half-written
+  pyright typeshed emitting diagnostics against the CPython stdlib), and because a later run
+  repaired the env, it cleared by itself and read as a flake. The common path is now
+  `uv tool upgrade bmk`, which leaves the environment byte-identical when bmk is already current
+  ("Nothing to upgrade", measured at ~0.9s with directory mtimes unchanged), so the destructive
+  window shrinks from every make to an actual version change.
+
+### Changed
+- **`--refresh-package bmk` and the `UV_OFFLINE` carve-out are gone.** They existed because
+  `uv tool install` re-resolves against uv's cached index, so a release published minutes ago
+  stayed invisible. `uv tool upgrade` revalidates the index on every run with no freshness window
+  and rejects `--refresh` outright (exit 2); offline it answers "Nothing to upgrade" cleanly.
+
+### Added
+- **`bmk_selfcheck`, a stdlib-only integrity check for bmk's own environment.** Rebuilding the env
+  on every make also repaired a damaged one as a side effect; upgrading does not, so that repair is
+  now deliberate. The Makefile runs `python -m bmk_selfcheck` before the upgrade: it compares every
+  installed distribution's `RECORD` against the filesystem and exits non-zero if a package was only
+  partially written, which is how uv's copy fallback on a mount it cannot hardlink across has left
+  `pip_api._hash` and `pydantic.functional_serializers` missing. That flavour does not clear on a
+  re-run. A miss falls through to the full reinstall, and an absent env stays quiet so a first-ever
+  make does not report an error before the install that fixes it. Net cost is still below the old
+  recipe: ~1.15s against ~2s of unconditional teardown. It is a top-level module rather than
+  `bmk._selfcheck` so that `-m` does not execute `bmk/__init__.py` first, and it deliberately is
+  not an import probe: `bmk --version` costs 1.3s, more than the upgrade it guards, and never
+  imports `pip_api`.
+
 ## [3.12.2] 2026-07-20 14:04:50
 
 ### Fixed

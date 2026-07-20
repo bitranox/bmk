@@ -10,7 +10,9 @@ from those repos. Five invariants are guarded:
    with the wrong version.
 2. The install cannot silently degrade. It runs before every make invocation, and each
    way it can go wrong - no-opping on a stale env, swallowing the error - produces a
-   working-looking env that fails much later, somewhere unrelated.
+   working-looking env that fails much later, somewhere unrelated. It also must not
+   REBUILD the env on the common path: that env is shared machine-wide, so an
+   unconditional reinstall deletes it out from under a bmk running in another repo.
 3. bmk's env holds bmk ALONE, and is therefore shared by every repo. The project's
    dependencies live in the project's own `.venv`. This is the load-bearing one: while
    the two resolved together, a project dependency could silently backtrack bmk to an
@@ -121,9 +123,9 @@ def test_ensure_bmk_installs_bmk_alone() -> None:
 def test_ensure_bmk_always_reinstalls() -> None:
     """Every install attempt carries `--reinstall`.
 
-    `uv tool install` without it NO-OPS when the tool is already present, so a
-    fallback lacking it silently keeps a STALE tool env - old pipeline code running
-    against new sources while still reporting success.
+    These attempts are the REPAIR path, reached when the env is absent or damaged.
+    `uv tool install` without `--reinstall` NO-OPS when the tool is already present,
+    so a repair lacking it would repair nothing and hand back the same broken env.
     """
     recipe = _install_recipe(_template_text())
     installs = re.findall(r"uv tool install[^|]*", recipe)
@@ -142,7 +144,7 @@ def test_ensure_bmk_retries_once() -> None:
     """
     recipe = _install_recipe(_template_text())
 
-    assert recipe.count("uv tool install") == 2, "expected exactly two identical attempts"
+    assert recipe.count("uv tool install") == 2, "expected exactly two identical repair attempts"
     assert "||" in recipe
 
 
@@ -170,25 +172,97 @@ def test_tool_env_is_shared_not_per_project() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_a_new_bmk_release_is_seen_immediately() -> None:
-    """The install refreshes bmk's cached index metadata - and skips that when offline.
+def test_the_common_path_upgrades_and_does_not_rebuild_the_env() -> None:
+    """`uv tool upgrade` is the primary path; the reinstall is only a fallback.
 
-    `--reinstall` re-resolves, but against uv's CACHED index, so a release published
-    minutes ago stays invisible: measured, with 3.8.0 already on PyPI,
-    `uv tool install "bmk>=3.7.1"` still installed 3.7.1. That silently defeats the one
-    thing running the install before EVERY target is meant to buy.
+    This is the fix for a cross-repo race, not a speed tweak. bmk's env is shared by
+    every repo on the machine, so an unconditional `uv tool install --reinstall --force`
+    before every target meant a make in one repo deleted the site-packages out from under
+    a bmk still RUNNING in another, mid-test-suite. It surfaced as an ImportError inside
+    bmk's own dependencies that cleared on a re-run, so it read as a flake.
 
-    The offline exemption is not optional politeness: uv REFUSES the combination ("the
-    argument UV_OFFLINE cannot be used with --refresh"), so an unconditional flag would
-    fail every make for an offline user, blaming an env var they never linked to it.
+    `uv tool upgrade` leaves the env byte-identical when bmk is already current (measured:
+    "Nothing to upgrade", directory mtimes unchanged), so the destructive window shrinks
+    from every make to an actual version change.
+    """
+    recipe = _install_recipe(_template_text())
+
+    assert "uv tool upgrade bmk" in recipe, "the common path must upgrade, not reinstall"
+    upgrade_at = recipe.index("uv tool upgrade bmk")
+    install_at = recipe.index("uv tool install")
+    assert upgrade_at < install_at, "the reinstall must be the FALLBACK, reached only after the upgrade path fails"
+
+
+@pytest.mark.os_agnostic
+def test_the_upgrade_carries_no_refresh_flag() -> None:
+    """No --refresh/--refresh-package on the upgrade: uv rejects them outright (exit 2).
+
+    The flag was required by the OLD recipe, because `uv tool install` re-resolves against
+    uv's CACHED index and a release published minutes ago stayed invisible (measured: with
+    3.8.0 already on PyPI, `uv tool install "bmk>=3.7.1"` still installed 3.7.1).
+
+    `uv tool upgrade` does not need it: it revalidates pypi.org/simple/bmk/ on EVERY run
+    with no freshness window (measured three times back to back, all revalidating). Adding
+    the flag anyway would fail every make with an argument-parse error.
     """
     text = _template_text()
+    recipe = _install_recipe(text)
 
-    assert re.search(r"^BMK_REFRESH := \$\(if \$\(UV_OFFLINE\),,--refresh-package bmk\)$", text, re.M), (
-        "the refresh must be present, and must be omitted when UV_OFFLINE is set"
+    assert "--refresh" not in recipe, "uv tool upgrade REJECTS --refresh/--refresh-package (exit 2)"
+    # Match the make ASSIGNMENT, not the bare name: both identifiers are discussed in the
+    # comment block above the recipe, and that prose must stay writable.
+    assert not re.search(r"^BMK_REFRESH :=", text, re.M), (
+        "the refresh variable is obsolete; uv tool upgrade always revalidates"
     )
-    for attempt in re.findall(r"uv tool install[^|]*", _install_recipe(text)):
-        assert "$(BMK_REFRESH)" in attempt, f"install attempt would use a stale index: {attempt.strip()!r}"
+    assert not re.search(r"^\s*BMK_REFRESH\b.*:?=", text, re.M) and "$(BMK_REFRESH)" not in text, (
+        "nothing may still reference the retired refresh variable"
+    )
+    assert not re.search(r"\$\(if \$\(UV_OFFLINE\)", text), (
+        "the offline carve-out existed only to dodge uv refusing --refresh; "
+        "UV_OFFLINE=1 uv tool upgrade bmk answers 'Nothing to upgrade' cleanly"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_a_damaged_env_is_detected_and_rebuilt() -> None:
+    """An integrity check gates the upgrade, replacing a repair that used to be accidental.
+
+    While every make rebuilt the env, a corrupted env silently fixed itself. Upgrading
+    does not rebuild, so that free repair is gone and has to be earned back deliberately:
+    `python -m bmk_selfcheck` compares every installed distribution's RECORD against the
+    filesystem, and a miss falls through to the full reinstall.
+
+    It must run the interpreter DIRECTLY, never `bmk --version`. An import probe costs
+    1.3s - more than the 0.9s upgrade it guards - and would have missed the real failure
+    anyway, because bmk's startup never imports pip_api, the package that was damaged.
+    """
+    text = _template_text()
+    recipe = _install_recipe(text)
+
+    assert "$(BMK_INTACT)" in recipe, "the upgrade must be gated on an integrity check"
+    assert re.search(r"^BMK_INTACT := .*-m bmk_selfcheck", text, re.M), (
+        "the check must run `python -m bmk_selfcheck` in bmk's own env"
+    )
+    assert "$(BMK) --version" not in recipe, (
+        "an import probe is slower than the upgrade it guards and misses the failure it exists for"
+    )
+    assert re.search(r"^BMK_PY := ", text, re.M), "the check needs the interpreter inside bmk's env"
+
+
+@pytest.mark.os_agnostic
+def test_a_fresh_machine_does_not_report_a_missing_env_as_an_error() -> None:
+    """The check is skipped when there is no tool env yet, rather than failing loudly.
+
+    A first-ever make has nothing installed. Running the interpreter anyway would print a
+    "no such file" error before the very install that fixes it, which reads as a broken
+    setup. `test -x` short-circuits instead, and the recipe proceeds to the install.
+    """
+    text = _template_text()
+    match = re.search(r"^BMK_INTACT := (.*)$", text, re.M)
+
+    assert match, "the template must define BMK_INTACT"
+    assert 'test -x "$(BMK_PY)"' in match.group(1), "an absent interpreter must short-circuit, not error"
+    assert match.group(1).endswith(",false)"), "an unresolvable tool dir must fall through to the install"
 
 
 @pytest.mark.os_agnostic
@@ -412,6 +486,45 @@ def test_root_makefile_keeps_its_own_env_unlike_the_template() -> None:
     assert "UV_TOOL_DIR" in recipe, (
         "bmk's own dev env must stay per-project; sharing it would push bmk-from-source "
         "into every other repo's toolchain"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_root_makefile_does_not_rebuild_its_env_on_every_make() -> None:
+    """bmk's own Makefile installs CONDITIONALLY, for the same reason the template upgrades.
+
+    `--reinstall` tears the env down and rebuilds it. Running that before every target
+    deleted the site-packages out from under a bmk still RUNNING out of the same env -
+    here, a subagent and the main agent both running make in this repo - and surfaced as an
+    ImportError inside bmk's own dependencies that read as a real test failure.
+
+    Skipping is safe only because the install is EDITABLE: a source edit is already live
+    without reinstalling. So the guard checks the three things that CAN invalidate the env,
+    and nothing else: it is damaged, its dependencies changed, or it was never installed.
+    """
+    text = _root_makefile_text()
+    recipe = _install_recipe(text)
+
+    assert "$(BMK_INTACT)" in recipe, "a damaged env must still be rebuilt"
+    assert "$(BMK_STAMP)" in recipe, "the install must be gated, not unconditional"
+    assert "pyproject.toml -nt" in recipe, "a dependency or entry-point change must reinstall"
+    assert re.search(r"^BMK_INTACT := .*-m bmk_selfcheck", text, re.M), (
+        "the damage check must be the same RECORD-vs-disk probe the template uses"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_only_the_root_makefile_uses_a_stamp() -> None:
+    """The stamp is right here and wrong in the template, so it must not spread.
+
+    This Makefile installs from LOCAL SOURCE: there is no release to discover, and the
+    source is already live in an editable install. The template installs a RELEASE from
+    PyPI, so a stamp would make make skip the upgrade and the env would silently pin
+    itself to whatever bmk it first saw.
+    """
+    assert "BMK_STAMP" in _root_makefile_text(), "bmk's own Makefile gates its editable install"
+    assert "BMK_STAMP" not in _template_text(), (
+        "a stamp in the template would stop uv from ever seeing a new bmk release"
     )
 
 

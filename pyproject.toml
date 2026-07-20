@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.12.2"
+version = "3.13.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -128,7 +128,12 @@ build-backend = "hatchling.build"
 
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bmk"]
+# `bmk_selfcheck` is a second TOP-LEVEL module on purpose, so the deployed Makefile can run
+# it as `python -m bmk_selfcheck` without importing `bmk` (whose __init__ costs 0.7s and is
+# the very thing the check audits). `packages` cannot carry a lone module, hence the
+# only-include/sources pair - which is exactly what `packages = ["src/bmk"]` desugars to.
+only-include = ["src/bmk", "src/bmk_selfcheck.py"]
+sources = ["src"]
 include = [
     "src/bmk/py.typed",
     "src/bmk/adapters/config/defaultconfig.toml",

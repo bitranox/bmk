@@ -42,7 +42,11 @@ Two further problems were never named anywhere:
 
 **bmk's environment holds bmk and its toolchain. Nothing of the project.**
 
-1. The install is `uv tool install --reinstall --force "bmk>=$(BMK_MIN)"` - no `--with`.
+1. The common path is `uv tool upgrade bmk` - no `--with`. It is a plain upgrade rather than
+   `uv tool install --reinstall --force "bmk>=$(BMK_MIN)"` precisely *because* the env is
+   shared (point 3): an unconditional rebuild before every target deleted it out from under a
+   bmk still running in another repo. The reinstall form remains as the repair path, taken when
+   `python -m bmk_selfcheck` finds the env absent or partially written.
 2. The tests run in the **project's** venv: `resolve_test_python` (mirroring the existing
    `resolve_audit_python`) resolves it at stage time, and `_coverage.py` takes it as
    `--python` instead of using `sys.executable`. It never falls back to bmk's interpreter -

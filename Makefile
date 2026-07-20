@@ -17,11 +17,14 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-# uv names the executable bmk.exe on Windows.
+# uv names the executable bmk.exe on Windows, and lays a tool env out like a venv, so its
+# interpreter is under Scripts/ there and bin/ everywhere else.
 ifeq ($(OS),Windows_NT)
   BMK_EXE := .exe
+  BMK_ENV_BIN := Scripts
 else
   BMK_EXE :=
+  BMK_ENV_BIN := bin
 endif
 
 # This env stays PER-PROJECT, and here that is deliberate - do NOT "unify" it with the
@@ -89,12 +92,38 @@ endif
 # already present, keeping a stale env. The retry covers the transient __pycache__
 # removal race ("Directory not empty", os error 39); if both fail, make fails loudly,
 # because a stale env is not a safe state to continue from.
+#
+# It is CONDITIONAL, for the same reason the template upgrades instead of reinstalling:
+# `--reinstall` tears the env down and rebuilds it, so running it before every target
+# deleted the site-packages out from under a bmk still RUNNING out of the same env - here
+# that is a subagent and the main agent both running make in this repo, which has produced
+# ImportErrors inside bmk's own dependencies that looked like real test failures.
+#
+# Skipping it is safe precisely because the install is EDITABLE: source edits are already
+# live with no reinstall (see above), so only three things can invalidate the env, and each
+# is checked below.
+#
+#   * the env is damaged or absent  -> `python -m bmk_selfcheck`, the same RECORD-vs-disk
+#     check the template uses (bmk ships it; a fresh tree has no env, so `test -x` keeps
+#     that quiet rather than erroring before the very install that fixes it).
+#   * dependencies or entry points changed -> pyproject.toml newer than the stamp.
+#   * no stamp yet -> never installed by this recipe.
+#
+# A stamp is wrong in the TEMPLATE (make would skip the install and uv would never see a
+# new bmk RELEASE, silently pinning the env) and right here: there is no release to pick
+# up, the source is the env's input and it is already live.
+BMK_PY := $(BMK_TOOL_DIR)/bmk/$(BMK_ENV_BIN)/python$(BMK_EXE)
+BMK_STAMP := $(BMK_TOOL_DIR)/.bmk-editable-install
+BMK_INTACT := test -x "$(BMK_PY)" && "$(BMK_PY)" -m bmk_selfcheck
+
 .PHONY: _ensure_bmk
 _ensure_bmk:
-	@UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
-	  uv tool install --reinstall --force --editable ./ \
-	  || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
-	  uv tool install --reinstall --force --editable ./
+	@if $(BMK_INTACT) && [ -f "$(BMK_STAMP)" ] && [ ! pyproject.toml -nt "$(BMK_STAMP)" ]; then exit 0; fi; \
+	  { UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
+	      uv tool install --reinstall --force --editable ./ \
+	    || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
+	      uv tool install --reinstall --force --editable ./; } \
+	  && touch "$(BMK_STAMP)"
 
 # ──────────────────────────────────────────────────────────────
 # Argument forwarding via MAKECMDGOALS

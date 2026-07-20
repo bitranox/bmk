@@ -32,8 +32,9 @@ Configuration settings additionally accept `BMK___<SECTION>__<KEY>` environment 
 
 `BMK_PROJECT_DIR`, `BMK_PYTHON_CMD` and `BMK_COMMAND_PREFIX` are **set by** bmk into each stage's
 child environment (`build_context()` in `stagerunner/context.py`), not read from yours - do not set them.
-`UV_OFFLINE` is uv's own; when it is set the Makefile drops `--refresh-package bmk`, which uv
-refuses to combine with offline mode.
+`UV_OFFLINE` is uv's own, and the Makefile no longer needs to special-case it: the install step
+runs `uv tool upgrade bmk`, which takes no `--refresh` flag (uv rejects one) and answers
+"Nothing to upgrade" cleanly when offline.
 
 ## Test Markers and What Each Command Runs
 
