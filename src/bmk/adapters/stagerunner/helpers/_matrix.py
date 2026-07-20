@@ -57,10 +57,44 @@ class CellResult:
     detail: str = ""
 
 
+_VERDICT_PREFIXES = ("FAILED", "ERROR", "error:")
+
+
 def _tail(text: str) -> str:
-    """The last few lines of a tool's output - enough to see the failure, not a flood."""
+    """The lines that explain a cell's failure - the verdicts first, then the tail.
+
+    A plain tail is not enough: the suite logs to stderr, so on a real failure the last
+    lines are routine log chatter and pytest's ``FAILED ...`` summary has already scrolled
+    past. That made a genuine matrix failure read as "no output captured". Verdict lines are
+    hoisted so the cause is visible whatever else the run printed.
+    """
     lines = text.strip().splitlines()
-    return "\n".join(lines[-_MAX_DETAIL_LINES:])
+    verdicts = [line for line in lines if line.startswith(_VERDICT_PREFIXES)]
+    tail = lines[-_MAX_DETAIL_LINES:]
+    hoisted = [line for line in verdicts if line not in tail]
+    return "\n".join(hoisted + tail)
+
+
+def _cell_env(venv: Path) -> dict[str, str]:
+    """Environment pinning a cell's subprocesses at that cell's own venv.
+
+    A cell must not inherit the ambient environment unchanged. The matrix runs as a
+    HelperAction (in-process), so there is no ``StageContext`` env to inherit - unlike
+    ``make test``, whose pytest runs as a ToolAction with the stage runner's env. Without
+    this, a test that shells out to a console script (``ruff``, ``pip-audit``) finds no
+    such tool on ``PATH`` and fails in ``test-all`` while passing in ``test``.
+
+    Pointing ``PATH`` at the CELL's ``bin`` (not bmk's tool bin) is what makes the matrix
+    honest: each version's tests resolve the tools installed for THAT interpreter.
+    """
+    env = dict(os.environ)
+    python = venv_python(venv)
+    env["VIRTUAL_ENV"] = str(venv)
+    env["PIPAPI_PYTHON_LOCATION"] = str(python)
+    bin_dir = str(python.parent)
+    existing = env.get("PATH", "")
+    env["PATH"] = f"{bin_dir}{os.pathsep}{existing}" if existing else bin_dir
+    return env
 
 
 def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[CellStatus, str]:
@@ -68,18 +102,20 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[Ce
 
     pytest runs from the venv's own interpreter (the project is installed there), pyright is
     pinned at it with ``--pythonpath``. ``-p no:cacheprovider`` keeps parallel cells from
-    racing on a shared ``.pytest_cache``.
+    racing on a shared ``.pytest_cache``. Both run under ``_cell_env`` so the cell's own
+    tools resolve.
     """
     python = venv_python(venv)
+    env = _cell_env(venv)
     pytest_cmd = [str(python), "-m", "pytest", "-m", "not integration", "-q", "-p", "no:cacheprovider"]
-    result = subprocess.run(pytest_cmd, cwd=project_dir, capture_output=True, text=True, check=False)
+    result = subprocess.run(pytest_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
         return CellStatus.FAIL, _tail(result.stdout + result.stderr)
 
     pyright_cmd = ["pyright", "--pythonpath", str(python)]
     if quiet:
         pyright_cmd.append("--outputjson")
-    checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False)
+    checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
     if checked.returncode != 0:
         return CellStatus.FAIL, _tail(checked.stdout + checked.stderr)
     return CellStatus.PASSED, ""

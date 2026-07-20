@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the version matrix helper (`test-all`).
 
 Two layers, no patching of internals:
@@ -11,13 +12,22 @@ Two layers, no patching of internals:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from bmk.adapters.stagerunner.helpers._matrix import CellResult, CellStatus, main
+from bmk.adapters.stagerunner.helpers._matrix import (
+    _MAX_DETAIL_LINES,
+    CellResult,
+    CellStatus,
+    _cell_env,
+    _tail,
+    main,
+)
+from bmk.adapters.stagerunner.venv import venv_python
 
 
 def _classifiers(minors: list[str]) -> str:
@@ -168,3 +178,47 @@ def test_e2e_no_classifiers_warns_and_names_the_version(tmp_path: Path, capsys: 
         check=False,
     ).stdout.strip()
     assert default_version and default_version in err
+
+
+# ---------------------------------------------------------------------------
+# Cell environment: a cell's subprocesses must resolve the CELL's own tools
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_cell_env_puts_the_cells_bin_first_on_path(tmp_path: Path) -> None:
+    """A cell's PATH leads with its own venv bin, so console scripts resolve per version.
+
+    Without this the matrix inherits the ambient PATH: a test that shells out to a console
+    script (ruff, pip-audit) then fails under `test-all` while passing under `test`, whose
+    pytest runs as a ToolAction with the stage runner's env.
+    """
+    venv = tmp_path / ".venv-3.12"
+    env = _cell_env(venv)
+
+    expected_bin = str(venv_python(venv).parent)
+    assert env["PATH"].split(os.pathsep)[0] == expected_bin
+    assert os.environ.get("PATH", "") in env["PATH"], "the ambient PATH must be kept, not replaced"
+
+
+@pytest.mark.os_agnostic
+def test_cell_env_pins_the_interpreter_for_venv_aware_tools(tmp_path: Path) -> None:
+    """VIRTUAL_ENV and PIPAPI_PYTHON_LOCATION name the cell, not whatever was active."""
+    venv = tmp_path / ".venv-3.12"
+    env = _cell_env(venv)
+
+    assert env["VIRTUAL_ENV"] == str(venv)
+    assert env["PIPAPI_PYTHON_LOCATION"] == str(venv_python(venv))
+
+
+@pytest.mark.os_agnostic
+def test_failure_detail_hoists_verdicts_above_trailing_log_noise() -> None:
+    """pytest's FAILED lines survive even when stderr chatter fills the tail.
+
+    The suite logs to stderr, so on a real failure the last lines are routine chatter and the
+    verdict has scrolled past - which made a genuine matrix failure read as no output at all.
+    """
+    noise = "\n".join(f"[INFO]: routine chatter {i}" for i in range(_MAX_DETAIL_LINES * 2))
+    detail = _tail(f"FAILED tests/test_thing.py::test_the_real_cause\n{noise}")
+
+    assert "FAILED tests/test_thing.py::test_the_real_cause" in detail
