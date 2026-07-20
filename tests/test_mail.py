@@ -7,8 +7,9 @@ email operations.
 
 from __future__ import annotations
 
+import smtplib
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from conftest import RecordingTransport
@@ -733,41 +734,40 @@ def test_send_email_raises_when_smtp_connection_fails() -> None:
         from_address="sender@test.com",
     )
 
-    with patch("smtplib.SMTP") as mock_smtp:
-        mock_smtp.side_effect = ConnectionError("Cannot connect to SMTP server")
+    transport = RecordingTransport(fail_hosts=["smtp.test.com:587"])
 
-        with pytest.raises(DeliveryError, match=r"failed.*on all of following hosts"):
-            send_email(
-                config=config,
-                recipients="recipient@test.com",
-                subject="Test",
-                body="Hello",
-            )
+    with pytest.raises(DeliveryError, match=r"failed.*on all of following hosts"):
+        send_email(
+            config=config,
+            recipients="recipient@test.com",
+            subject="Test",
+            body="Hello",
+            transport=transport,
+        )
 
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_authentication_fails() -> None:
     """SMTP authentication failure raises DeliveryError."""
-    mock_instance = MagicMock()
-    mock_instance.login.side_effect = Exception("Authentication failed")
-
     config = EmailConfig(
         smtp_hosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         smtp_username="user@test.com",
         smtp_password="wrong_password",
     )
+    transport = RecordingTransport(
+        fail_hosts=["smtp.test.com:587"],
+        failure=smtplib.SMTPAuthenticationError(535, b"Authentication credentials invalid"),
+    )
 
-    with patch("smtplib.SMTP") as mock_smtp:
-        mock_smtp.return_value.__enter__.return_value = mock_instance
-
-        with pytest.raises(DeliveryError, match=r"failed.*on all of following hosts"):
-            send_email(
-                config=config,
-                recipients="recipient@test.com",
-                subject="Test",
-                body="Hello",
-            )
+    with pytest.raises(DeliveryError, match=r"failed.*on all of following hosts"):
+        send_email(
+            config=config,
+            recipients="recipient@test.com",
+            subject="Test",
+            body="Hello",
+            transport=transport,
+        )
 
 
 @pytest.mark.os_agnostic
@@ -778,16 +778,19 @@ def test_send_email_raises_when_recipient_validation_fails() -> None:
         from_address="sender@test.com",
     )
 
-    with patch("smtplib.SMTP") as mock_smtp:
-        mock_smtp.side_effect = ValueError("Invalid recipient address")
+    transport = RecordingTransport(
+        fail_hosts=["smtp.test.com:587"],
+        failure=smtplib.SMTPRecipientsRefused({"recipient@test.com": (550, b"No such user")}),
+    )
 
-        with pytest.raises(DeliveryError, match="following recipients failed"):
-            send_email(
-                config=config,
-                recipients="recipient@test.com",
-                subject="Test",
-                body="Hello",
-            )
+    with pytest.raises(DeliveryError, match="following recipients failed"):
+        send_email(
+            config=config,
+            recipients="recipient@test.com",
+            subject="Test",
+            body="Hello",
+            transport=transport,
+        )
 
 
 @pytest.mark.os_agnostic
@@ -804,13 +807,14 @@ def test_send_email_raises_when_attachment_missing(tmp_path: Path) -> None:
         attachment_blocked_directories=frozenset(),
     )
 
-    with patch("smtplib.SMTP"), pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError):
         send_email(
             config=config,
             recipients="recipient@test.com",
             subject="Test",
             body="Hello",
             attachments=[nonexistent],
+            transport=RecordingTransport(),
         )
 
 
@@ -822,16 +826,19 @@ def test_send_email_raises_when_all_smtp_hosts_fail() -> None:
         from_address="sender@test.com",
     )
 
-    with patch("smtplib.SMTP") as mock_smtp:
-        mock_smtp.side_effect = ConnectionError("Connection refused")
+    transport = RecordingTransport(fail_hosts=["smtp1.test.com:587", "smtp2.test.com:587"])
 
-        with pytest.raises(DeliveryError, match="following recipients failed"):
-            send_email(
-                config=config,
-                recipients="recipient@test.com",
-                subject="Test",
-                body="Hello",
-            )
+    with pytest.raises(DeliveryError, match="following recipients failed"):
+        send_email(
+            config=config,
+            recipients="recipient@test.com",
+            subject="Test",
+            body="Hello",
+            transport=transport,
+        )
+
+    assert transport.attempted_hosts == ["smtp1.test.com:587", "smtp2.test.com:587"]
+    assert transport.deliveries == []
 
 
 @pytest.mark.os_agnostic

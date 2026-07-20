@@ -579,11 +579,17 @@ class RecordingTransport:
 
     Attributes:
         fail_hosts: Hosts that raise instead of accepting, to drive failover.
+        failure: Exception a failing host raises. Defaults to ``ConnectionError``;
+            set it to distinguish a refusal reason (auth rejected, recipient
+            refused) that the caller is expected to surface differently.
         deliveries: Every accepted delivery, in the order it was handed over.
+        attempted_hosts: Every host handed over, accepted or not, in order.
     """
 
     fail_hosts: Collection[str] = ()
+    failure: Exception | None = None
     deliveries: list[RecordedDelivery] = field(default_factory=list[RecordedDelivery])
+    attempted_hosts: list[str] = field(default_factory=list[str])
 
     @property
     def recipients(self) -> list[str]:
@@ -606,8 +612,9 @@ class RecordingTransport:
     ) -> None:
         """Accept a message, or raise when ``host`` is configured to fail."""
         del delivery  # Credentials/TLS options are btx_lib_mail's concern, not the double's.
+        self.attempted_hosts.append(host)
         if host in self.fail_hosts:
-            raise ConnectionError(f"simulated delivery failure for {host}")
+            raise self.failure or ConnectionError(f"simulated delivery failure for {host}")
         message.seek(0)
         self.deliveries.append(RecordedDelivery(host=host, sender=sender, recipient=recipient, message=message.read()))
 
