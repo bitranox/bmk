@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.12.1] 2026-07-20 13:34:26
+
 ### Fixed
 - **The Quickstart notebook's CI job now actually gates.** CI executes the notebook with
   `allow_errors=False`, which only catches exceptions raised in the kernel - `!cmd` goes through
