@@ -141,7 +141,11 @@ def test_to_conf_mail_carries_the_real_password() -> None:
     """Redaction must not reach the object that actually authenticates."""
     config = EmailConfig(smtp_hosts=["smtp.test.com:587"], smtp_password="secret123")
 
-    assert config.to_conf_mail().smtp_password == "secret123"
+    # ConfMail.smtp_password is a SecretStr (btx_lib_mail 1.4.0+): masked in repr,
+    # but the plaintext must survive for the actual SMTP login.
+    carried = config.to_conf_mail().smtp_password
+    assert carried is not None
+    assert carried.get_secret_value() == "secret123"
 
 
 @pytest.mark.os_agnostic

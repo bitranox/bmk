@@ -13,10 +13,10 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, fields
+from collections.abc import Callable, Collection, Iterator
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import lib_cli_exit_tools
 import pytest
@@ -25,6 +25,8 @@ from lib_layered_config import Config
 from lib_layered_config.domain.config import SourceInfo
 
 if TYPE_CHECKING:
+    from btx_lib_mail.lib_mail import DeliveryOptions
+
     from bmk.adapters.memory.email import EmailSpy
     from bmk.composition import AppServices
 
@@ -545,6 +547,75 @@ def inject_test_services() -> Callable[[], Callable[[], AppServices]]:
         return build_testing
 
     return _inject
+
+
+@dataclass(frozen=True)
+class RecordedDelivery:
+    """One message handed to the transport for one recipient via one host.
+
+    Attributes:
+        host: SMTP host the message was routed to, as ``host:port``.
+        sender: Envelope sender address.
+        recipient: Single envelope recipient address.
+        message: Raw composed message bytes.
+    """
+
+    host: str
+    sender: str
+    recipient: str
+    message: bytes
+
+
+@dataclass
+class RecordingTransport:
+    """btx_lib_mail ``Transport`` double that records deliveries in memory.
+
+    btx_lib_mail composes the message and orchestrates per-host failover, then
+    hands each (host, recipient) pair to a ``Transport``. Injecting this double
+    via ``send_email(transport=...)`` exercises that real code path without a
+    live SMTP server, which is why delivery tests must not reach for
+    ``patch("smtplib.SMTP")`` - that pins btx_lib_mail's private wire protocol,
+    and broke wholesale when 1.5.0 moved to RFC 3030 BDAT framing.
+
+    Attributes:
+        fail_hosts: Hosts that raise instead of accepting, to drive failover.
+        deliveries: Every accepted delivery, in the order it was handed over.
+    """
+
+    fail_hosts: Collection[str] = ()
+    deliveries: list[RecordedDelivery] = field(default_factory=list[RecordedDelivery])
+
+    @property
+    def recipients(self) -> list[str]:
+        """Recipient addresses of all accepted deliveries, in order."""
+        return [delivery.recipient for delivery in self.deliveries]
+
+    @property
+    def hosts(self) -> list[str]:
+        """Hosts of all accepted deliveries, in order."""
+        return [delivery.host for delivery in self.deliveries]
+
+    def deliver(
+        self,
+        *,
+        host: str,
+        sender: str,
+        recipient: str,
+        message: IO[bytes],
+        delivery: DeliveryOptions,
+    ) -> None:
+        """Accept a message, or raise when ``host`` is configured to fail."""
+        del delivery  # Credentials/TLS options are btx_lib_mail's concern, not the double's.
+        if host in self.fail_hosts:
+            raise ConnectionError(f"simulated delivery failure for {host}")
+        message.seek(0)
+        self.deliveries.append(RecordedDelivery(host=host, sender=sender, recipient=recipient, message=message.read()))
+
+
+@pytest.fixture
+def recording_transport() -> RecordingTransport:
+    """Transport double capturing what would have gone out over SMTP."""
+    return RecordingTransport()
 
 
 @dataclass

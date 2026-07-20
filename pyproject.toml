@@ -18,7 +18,7 @@ dependencies = [
     "lib_cli_exit_tools>=2.3.2",
     "lib_log_rich>=6.3.5",
     "lib_layered_config>=5.6.0",
-    "btx_lib_mail>=1.3.2",         # send-email / send-notification
+    "btx_lib_mail>=1.5.0",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.13.4",            # the pipeline-overlay and email schemas
     "orjson>=3.11.9",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
@@ -334,7 +334,7 @@ layers = [
 ignore-vulns = []
 
 [tool.bandit]
-# Skip warnings for subprocess usage in _shared.py and commit_cmd.py — these modules
+# Skip warnings for subprocess usage in _shared.py and commit_cmd.py  -  these modules
 # intentionally execute external scripts (test runners, git) as part of core functionality.
 skips = [
   "B404",  # Consider possible security implications associated with subprocess module

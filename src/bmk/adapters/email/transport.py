@@ -10,6 +10,7 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+from btx_lib_mail.lib_mail import Transport
 from btx_lib_mail.lib_mail import send as btx_send
 
 from bmk.domain.errors import ConfigurationError, DeliveryError
@@ -136,6 +137,7 @@ def send_email(
     body_html: str = "",
     from_address: str | None = None,
     attachments: Sequence[Path] | None = None,
+    transport: Transport | None = None,
 ) -> bool:
     """Send an email using configured SMTP settings.
 
@@ -151,6 +153,9 @@ def send_email(
         body_html: HTML email body (optional, sent as multipart with plain text).
         from_address: Override sender address. Uses config.from_address when None.
         attachments: Optional sequence of file paths to attach.
+        transport: Delivery seam overriding the SMTP wire adapter. None uses
+            btx_lib_mail's default. Injecting a double here is how delivery is
+            exercised without a live server; do not monkeypatch ``smtplib``.
 
     Returns:
         True when delivery succeeds; False if the underlying transport
@@ -205,6 +210,7 @@ def send_email(
             attachment_raise_on_security_violation=config.attachment_raise_on_security_violation,
             raise_on_missing_attachments=config.raise_on_missing_attachments,
             raise_on_invalid_recipient=config.raise_on_invalid_recipient,
+            transport=transport,
         )
     except RuntimeError as exc:
         logger.debug("SMTP delivery failed", exc_info=True)
@@ -231,6 +237,7 @@ def send_notification(
     subject: str,
     message: str,
     from_address: str | None = None,
+    transport: Transport | None = None,
 ) -> bool:
     """Send a simple plain-text notification email.
 
@@ -244,6 +251,8 @@ def send_notification(
         subject: Email subject line.
         message: Plain-text notification message.
         from_address: Override sender address. Uses config.from_address when None.
+        transport: Delivery seam overriding the SMTP wire adapter. None uses
+            btx_lib_mail's default.
 
     Returns:
         True when delivery succeeds; False if the underlying transport
@@ -263,6 +272,7 @@ def send_notification(
         subject=subject,
         body=message,
         from_address=from_address,
+        transport=transport,
     )
 
 

@@ -6,6 +6,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+- **Email delivery works against `btx_lib_mail` 1.5.0.** The dependency floor moves to `>=1.5.0`,
+  which is where `ConfMail.smtp_password` became a `SecretStr` (1.4.0) and delivery moved to RFC 3030
+  BDAT framing (1.5.0). Production code already fed the new contract correctly; the scheduled CI run
+  went red on tests pinned to the old one.
+
+### Added
+- **`send_email` / `send_notification` accept a `transport` delivery seam**, forwarded to
+  `btx_lib_mail`. Passing `None` (the default) keeps the library's own SMTP transport, so existing
+  callers are unaffected. Delivery tests now inject a recording double through this seam instead of
+  monkeypatching `smtplib.SMTP`, which pinned the library's private wire protocol and is what broke.
+
 ## [3.11.2] 2026-07-19 14:07:59
 
 ### Fixed
