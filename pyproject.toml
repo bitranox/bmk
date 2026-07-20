@@ -178,8 +178,11 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Notebooks: unused imports are often intentional for side effects
-"notebooks/*.ipynb" = ["F401"]
+# Notebooks: unused imports are often intentional for side effects.
+# F821: `_exit_code` is injected by IPython, so ruff cannot see it defined.
+# S101: the asserts on it ARE the CI gate - `allow_errors=False` cannot see a
+#       failing `!cmd`, so without them a broken command leaves the run green.
+"notebooks/*.ipynb" = ["F401", "F821", "S101"]
 # Stage helpers: CLI-style utilities with subprocess calls, print output, and magic values
 "src/bmk/adapters/stagerunner/helpers/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0912", "PLR0913", "PLR2004"]
 # Tests: assert is standard, test fixtures have passwords, magic values are clearer inline, temp paths are fine

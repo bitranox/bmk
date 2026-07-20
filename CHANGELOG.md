@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+- **The Quickstart notebook's CI job now actually gates.** CI executes the notebook with
+  `allow_errors=False`, which only catches exceptions raised in the kernel - `!cmd` goes through
+  IPython's `system()` and never raises, so a broken command printed its error and the run stayed
+  green. IPython also records only the last `!` per cell in `_exit_code`, so an earlier failure was
+  erased outright. That is how a `bmk hello` invoking a nonexistent command survived in the
+  notebook. Every `!` is now followed by an assertion on its exit status, stating whether the
+  command must succeed or (for the `bmk fail` traceback demos) must exit 1.
+
 ## [3.12.0] 2026-07-20 12:12:14
 
 ### Fixed
