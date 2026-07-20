@@ -105,7 +105,7 @@ bmk send-notification \
 #### Programmatic Email Usage
 
 ```python
-from bmk.adapters.email.sender import EmailConfig
+from bmk.adapters.email.config import EmailConfig
 from bmk.composition import send_email, send_notification
 
 # Configure email
@@ -144,6 +144,45 @@ send_notification(
     message="Production deployment finished successfully",
 )
 ```
+
+#### Sending Without a Live SMTP Server
+
+Both functions accept an optional `transport`, forwarded to `btx_lib_mail`. Leaving it `None`
+(the default) uses the library's own SMTP transport, so normal callers need not pass it.
+
+Supplying one replaces only the wire step: `btx_lib_mail` still composes the message, validates
+recipients and attachments, and orchestrates per-host failover, then hands each `(host, recipient)`
+pair to the transport. That makes it the way to exercise delivery in a test without a live server,
+and the seam for an alternative transport.
+
+```python
+class RecordingTransport:
+    """Accept every message and remember it, instead of opening a socket."""
+
+    def __init__(self) -> None:
+        self.deliveries: list[tuple[str, str, bytes]] = []
+
+    def deliver(self, *, host, sender, recipient, message, delivery) -> None:
+        message.seek(0)
+        self.deliveries.append((host, recipient, message.read()))
+
+
+recorder = RecordingTransport()
+send_email(
+    config=config,
+    recipients="recipient@example.com",
+    subject="Test Email",
+    body="Hello from Python!",
+    transport=recorder,
+)
+assert recorder.deliveries[0][1] == "recipient@example.com"
+```
+
+Raise an exception from `deliver` to simulate a host refusing the message; `btx_lib_mail` then
+falls over to the next configured host, so failover is testable the same way.
+
+Prefer this over patching `smtplib.SMTP`. That pins the library's private wire protocol and breaks
+whenever it changes - which is exactly what happened when 1.5.0 moved to RFC 3030 BDAT framing.
 
 #### Email Troubleshooting
 

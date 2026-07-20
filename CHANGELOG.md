@@ -6,11 +6,22 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.12.0] 2026-07-20 12:12:14
+
 ### Fixed
 - **Email delivery works against `btx_lib_mail` 1.5.0.** The dependency floor moves to `>=1.5.0`,
   which is where `ConfMail.smtp_password` became a `SecretStr` (1.4.0) and delivery moved to RFC 3030
   BDAT framing (1.5.0). Production code already fed the new contract correctly; the scheduled CI run
   went red on tests pinned to the old one.
+- **`test-all` cells now resolve their own venv's console scripts.** Each cell spawned pytest and
+  pyright with the ambient environment, so no venv `bin/` was ever on `PATH`: a project whose tests
+  shell out to a console script (`ruff`, `pip-audit`) failed under `test-all` while passing under
+  `test`, whose pytest runs with the stage runner's env. Each cell is now pinned at its own venv
+  (`PATH`, `VIRTUAL_ENV`, `PIPAPI_PYTHON_LOCATION`), which also makes the matrix per-version in
+  earnest - every interpreter resolves the tools installed for it.
+- **A failing `test-all` cell reports the cause.** The per-cell detail was a plain tail of the
+  output, and because the suite logs to stderr the real `FAILED` summary had already scrolled past,
+  so a genuine failure printed as `no output captured`. Verdict lines are now hoisted above the tail.
 
 ### Added
 - **`send_email` / `send_notification` accept a `transport` delivery seam**, forwarded to
