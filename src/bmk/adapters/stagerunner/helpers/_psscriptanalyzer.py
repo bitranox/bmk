@@ -26,6 +26,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
@@ -187,37 +188,48 @@ def _exclude_rule_fragment(exclude_rules: tuple[str, ...]) -> str:
 def run_psscriptanalyzer(
     *,
     pwsh: str,
-    project_dir: Path,
+    files: Sequence[Path],
     exclude_rules: tuple[str, ...],
     verbose: bool = False,
     output_format: ToolOutputFormat = ToolOutputFormat.TEXT,
 ) -> int:
-    """Invoke PSScriptAnalyzer via subprocess.
+    """Invoke PSScriptAnalyzer over exactly ``files``.
+
+    Takes the resolved file list, NOT the project root: an earlier version passed
+    ``-Path <project_dir> -Recurse``, which re-walked the tree and undid every exclusion
+    ``find_ps1_files`` had just applied. Discovery was then only a "run at all?" gate, so a
+    repo holding one real script plus an in-tree ``.venv`` linted the vendored ``.ps1``
+    shipped inside that venv (npm wrappers from ``pyright[nodejs]``). CI never saw it,
+    because CI builds its venv outside the repo.
 
     Args:
         pwsh: Path to the ``pwsh`` executable.
-        project_dir: Project root to scan.
+        files: The ``.ps1`` files to lint, as returned by ``find_ps1_files``.
         exclude_rules: Rule names to exclude.
         verbose: If True, print additional diagnostic output.
         output_format: ``JSON`` for machine-readable output, ``TEXT`` for human-readable.
 
     Returns:
-        Exit code from PSScriptAnalyzer (0 = clean, >0 = violation count).
+        Exit code: 0 when clean, else the violation count capped at 255.
     """
-    path_lit = _ps_single_quote(str(project_dir))
+    if not files:
+        return 0
+
+    file_array = ",".join(_ps_single_quote(str(f)) for f in files)
     exclude_fragment = _exclude_rule_fragment(exclude_rules)
-    if output_format is ToolOutputFormat.JSON:
-        command = (
-            f"$results = Invoke-ScriptAnalyzer -Path {path_lit} -Recurse"
-            f" -Severity Error,Warning"
-            f"{exclude_fragment};"
-            f" $results | ConvertTo-Json -Depth 5;"
-            f" if ($results) {{ exit $results.Count }} else {{ exit 0 }}"
-        )
-    else:
-        command = (
-            f"Invoke-ScriptAnalyzer -Path {path_lit} -Recurse -Severity Error,Warning{exclude_fragment} -EnableExit"
-        )
+    # Each file is analysed by name. `-Recurse` is deliberately absent: it would re-expand
+    # any directory back into the tree this list was filtered out of.
+    collect = (
+        f"$results = @({file_array}) | ForEach-Object {{"
+        f" Invoke-ScriptAnalyzer -Path $_ -Severity Error,Warning{exclude_fragment} }};"
+    )
+    # `@(...)` forces an array: a lone violation is a bare object whose .Count would be
+    # unreliable. The cap matters because a POSIX exit status is mod 256, so exactly 256
+    # violations would otherwise exit 0 and report a clean run.
+    verdict = " $n = @($results).Count; if ($n -gt 255) { exit 255 } else { exit $n }"
+    render = " $results | ConvertTo-Json -Depth 5;" if output_format is ToolOutputFormat.JSON else " $results;"
+    command = collect + render + verdict
+
     if verbose:
         print(f'Running: pwsh -NoProfile -Command "{command}"')
 
@@ -263,7 +275,7 @@ def main(
 
     exit_code = run_psscriptanalyzer(
         pwsh=pwsh,
-        project_dir=project_dir,
+        files=files,
         exclude_rules=exclude_rules,
         verbose=verbose,
         output_format=output_format,

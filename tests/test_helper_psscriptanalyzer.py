@@ -252,7 +252,7 @@ def test_run_psscriptanalyzer_returns_zero_on_clean(tmp_path: Path) -> None:
     ) as mock_run:
         result = run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
-            project_dir=tmp_path,
+            files=[tmp_path / "script.ps1"],
             exclude_rules=("PSAvoidUsingWriteHost",),
         )
 
@@ -269,7 +269,7 @@ def test_run_psscriptanalyzer_returns_nonzero_on_violations(tmp_path: Path) -> N
     with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(3)):
         result = run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
-            project_dir=tmp_path,
+            files=[tmp_path / "script.ps1"],
             exclude_rules=(),
         )
 
@@ -282,7 +282,7 @@ def test_run_psscriptanalyzer_verbose_prints_command(tmp_path: Path, capsys: pyt
     with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)):
         run_psscriptanalyzer(
             pwsh="/usr/bin/pwsh",
-            project_dir=tmp_path,
+            files=[tmp_path / "script.ps1"],
             exclude_rules=("PSAvoidUsingWriteHost",),
             verbose=True,
         )
@@ -312,13 +312,13 @@ def test_exclude_rule_fragment_quotes_each_element_or_omits_when_empty() -> None
 
 
 @pytest.mark.os_agnostic
-def test_run_psscriptanalyzer_escapes_a_project_dir_with_a_quote(tmp_path: Path) -> None:
-    """A path containing a single quote is escaped, not left to break out of -Path."""
-    nasty = tmp_path / "o'brien"
+def test_run_psscriptanalyzer_escapes_a_file_path_with_a_quote(tmp_path: Path) -> None:
+    """A path containing a single quote is escaped, not left to break out of the array."""
+    nasty = tmp_path / "o'brien" / "script.ps1"
     with patch(
         "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
     ) as mock_run:
-        run_psscriptanalyzer(pwsh="/usr/bin/pwsh", project_dir=nasty, exclude_rules=("PSAvoidUsingWriteHost",))
+        run_psscriptanalyzer(pwsh="/usr/bin/pwsh", files=[nasty], exclude_rules=("PSAvoidUsingWriteHost",))
     command = mock_run.call_args[0][0][3]
     assert _ps_single_quote(str(nasty)) in command
     assert "o''brien" in command  # the quote was doubled, not left raw
@@ -417,3 +417,87 @@ def test_main_returns_nonzero_when_lint_fails(tmp_path: Path, capsys: pytest.Cap
 
     assert result == 2
     assert "PSScriptAnalyzer found lint violations" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# discovery must reach the scan (the exclusions are not decorative)
+# ---------------------------------------------------------------------------
+
+
+def _pwsh_command(mock_run: object) -> str:
+    """The -Command string handed to pwsh by the last subprocess.run call."""
+    return mock_run.call_args[0][0][3]  # type: ignore[attr-defined]
+
+
+@pytest.mark.os_agnostic
+def test_main_does_not_lint_ps1_files_inside_a_venv(tmp_path: Path) -> None:
+    """A vendored .ps1 under .venv must never reach PSScriptAnalyzer.
+
+    find_ps1_files excluded it, but the scan used to be handed the project ROOT with
+    -Recurse, so it re-walked the tree and linted the venv anyway. Discovery was then only
+    a "run at all?" gate: one real script opened it and the vendored npm wrappers that ship
+    inside pyright[nodejs] got flagged. CI never caught it - CI builds its venv outside the
+    repo, so nothing vendored was ever in range.
+    """
+    (tmp_path / "real.ps1").write_text("Write-Output 'hi'", encoding="utf-8")
+    vendored = tmp_path / ".venv" / "Scripts"
+    vendored.mkdir(parents=True)
+    (vendored / "npm.ps1").write_text("Write-Output 'vendored'", encoding="utf-8")
+
+    with (
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", return_value="/usr/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.ensure_psscriptanalyzer"),
+        patch(
+            "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
+        ) as mock_run,
+    ):
+        main(project_dir=tmp_path)
+
+    command = _pwsh_command(mock_run)
+    assert "npm.ps1" not in command, "a .ps1 inside .venv was handed to the scanner"
+    assert "real.ps1" in command, "the project's own script must still be linted"
+    assert "-Recurse" not in command, "-Recurse re-expands the tree and undoes the exclusions"
+
+
+@pytest.mark.os_agnostic
+def test_main_scans_every_discovered_file(tmp_path: Path) -> None:
+    """All discovered scripts reach the scan, not just the first."""
+    for name in ("a.ps1", "b.ps1"):
+        (tmp_path / name).write_text("Write-Output 'x'", encoding="utf-8")
+    nested = tmp_path / "tools"
+    nested.mkdir()
+    (nested / "c.ps1").write_text("Write-Output 'x'", encoding="utf-8")
+
+    with (
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", return_value="/usr/bin/pwsh"),
+        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.ensure_psscriptanalyzer"),
+        patch(
+            "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
+        ) as mock_run,
+    ):
+        main(project_dir=tmp_path)
+
+    command = _pwsh_command(mock_run)
+    for name in ("a.ps1", "b.ps1", "c.ps1"):
+        assert name in command
+
+
+@pytest.mark.os_agnostic
+def test_run_psscriptanalyzer_skips_pwsh_entirely_when_no_files() -> None:
+    """An empty file list must not spawn pwsh at all."""
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run") as mock_run:
+        result = run_psscriptanalyzer(pwsh="/usr/bin/pwsh", files=[], exclude_rules=())
+
+    assert result == 0
+    mock_run.assert_not_called()
+
+
+@pytest.mark.os_agnostic
+def test_violation_count_is_capped_so_it_cannot_wrap_to_success(tmp_path: Path) -> None:
+    """The exit status is capped at 255: a POSIX status is mod 256, so 256 would read as 0."""
+    with patch(
+        "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
+    ) as mock_run:
+        run_psscriptanalyzer(pwsh="/usr/bin/pwsh", files=[tmp_path / "s.ps1"], exclude_rules=())
+
+    assert "if ($n -gt 255) { exit 255 }" in _pwsh_command(mock_run)

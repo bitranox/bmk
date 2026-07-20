@@ -6,6 +6,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+- **PSScriptAnalyzer no longer lints vendored `.ps1` files inside the project venv.**
+  `find_ps1_files` excluded `.venv` and `node_modules`, but the scan itself was handed the project
+  ROOT with `-Recurse`, so it re-walked the whole tree and undid every exclusion. Discovery was
+  therefore only a "run at all?" gate: a repo holding one real script plus an in-tree `.venv` linted
+  the npm wrappers that ship inside `pyright[nodejs]`. The scan now receives exactly the discovered
+  file list and no longer recurses. This was invisible in CI, which builds its venv outside the
+  repository, so no vendored script was ever in range - it only ever hit local runs.
+- **A violation count of exactly 256 no longer reports success.** The helper exits with the number
+  of violations, and a POSIX exit status is taken mod 256, so 256 findings wrapped to 0. The count
+  is now capped at 255.
+
 ## [3.12.1] 2026-07-20 13:34:26
 
 ### Fixed
