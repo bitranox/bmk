@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import rich_click as click
-from lib_layered_config import Config
 
 from bmk import __init__conf__
 from bmk.adapters.config.overrides import apply_overrides
@@ -22,6 +21,8 @@ from .context import apply_traceback_preferences, store_cli_context
 from .typed_click import option, version_option
 
 if TYPE_CHECKING:
+    from lib_layered_config import Config
+
     from bmk.composition import AppServices
 
 
@@ -110,7 +111,9 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
 
     if ctx.invoked_subcommand is not None and ctx.invoked_subcommand != "install":
         try:
-            from .commands.install_cmd import check_makefile_update
+            # Same lazy-import rationale as `_register_commands` below: importing
+            # `.commands` here (before `cli` finishes definition) is deferred by convention.
+            from .commands.install_cmd import check_makefile_update  # noqa: PLC0415
 
             check_makefile_update()
         except (OSError, click.Abort):
@@ -126,7 +129,7 @@ def cli(ctx: click.Context, traceback: bool, profile: str | None, set_overrides:
 # the ``cli`` group, commands register themselves onto it, and those command
 # modules import from package ancestors. This is the standard Click pattern.
 def _register_commands() -> None:
-    from .commands import (
+    from .commands import (  # noqa: PLC0415
         cli_b,
         cli_bld,
         cli_bmp,

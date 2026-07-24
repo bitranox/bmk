@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,6 +14,9 @@ from bmk.adapters.stagerunner.helpers._sync_initconf import (
     sync_initconf_version,
     sync_makefile_version,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_project(tmp_path: Path, *, version: str = "2.0.0", pkg: str = "my_pkg") -> Path:

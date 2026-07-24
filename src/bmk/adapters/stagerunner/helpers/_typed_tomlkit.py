@@ -23,11 +23,13 @@ which parses into typed Pydantic models via rtoml.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, MutableMapping
 
 __all__ = ["TOMLKitError", "dumps", "parse"]
 

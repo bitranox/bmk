@@ -10,11 +10,13 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-
-from bmk.domain.enums import ToolOutputFormat
+from typing import TYPE_CHECKING
 
 from .model import StageContext
 from .venv import is_venv, resolve_project_venv, venv_python
+
+if TYPE_CHECKING:
+    from bmk.domain.enums import ToolOutputFormat
 
 
 def _pin_project_venv(env: dict[str, str], cwd: Path) -> None:

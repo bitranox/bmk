@@ -14,11 +14,11 @@ from .enums import DeployTarget, OutputFormat
 from .errors import ConfigurationError, DeliveryError, InvalidRecipientError
 
 __all__ = [
-    # Enums
-    "DeployTarget",
-    "OutputFormat",
     # Errors
     "ConfigurationError",
     "DeliveryError",
+    # Enums
+    "DeployTarget",
     "InvalidRecipientError",
+    "OutputFormat",
 ]

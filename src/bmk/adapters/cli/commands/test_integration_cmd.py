@@ -109,4 +109,4 @@ def cli_ti(human: bool, args: tuple[str, ...]) -> None:
         _run_test_integration(args, human=human)
 
 
-__all__ = ["cli_testintegration", "cli_testi", "cli_ti"]
+__all__ = ["cli_testi", "cli_testintegration", "cli_ti"]

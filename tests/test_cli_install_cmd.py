@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from click.testing import CliRunner, Result
 
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.exit_codes import ExitCode
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from click.testing import CliRunner, Result
 
 # =============================================================================
 # Command existence tests

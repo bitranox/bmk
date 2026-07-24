@@ -135,8 +135,10 @@ def _run_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str)
     Raises:
         SystemExit: On any step failure.
     """
-    from .push_cmd import run_push
-    from .release_cmd import run_release
+    # Deferred: pull in the push/release command implementations only when
+    # `bmk ship` actually runs, not on command registration.
+    from .push_cmd import run_push  # noqa: PLC0415
+    from .release_cmd import run_release  # noqa: PLC0415
 
     if shutil.which("gh") is None:
         logger.warning("gh CLI not found; running push only. Watch CI and run 'bmk release' manually.")

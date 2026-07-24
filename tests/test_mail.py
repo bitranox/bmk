@@ -8,7 +8,7 @@ email operations.
 from __future__ import annotations
 
 import smtplib
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -22,6 +22,9 @@ from bmk.adapters.email.sender import (
     send_notification,
 )
 from bmk.domain.errors import ConfigurationError, DeliveryError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ======================== EmailConfig Default Values ========================
 

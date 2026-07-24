@@ -16,14 +16,16 @@ System Role:
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import lib_log_rich.config
 import lib_log_rich.runtime
-from lib_layered_config import Config
 from pydantic import BaseModel, ConfigDict
 
 from bmk import __init__conf__
+
+if TYPE_CHECKING:
+    from lib_layered_config import Config
 
 
 class LoggingConfigModel(BaseModel):

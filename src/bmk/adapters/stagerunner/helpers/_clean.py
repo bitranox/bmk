@@ -21,10 +21,13 @@ from __future__ import annotations
 
 import shutil
 import sys
-from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # The project venv is deliberately absent: bmk provisions and syncs it (see
 # ``stagerunner/venv.py``), and the ``push`` pipeline cleans at order 30, right

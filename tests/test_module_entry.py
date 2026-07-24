@@ -6,14 +6,17 @@ import os
 import runpy
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import lib_cli_exit_tools
 import pytest
 
 from bmk import __init__conf__, entry
 from bmk.adapters import cli as cli_mod
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _get_subprocess_env() -> dict[str, str]:

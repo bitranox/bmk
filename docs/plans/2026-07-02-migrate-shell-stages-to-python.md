@@ -75,15 +75,18 @@ Goal: prove the whole spine end-to-end on the simplest pipeline (single-stage, o
 # tests/test_domain_stages.py
 from bmk.domain.stages import group_into_batches, normalize_returncode
 
+
 def test_group_into_batches_groups_equal_keys_and_sorts() -> None:
     items = [("a", 40), ("b", 10), ("c", 40), ("d", 20)]
     batches = group_into_batches(items, key=lambda t: t[1])
     assert [[t[0] for t in b] for b in batches] == [["b"], ["d"], ["a", "c"]]
 
+
 def test_group_into_batches_preserves_declaration_order_within_batch() -> None:
     items = [("a", 40), ("c", 40), ("b", 40)]
     batches = group_into_batches(items, key=lambda t: t[1])
     assert [t[0] for t in batches[0]] == ["a", "c", "b"]
+
 
 def test_normalize_returncode_maps_signal_to_128_plus_n() -> None:
     assert normalize_returncode(-2) == 130
@@ -99,6 +102,7 @@ Expected: FAIL  -  `ModuleNotFoundError: bmk.domain.stages`.
 ```python
 # src/bmk/domain/stages.py
 """Pure stage-ordering primitives (no I/O, no subprocess, no framework deps)."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -173,15 +177,22 @@ git commit -m "feat(stagerunner): pure domain stage-ordering primitives"
 from pathlib import Path
 from bmk.adapters.stagerunner.model import Stage, StageContext
 
+
 def test_stage_is_frozen_and_defaults_non_interactive() -> None:
     s = Stage(name="ruff_lint", order=40, action=lambda ctx, sink: 0)
     assert s.interactive is False
     assert s.order == 40
 
+
 def test_stage_context_carries_project_dir_and_args() -> None:
     ctx = StageContext(
-        project_dir=Path("/proj"), args=("--x",), output_format="json",
-        python_cmd="python3", package_name="bmk", env={}, show_warnings=True,
+        project_dir=Path("/proj"),
+        args=("--x",),
+        output_format="json",
+        python_cmd="python3",
+        package_name="bmk",
+        env={},
+        show_warnings=True,
     )
     assert ctx.project_dir == Path("/proj")
     assert ctx.args == ("--x",)
@@ -262,15 +273,18 @@ git commit -m "feat(stagerunner): Stage model, StageContext, StageAction protoco
 import io
 from bmk.adapters.stagerunner.output import CapturingSink, extract_warnings, hint_for
 
+
 def test_capturing_sink_buffers_text() -> None:
     sink = CapturingSink()
     sink.write("hello\n")
     sink.write("world\n")
     assert sink.getvalue() == "hello\nworld\n"
 
+
 def test_extract_warnings_drops_summary_line() -> None:
     out = "src/a.py: warning: unused import\nfound 3 warnings\nok\n"
     assert extract_warnings(out) == ["src/a.py: warning: unused import"]
+
 
 def test_hint_for_ruff_lint_violation() -> None:
     assert hint_for("ruff", 1) == "Lint violations found"
@@ -297,8 +311,11 @@ _WARNING_SUMMARY = re.compile(r"\b\d+\s+warnings?\b", re.IGNORECASE)
 
 EXIT_HINTS: dict[str, dict[int, str]] = {
     "ruff": {1: "Lint violations found", 2: "Configuration or CLI error"},
-    "git-commit": {1: "Commit failed (nothing to commit or pre-commit hook failed)",
-                   128: "Fatal git error", 129: "Git usage error"},
+    "git-commit": {
+        1: "Commit failed (nothing to commit or pre-commit hook failed)",
+        128: "Fatal git error",
+        129: "Git usage error",
+    },
     # extended per pipeline as ports land
 }
 
@@ -348,10 +365,7 @@ def report_batch_failures(results: list[StageResult], *, quiet: bool, out: TextI
 
 def report_success_summary(summary: PipelineSummary, *, quiet: bool, out: TextIO) -> None:
     if quiet:
-        out.write(
-            f'{{"result":"{summary.result}","stages":{summary.stages},'
-            f'"scripts":{summary.scripts}}}\n'
-        )
+        out.write(f'{{"result":"{summary.result}","stages":{summary.stages},"scripts":{summary.scripts}}}\n')
 ```
 
 - [ ] **Step 4: Run tests + pyright**
@@ -387,15 +401,25 @@ from bmk.adapters.stagerunner.actions import ToolAction, run_argv
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
 
+
 def _ctx(tmp_path: Path) -> StageContext:
-    return StageContext(project_dir=tmp_path, args=(), output_format="json",
-                        python_cmd=sys.executable, package_name="x", env={}, show_warnings=True)
+    return StageContext(
+        project_dir=tmp_path,
+        args=(),
+        output_format="json",
+        python_cmd=sys.executable,
+        package_name="x",
+        env={},
+        show_warnings=True,
+    )
+
 
 def test_run_argv_captures_output_and_returncode(tmp_path: Path) -> None:
     sink = CapturingSink()
     rc = run_argv([sys.executable, "-c", "print('hi'); raise SystemExit(3)"], _ctx(tmp_path), sink)
     assert rc == 3
     assert "hi" in sink.getvalue()
+
 
 def test_tool_action_builds_argv_from_context(tmp_path: Path) -> None:
     action = ToolAction(lambda ctx: [sys.executable, "-c", "print('ok')"])
@@ -472,8 +496,12 @@ from .output import OutputSink
 
 def run_argv(argv: Sequence[str], ctx: StageContext, sink: OutputSink) -> int:
     proc = subprocess.Popen(  # noqa: S603  -  argv list, never shell=True
-        list(argv), cwd=ctx.project_dir, env=dict(ctx.env),
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        list(argv),
+        cwd=ctx.project_dir,
+        env=dict(ctx.env),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
     signals.register(proc)
     try:
@@ -528,6 +556,7 @@ git commit -m "feat(stagerunner): argv/tool/helper actions + SIGINT/SIGTERM hand
 ```python
 # tests/test_stagerunner_registry.py
 from bmk.adapters.stagerunner.registry import PIPELINES
+
 
 def test_clean_pipeline_registered_single_stage() -> None:
     stages = PIPELINES["clean"]
@@ -597,24 +626,48 @@ from pathlib import Path
 from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
 
+
 def _ctx(tmp_path: Path) -> StageContext:
-    return StageContext(project_dir=tmp_path, args=(), output_format="json",
-                        python_cmd="python3", package_name="x", env={}, show_warnings=True)
+    return StageContext(
+        project_dir=tmp_path,
+        args=(),
+        output_format="json",
+        python_cmd="python3",
+        package_name="x",
+        env={},
+        show_warnings=True,
+    )
+
 
 def test_run_pipeline_fail_fast_skips_later_batches(tmp_path: Path) -> None:
     called: list[str] = []
-    def ok(ctx, sink): called.append("a"); return 0
-    def boom(ctx, sink): called.append("b"); return 7
-    def never(ctx, sink): called.append("c"); return 0
+
+    def ok(ctx, sink):
+        called.append("a")
+        return 0
+
+    def boom(ctx, sink):
+        called.append("b")
+        return 7
+
+    def never(ctx, sink):
+        called.append("c")
+        return 0
+
     stages = [Stage("a", 10, ok), Stage("b", 20, boom), Stage("c", 30, never)]
     rc = run_pipeline(stages, _ctx(tmp_path))
     assert rc == 7
     assert "c" not in called  # later batch never runs
 
+
 def test_run_batch_runs_equal_order_in_parallel(tmp_path: Path) -> None:
     starts: list[float] = []
+
     def slow(ctx, sink):
-        starts.append(time.monotonic()); time.sleep(0.3); return 0
+        starts.append(time.monotonic())
+        time.sleep(0.3)
+        return 0
+
     stages = [Stage("x", 40, slow), Stage("y", 40, slow)]
     t0 = time.monotonic()
     assert run_pipeline(stages, _ctx(tmp_path)) == 0
@@ -654,10 +707,12 @@ git commit -m "feat(stagerunner): sequential-batch engine with parallel within-b
 from pathlib import Path
 from bmk.adapters.stagerunner.context import build_context
 
+
 def test_build_context_sets_project_env(tmp_path: Path) -> None:
     ctx = build_context(tmp_path, (), command_prefix="clean", output_format="json", show_warnings=True)
     assert ctx.env["BMK_PROJECT_DIR"] == str(tmp_path)
     assert ctx.env["BMK_COMMAND_PREFIX"] == "clean"
+
 
 def test_build_context_omits_virtualenv_when_no_venv(tmp_path: Path) -> None:
     ctx = build_context(tmp_path, (), command_prefix="clean", output_format="json", show_warnings=True)
@@ -714,6 +769,8 @@ def ruff_lint_argv(ctx: StageContext) -> list[str]:
     if ctx.output_format == "json":
         argv += ["--output-format", "json"]
     return [*argv, "."]
+
+
 Stage("ruff_lint", 40, ToolAction(ruff_lint_argv))
 ```
 The per-script `explain_exit_code` case-statement is *not* re-implemented per stage  -  extend `EXIT_HINTS` once (Task 3) and let the reporter consult `hint_for(tool, code)` on failure.
@@ -722,8 +779,10 @@ The per-script `explain_exit_code` case-statement is *not* re-implemented per st
 ```python
 def run_pytest_coverage(ctx: StageContext) -> int:
     from .helpers import coverage
-    return coverage.main(project_dir=ctx.project_dir, run_tests=True, upload=True,
-                         quiet=ctx.output_format == "json")
+
+    return coverage.main(project_dir=ctx.project_dir, run_tests=True, upload=True, quiet=ctx.output_format == "json")
+
+
 Stage("pytest", 40, HelperAction(run_pytest_coverage))
 ```
 `_coverage.main()` is already keyword-only and returns int (verified). `git mv _coverage.py -> helpers/coverage.py`; re-point `tests/test_makescripts_coverage.py`.

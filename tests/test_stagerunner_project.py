@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.project import derive_package_name, pip_audit_ignore_flags
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_derive_package_name_from_hatch_wheel_packages(tmp_path: Path) -> None:

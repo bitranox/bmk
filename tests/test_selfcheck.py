@@ -17,11 +17,14 @@ a healthy ~300MB environment on every single make.
 from __future__ import annotations
 
 import csv
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import bmk_selfcheck
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _install_dist(site_packages: Path, name: str, files: dict[str, str]) -> Path:

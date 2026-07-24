@@ -39,12 +39,12 @@ _EXCLUDED_DIRS: tuple[str, ...] = (
 )
 
 __all__ = [
-    "get_bashate_config",
     "find_sh_files",
+    "get_bashate_config",
+    "main",
+    "run_bashate",
     "run_shellcheck",
     "run_shfmt",
-    "run_bashate",
-    "main",
 ]
 
 

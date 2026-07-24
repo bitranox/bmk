@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,6 +28,9 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     main,
 )
 from bmk.adapters.stagerunner.venv import venv_python
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _classifiers(minors: list[str]) -> str:

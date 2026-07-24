@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bmk.adapters.cli.commands.email._common import apply_validated_overrides
 from bmk.adapters.email.config import REVEAL_SECRETS, EmailConfig, load_email_config_from_dict
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # ---------------------------------------------------------------------------
 # Validator: _coerce_string_to_list edge cases

@@ -5,8 +5,6 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Iterator
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -15,6 +13,9 @@ from bmk.adapters.stagerunner.helpers._release import _cmd_exists, _get_default_
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
     from pytest import CaptureFixture
 
 # ---------------------------------------------------------------------------

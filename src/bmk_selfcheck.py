@@ -26,8 +26,11 @@ from __future__ import annotations
 import csv
 import sys
 import sysconfig
-from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Reported before giving up on listing. The caller reinstalls on ANY miss, so the
 # full list is noise; a few names are enough to explain why the repair happened.

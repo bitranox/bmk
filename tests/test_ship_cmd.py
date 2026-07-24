@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bmk.adapters.cli.commands import ship_cmd
 from bmk.adapters.cli.commands.ship_cmd import _find_run_id
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _RUNS_JSON = (
     '[{"databaseId": 123, "workflowName": "CI", "event": "push", "headSha": "abc"},'

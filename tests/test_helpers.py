@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pytest import CaptureFixture
 
 
@@ -607,6 +608,7 @@ class TestDependencyVersionParsing:
     )
     def test_parse_version_constraint_extracts_components(
         self,
+        *,
         deps_module: Any,
         spec: str,
         expected_name: str,

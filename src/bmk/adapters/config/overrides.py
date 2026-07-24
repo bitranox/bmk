@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import orjson
-from lib_layered_config import Config
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from lib_layered_config import Config
 
 CoercedValue = str | int | float | bool | None | list[object] | dict[str, object]
 """Union of types that :func:`coerce_value` can produce.
@@ -194,7 +196,7 @@ def apply_overrides(config: Config, raw_overrides: tuple[str, ...]) -> Config:
 __all__ = [
     "CoercedValue",
     "ConfigOverride",
-    "parse_override",
-    "coerce_value",
     "apply_overrides",
+    "coerce_value",
+    "parse_override",
 ]

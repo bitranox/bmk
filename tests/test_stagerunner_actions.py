@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,6 +14,9 @@ from bmk.adapters.stagerunner.actions import HelperAction, PipAuditAction, ToolA
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink, OutputSink
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _ctx(tmp_path: Path) -> StageContext:

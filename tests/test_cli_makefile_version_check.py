@@ -4,15 +4,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from click.testing import CliRunner, Result
 
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands.install_cmd import _extract_version
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from click.testing import CliRunner, Result
 
 # Body of the stale Makefile these tests plant, and the string they assert is gone
 # once it has been regenerated. It must be a marker that CANNOT occur in a real

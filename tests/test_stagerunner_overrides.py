@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import os
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,6 +19,9 @@ from bmk.adapters.stagerunner.overrides import (
     resolve_stages,
 )
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _base() -> tuple[Stage, ...]:

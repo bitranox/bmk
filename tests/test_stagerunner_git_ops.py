@@ -7,13 +7,16 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bmk.adapters.stagerunner import git_ops
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _ctx(tmp_path: Path, *, args: tuple[str, ...] = (), env: dict[str, str] | None = None) -> StageContext:

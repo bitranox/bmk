@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
-from click.testing import CliRunner
 
 from bmk.adapters.cli.commands._prerequisites import (
     ToolCheck,
     check_prerequisites,
     format_prerequisites_report,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from click.testing import CliRunner
 
 
 def _fake_which_all_found(name: str) -> str:

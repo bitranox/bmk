@@ -19,12 +19,15 @@ re-list the defaults - is the failure mode that caused this.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import tomlkit
 
 from bmk.adapters.stagerunner.venv import ensure_venv_typecheck_excluded
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write(project: Path, body: str) -> None:

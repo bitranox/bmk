@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import httpx2
@@ -34,6 +33,9 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
     update_dependencies,
 )
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -41,12 +41,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from bmk.domain.enums import ToolOutputFormat
 
 __all__ = [
+    "ensure_codecov_token",
+    "main",
     "prune_coverage_data_files",
     "remove_report_artifacts",
     "run_coverage_tests",
-    "ensure_codecov_token",
     "upload_coverage_report",
-    "main",
 ]
 
 
@@ -397,7 +397,9 @@ def ensure_codecov_token(project_dir: Path | None = None) -> str | None:
     if existing:
         return existing
 
-    from dotenv import dotenv_values
+    # Deferred: skip the dotenv import/parse entirely in the common CI case
+    # above, where CODECOV_TOKEN is already set in the environment.
+    from dotenv import dotenv_values  # noqa: PLC0415
 
     start = project_dir or Path.cwd()
     env_path = _find_dotenv_upward(start)

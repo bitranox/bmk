@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from bmk.domain.enums import ToolOutputFormat
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
 
-from .output import OutputSink
+    from bmk.domain.enums import ToolOutputFormat
+
+    from .output import OutputSink
 
 
 @dataclass(frozen=True, slots=True)

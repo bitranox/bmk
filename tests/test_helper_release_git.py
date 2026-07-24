@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from bmk.adapters.stagerunner.helpers import _release
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _FakeRun:

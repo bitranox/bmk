@@ -5,12 +5,14 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.context import build_context, resolve_audit_python
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _ctx(env: dict[str, str]) -> StageContext:

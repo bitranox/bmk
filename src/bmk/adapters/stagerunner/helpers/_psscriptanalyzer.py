@@ -26,11 +26,14 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _FALLBACK_EXCLUDED_RULES: tuple[str, ...] = (
     "PSAvoidUsingWriteHost",
@@ -44,12 +47,12 @@ _EXCLUDED_DIRS: tuple[str, ...] = (
 )
 
 __all__ = [
-    "get_excluded_rules",
     "check_pwsh",
     "ensure_psscriptanalyzer",
     "find_ps1_files",
-    "run_psscriptanalyzer",
+    "get_excluded_rules",
     "main",
+    "run_psscriptanalyzer",
 ]
 
 

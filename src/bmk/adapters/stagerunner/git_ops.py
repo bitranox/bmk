@@ -10,13 +10,16 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.domain.stages import normalize_returncode
 
-from .model import StageContext
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+    from pathlib import Path
+
+    from .model import StageContext
 
 _SENSITIVE = re.compile(r"\.env$|\.env\.|credentials|secret|\.key$|\.pem$|id_rsa", re.IGNORECASE)
 

@@ -6,6 +6,40 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.13.1] 2026-07-24 18:24:00
+
+### Fixed
+- **PLR0917 (too many positional arguments) on the three Click command callbacks and one
+  internal helper.** `cli_config_deploy`, `cli_send_email`, and `cli_send_notification` now
+  take their options keyword-only (a bare `*,` after `ctx`) - Click already invokes them with
+  `f(ctx, **ctx.params)`, so this is a no-op for callers. `_execute_deploy` (an internal
+  helper, not a Click callback) got the same treatment plus its one call site updated to pass
+  everything by keyword.
+
+### Changed
+- **Removed the blanket `[tool.ruff.lint].ignore` list** (`RUF002`, `RUF022`, `PLC0415`,
+  `TC001`-`TC003`, `TC006`). Ruff 0.16 surfaced ~400 real findings once the ignores came off;
+  fixed each at the root instead of re-suppressing:
+  - `RUF022`/`TC001`-`TC003`/`TC006`/`I`: mechanical autofix (import sorting, moving
+    type-only imports into `TYPE_CHECKING`, quoting `cast()` expressions) across `src` and
+    `tests`.
+  - Added `[tool.ruff.lint.flake8-type-checking].runtime-evaluated-base-classes =
+    ["pydantic.BaseModel"]` so the TC00x autofix never moves a Pydantic field-type import
+    into `TYPE_CHECKING` (Pydantic resolves those at runtime).
+  - `PLC0415` (import not at top-level): moved trivial stdlib deferrals (`os`, `sys`,
+    `pathlib.Path`) to the module top; kept genuine lazy/circular-import cases with a narrow
+    `# noqa: PLC0415` and a one-line reason (CLI command registration staying import-light,
+    breaking a documented stagerunner import cycle, skipping the `dotenv` import when
+    `CODECOV_TOKEN` is already set, keeping test-only in-memory adapters out of production
+    imports). Added `PLC0415` to the `tests/*.py` per-file-ignore: several tests defer
+    imports on purpose to exercise import/cache behaviour.
+  - Added `PLR0917` to the `tests/*.py` per-file-ignore: five `test_helper_dependencies.py`
+    tests stack four `@patch` decorators, which inject mocks positionally in decorator
+    (bottom-up) order - they cannot be made keyword-only without breaking the injection.
+  - Cleared stray executable bits on 146 test files (an artifact of the softdev ZFS/SMB
+    mount; git already stored them as `100644`, so this never affected CI - only local
+    `ruff check` via `EXE002`).
+
 ## [3.13.0] 2026-07-20 14:46:40
 
 ### Fixed

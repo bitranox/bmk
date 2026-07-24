@@ -94,4 +94,4 @@ def cli_cl() -> None:
         _run_clean()
 
 
-__all__ = ["cli_cl", "cli_cln", "cli_clean"]
+__all__ = ["cli_cl", "cli_clean", "cli_cln"]

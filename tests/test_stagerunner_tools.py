@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner import tools
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _ctx(

@@ -190,4 +190,4 @@ def d_cmd_u() -> None:
         _run_dependencies("update")
 
 
-__all__ = ["cli_d", "cli_deps", "cli_dependencies"]
+__all__ = ["cli_d", "cli_dependencies", "cli_deps"]

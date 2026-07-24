@@ -8,15 +8,18 @@ pins for the stages that follow it.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from bmk.adapters.cli.commands._shared import VENV_PIPELINES, run_command
-from bmk.adapters.stagerunner.model import Stage, StageContext
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from bmk.adapters.stagerunner.model import Stage, StageContext
 
 
 @pytest.fixture

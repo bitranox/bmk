@@ -11,14 +11,18 @@ are invoked as subprocesses of the makescripts scripts, matching the shell.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.domain.enums import ToolOutputFormat
 
 from .context import resolve_test_python
-from .model import StageContext
 from .project import derive_package_name, pip_audit_ignore_flags
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .model import StageContext
 
 # The subprocess-invoked helper scripts live next to this module, in helpers/.
 _HELPERS_DIR = Path(__file__).resolve().parent / "helpers"

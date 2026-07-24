@@ -10,10 +10,12 @@ from __future__ import annotations
 import io
 import re
 import sys
-import threading
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from bmk.domain.stages import PipelineSummary, StageResult
+if TYPE_CHECKING:
+    import threading
+
+    from bmk.domain.stages import PipelineSummary, StageResult
 
 
 class SupportsWrite(Protocol):

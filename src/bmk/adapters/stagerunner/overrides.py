@@ -13,15 +13,17 @@ validated at this boundary; a malformed overlay surfaces as a clear ``ValueError
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import rtoml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .actions import ToolAction
 from .model import Stage, StageContext
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 _MAX_ARGV = 256
 

@@ -19,14 +19,16 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # Sync targets, tried in order: a project with no ``[dev]`` extra (bmk itself is
 # one - all its tooling is a runtime dependency by design) must still sync.

@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import contextlib
 import signal
-import subprocess
 import threading
-from collections.abc import Callable, Generator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import subprocess
+    from collections.abc import Callable, Generator
 
 _LIVE: set[subprocess.Popen[str]] = set()
 _LOCK = threading.Lock()

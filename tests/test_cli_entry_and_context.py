@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import lib_cli_exit_tools
 import pytest
 import rich_click as click
-from click.testing import CliRunner, Result
 from lib_layered_config import Config
 
 from bmk.adapters import cli as cli_mod
@@ -20,6 +21,9 @@ from bmk.adapters.cli.context import (
     store_cli_context,
 )
 from bmk.adapters.cli.main import main
+
+if TYPE_CHECKING:
+    from click.testing import CliRunner, Result
 
 # ---------------------------------------------------------------------------
 # main() - missing services_factory

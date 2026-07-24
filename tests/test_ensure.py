@@ -6,11 +6,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from click.testing import CliRunner, Result
 
 from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands import _ensure
@@ -26,6 +24,11 @@ from bmk.adapters.cli.commands._ensure import (
     run_ensure,
 )
 from bmk.adapters.cli.commands._prerequisites import ToolCheck
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from click.testing import CliRunner, Result
 
 
 def _completed(returncode: int) -> subprocess.CompletedProcess[bytes]:

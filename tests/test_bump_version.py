@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from bmk.domain.enums import BumpPart
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 # Import the module under test

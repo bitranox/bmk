@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.adapters.stagerunner.project import derive_package_name as _derive
 
 _VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
 _MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")
@@ -40,8 +41,6 @@ def derive_package_name(project_dir: Path) -> str:
     Raises:
         ValueError: If no package name can be derived.
     """
-    from bmk.adapters.stagerunner.project import derive_package_name as _derive
-
     name = _derive(project_dir / "pyproject.toml")
     if name is None:
         msg = "Cannot derive package name from pyproject.toml"

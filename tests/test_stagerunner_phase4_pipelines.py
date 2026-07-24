@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.actions import ToolAction
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES, resolve_python_pipeline
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_bump_pipelines_registered() -> None:

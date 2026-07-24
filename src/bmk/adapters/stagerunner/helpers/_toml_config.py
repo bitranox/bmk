@@ -20,13 +20,13 @@ import rtoml
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
 __all__ = [
+    "BashateConfig",
+    "BuildSystemSection",
     "CleanConfig",
     "PSScriptAnalyzerConfig",
-    "BashateConfig",
-    "ToolConfig",
     "ProjectSection",
-    "BuildSystemSection",
     "PyprojectConfig",
+    "ToolConfig",
     "load_pyproject_config",
 ]
 

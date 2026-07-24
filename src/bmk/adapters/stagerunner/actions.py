@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.domain.stages import normalize_returncode
 
 from . import signals
-from .model import StageContext
-from .output import OutputSink
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from .model import StageContext
+    from .output import OutputSink
 
 
 def _resolve_executable(argv: Sequence[str], env: Mapping[str, str]) -> list[str]:
@@ -155,7 +159,7 @@ class PipelineAction:
     def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
         # Deferred imports: registry imports this module, and the engine is a
         # sibling; importing them at call time avoids an import cycle.
-        from . import registry
-        from .engine import run_pipeline
+        from . import registry  # noqa: PLC0415
+        from .engine import run_pipeline  # noqa: PLC0415
 
         return run_pipeline(list(registry.PIPELINES[self._prefix]), ctx, out=sink)

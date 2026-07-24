@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.13.0"
+version = "3.13.1"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,22 +15,22 @@ dependencies = [
     "click>=8.4.2",                # imported directly in cli/main.py for cli.main(obj=...);
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
-    "lib_cli_exit_tools>=2.3.2",
-    "lib_log_rich>=6.3.5",
-    "lib_layered_config>=5.6.0",
-    "btx_lib_mail>=1.5.0",         # send-email / send-notification (SecretStr password + Transport seam)
+    "lib_cli_exit_tools>=2.3.3",
+    "lib_log_rich>=6.3.6",
+    "lib_layered_config>=5.6.1",
+    "btx_lib_mail>=1.5.1",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.13.4",            # the pipeline-overlay and email schemas
     "orjson>=3.11.9",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
     "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
-    "httpx2>=2.7.0",               # PyPI version lookups
+    "httpx2>=2.9.1",               # PyPI version lookups
     "python-dotenv>=1.2.2",        # reads CODECOV_TOKEN from .env
 
     # --- invoked as tools, never imported ---------------------------------------------
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.15.22",
+    "ruff>=0.16.0",
     "pyright[nodejs]>=1.1.411",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
@@ -40,7 +40,7 @@ dependencies = [
     "bashate>=2.1.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",           # a pytest PLUGIN, activated by CI's --cov flags
-    "hypothesis>=6.157.0",         # property tests in bmk's own suite
+    "hypothesis>=6.161.2",         # property tests in bmk's own suite
     # Floor stays at 1.5.0, NOT 1.5.1: PyPI yanked 1.5.1 (upstream shipped unintended breaking
     # changes and will re-release them as a new major). A yanked release is invisible to a range
     # resolve, and nothing newer exists, so a >=1.5.1 floor has ZERO candidates and makes bmk
@@ -169,18 +169,14 @@ select = [
   "PLR",         # pylint refactor
   "PLW",         # pylint warnings
 ]
-ignore = [
-  "RUF002",    # ambiguous unicode characters in docstrings (en-dash) - typography choice
-  "RUF022",    # unsorted __all__ - kept in logical grouping order
-  "PLC0415",   # deferred imports inside functions - circular import prevention
-  "TC001",     # stdlib imports at runtime - needed, not just for type hints
-  "TC002",     # third-party imports at runtime - needed, not just for type hints
-  "TC003",     # stdlib imports - same as TC001
-  "TC006",     # cast() type expressions - existing code uses unquoted
-]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime (model validation, serialization),
+# so the TC00x autofix must not move BaseModel field-type imports into TYPE_CHECKING.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 # Notebooks: unused imports are often intentional for side effects.
@@ -191,7 +187,15 @@ convention = "google"
 # Stage helpers: CLI-style utilities with subprocess calls, print output, and magic values
 "src/bmk/adapters/stagerunner/helpers/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0912", "PLR0913", "PLR2004"]
 # Tests: assert is standard, test fixtures have passwords, magic values are clearer inline, temp paths are fine
-"tests/*.py" = ["T20", "S101", "S105", "S106", "S108", "S603", "S607", "E501", "ERA001", "FBT001", "FBT003", "PLR0913", "PLR2004", "PLW1510"]
+# PLR0917: unittest.mock.patch stacks inject mocks POSITIONALLY in decorator (bottom-up) order,
+# so the flagged test functions cannot be made keyword-only without breaking the injection.
+# PLC0415: deferred imports are a deliberate test idiom here - several tests import inside
+# the test body to exercise import/cache behaviour, or to import a module under test lazily
+# via a fixture.
+"tests/*.py" = [
+    "T20", "S101", "S105", "S106", "S108", "S603", "S607", "E501", "ERA001",
+    "FBT001", "FBT003", "PLC0415", "PLR0913", "PLR0917", "PLR2004", "PLW1510",
+]
 # CLI: Click framework injects boolean params; commands have many options
 "src/bmk/adapters/cli/**/*.py" = ["FBT001", "FBT002", "PLR0913"]
 # Protocols/adapters: many-param signatures by design

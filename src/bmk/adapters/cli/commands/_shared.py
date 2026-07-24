@@ -8,7 +8,8 @@ override.
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+from typing import TYPE_CHECKING
 
 import rich_click as click
 
@@ -16,6 +17,9 @@ from bmk.domain.enums import ToolOutputFormat
 from bmk.domain.stages import normalize_returncode
 
 from ..exit_codes import ExitCode
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Pipelines whose stages read or write the project's Python environment, and so
 # need it provisioned and synced first. Everything else (clean, bump, commit,
@@ -49,12 +53,13 @@ def run_command(
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the prefix.
     """
-    import os
-
-    from bmk.adapters.stagerunner.context import build_context
-    from bmk.adapters.stagerunner.engine import run_pipeline
-    from bmk.adapters.stagerunner.registry import resolve_python_pipeline
-    from bmk.adapters.stagerunner.venv import ensure_project_venv
+    # Deferred: the stagerunner subsystem (pipeline engine, registry, venv provisioning)
+    # is expensive to import and only every command that actually RUNS a pipeline needs
+    # it - `bmk --version` / `bmk info` must not pay for it.
+    from bmk.adapters.stagerunner.context import build_context  # noqa: PLC0415
+    from bmk.adapters.stagerunner.engine import run_pipeline  # noqa: PLC0415
+    from bmk.adapters.stagerunner.registry import resolve_python_pipeline  # noqa: PLC0415
+    from bmk.adapters.stagerunner.venv import ensure_project_venv  # noqa: PLC0415
 
     if output_format is None:
         output_format = resolve_output_format(human=False)
@@ -91,8 +96,6 @@ def resolve_output_format(*, human: bool) -> ToolOutputFormat:
     ``--human`` forces TEXT; otherwise ``BMK_OUTPUT_FORMAT=text`` selects TEXT and
     anything else (including unset) defaults to JSON.
     """
-    import os
-
     if human:
         return ToolOutputFormat.TEXT
     return ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT"))

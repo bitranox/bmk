@@ -6,7 +6,7 @@ import io
 import os
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,6 +14,9 @@ from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
 from bmk.adapters.stagerunner.registry import PIPELINES
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _ctx(tmp_path: Path) -> StageContext:

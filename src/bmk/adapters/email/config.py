@@ -6,9 +6,8 @@ and the loader function to create it from configuration dictionaries.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from btx_lib_mail import validate_email_address, validate_smtp_host
 from btx_lib_mail.lib_mail import ConfMail
@@ -22,6 +21,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 REVEAL_SECRETS = "reveal_secrets"
 """Serialization-context key that opts OUT of password redaction.
@@ -105,7 +107,7 @@ class EmailConfig(BaseModel):
         if isinstance(v, str):
             return [v] if v.strip() else []
         if isinstance(v, list):
-            return cast(list[str], v)
+            return cast("list[str]", v)
         return []
 
     @field_validator("from_address", "smtp_username", "smtp_password", mode="before")
@@ -139,10 +141,10 @@ class EmailConfig(BaseModel):
             return None
         if isinstance(v, frozenset):
             # Preserve frozensets as-is (allows explicit empty frozenset to disable)
-            return cast(frozenset[str], v)
+            return cast("frozenset[str]", v)
         if isinstance(v, list):
             # Empty list from config = use library defaults
-            ext_list = cast(list[str], v)
+            ext_list = cast("list[str]", v)
             return frozenset(ext_list) if ext_list else None
         return None  # Unsupported type, let Pydantic handle validation error
 
@@ -162,10 +164,10 @@ class EmailConfig(BaseModel):
             return None
         if isinstance(v, frozenset):
             # Preserve frozensets as-is (allows explicit empty frozenset to disable)
-            return cast(frozenset[Path], v)
+            return cast("frozenset[Path]", v)
         if isinstance(v, list):
             # Empty list from config = use library defaults
-            dir_list = cast(list[str | Path], v)
+            dir_list = cast("list[str | Path]", v)
             if not dir_list:
                 return None
             return frozenset(Path(p) if isinstance(p, str) else p for p in dir_list)

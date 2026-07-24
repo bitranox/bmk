@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bmk.adapters.stagerunner.helpers._toml_config import PoetryDepSpec, PyprojectConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # PyprojectConfig.from_path - degradation on a missing/malformed file

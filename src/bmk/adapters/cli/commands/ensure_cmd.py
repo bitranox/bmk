@@ -38,7 +38,9 @@ def cli_ensure(*, dry_run: bool, strict: bool) -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-ensure", extra={"command": "ensure"}):
         logger.info("Ensuring external tools are installed")
-        from ._ensure import run_ensure
+        # Deferred: `_ensure` pulls in per-OS installer plumbing that only this
+        # command needs; command registration must not pay for it.
+        from ._ensure import run_ensure  # noqa: PLC0415
 
         exit_code = run_ensure(dry_run=dry_run, strict=strict)
         if exit_code != 0:

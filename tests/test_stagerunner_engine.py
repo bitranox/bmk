@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import io
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
-from bmk.adapters.stagerunner.output import OutputSink
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from bmk.adapters.stagerunner.output import OutputSink
 
 
 def _ctx(tmp_path: Path, output_format: ToolOutputFormat = ToolOutputFormat.JSON) -> StageContext:

@@ -12,8 +12,8 @@ import sys
 import threading
 import time
 import traceback
-from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
 from bmk.domain.enums import ToolOutputFormat
 from bmk.domain.stages import (
@@ -23,7 +23,6 @@ from bmk.domain.stages import (
     normalize_returncode,
 )
 
-from .model import Stage, StageContext
 from .output import (
     CapturingSink,
     OutputSink,
@@ -34,6 +33,11 @@ from .output import (
     report_success_summary,
 )
 from .signals import install_signal_handlers
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from .model import Stage, StageContext
 
 
 def _sink_for(stage: Stage, ctx: StageContext, out: SupportsWrite, *, lock: threading.Lock | None) -> OutputSink:

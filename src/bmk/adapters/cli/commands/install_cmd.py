@@ -12,6 +12,7 @@ Contents:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -65,8 +66,6 @@ def check_makefile_update() -> bool:
     if bundled_ver is None or local_ver == bundled_ver:
         return False
 
-    import os
-
     auto_accept = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
 
     if not auto_accept and not click.confirm(
@@ -116,7 +115,9 @@ def cli_install() -> None:
                 click.echo("Installing bmk Makefile")
                 shutil.copy2(_BUNDLED_MAKEFILE, target)
 
-        from ._prerequisites import check_prerequisites, format_prerequisites_report
+        # Deferred: keep `bmk install` (and thus command registration) from paying
+        # for the prerequisites-check module unless this command actually runs.
+        from ._prerequisites import check_prerequisites, format_prerequisites_report  # noqa: PLC0415
 
         results = check_prerequisites()
         report = format_prerequisites_report(results)

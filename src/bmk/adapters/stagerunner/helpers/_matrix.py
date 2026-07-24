@@ -20,11 +20,10 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
@@ -33,6 +32,10 @@ from bmk.adapters.stagerunner.venv import (
     venv_python,
     venv_version,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 __all__ = ["CellResult", "CellStatus", "main"]
 

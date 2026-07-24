@@ -127,6 +127,7 @@ send_email(
 
 # Send email with HTML and attachments
 from pathlib import Path
+
 send_email(
     config=config,
     recipients=["user1@example.com", "user2@example.com"],

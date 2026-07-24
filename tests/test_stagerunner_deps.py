@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _ctx(

@@ -12,16 +12,16 @@ System Role:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from ..domain.enums import DeployTarget, OutputFormat
-
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
+
     from lib_layered_config import Config
 
     from ..adapters.email.sender import EmailConfig
+    from ..domain.enums import DeployTarget, OutputFormat
 
 
 class GetConfig(Protocol):

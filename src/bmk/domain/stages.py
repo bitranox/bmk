@@ -7,10 +7,12 @@ the CLI adapter and the stage-runner engine share one definition.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import groupby
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 T = TypeVar("T")
 

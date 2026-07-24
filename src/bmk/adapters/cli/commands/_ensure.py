@@ -31,6 +31,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 import rich_click as click
 
@@ -93,8 +94,6 @@ _LINUX_PKG_MANAGERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def _externally_managed() -> bool:
     """Whether this interpreter is a PEP 668 externally-managed install."""
-    from pathlib import Path
-
     prefix = Path(sys.prefix)
     if (prefix / "EXTERNALLY-MANAGED").exists():
         return True
@@ -193,7 +192,12 @@ def _action_for(check: ToolCheck) -> _InstallAction:
 
 def _install_module(check: ToolCheck, *, dry_run: bool) -> EnsureResult:
     """Install a PowerShell module (PSScriptAnalyzer) via the existing helper."""
-    from bmk.adapters.stagerunner.helpers._psscriptanalyzer import check_pwsh, ensure_psscriptanalyzer
+    # Deferred: avoid loading the PSScriptAnalyzer helper (and its subprocess plumbing)
+    # for every `bmk ensure` run when this rarely-hit PowerShell install path is skipped.
+    from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (  # noqa: PLC0415
+        check_pwsh,
+        ensure_psscriptanalyzer,
+    )
 
     pwsh = check_pwsh()
     if pwsh is None:

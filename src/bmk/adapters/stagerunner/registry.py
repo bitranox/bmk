@@ -8,7 +8,7 @@ delegate to another via ``PipelineAction`` (e.g. ``bld`` -> ``clean``).
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmk.domain.enums import ToolOutputFormat
 
@@ -19,6 +19,9 @@ from .helpers import _clean, _dependencies, _matrix
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
 from .venv import is_venv, resolve_project_venv, venv_python
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def clean_action(ctx: StageContext) -> int:

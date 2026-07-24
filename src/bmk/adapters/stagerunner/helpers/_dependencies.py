@@ -192,7 +192,7 @@ def fetch_latest_version(package_name: str) -> str | None:
         return None
     info = data.get("info")
     if isinstance(info, dict):
-        typed_info = cast(dict[str, Any], info)
+        typed_info = cast("dict[str, Any]", info)
         version = typed_info.get("version", "")
         return str(version) if version else ""
     return ""
@@ -216,7 +216,7 @@ def _fetch_latest_version_below(package_name: str, upper_bound: str) -> str | No
     if not isinstance(releases, dict) or not releases:
         return None
 
-    typed_releases = cast(dict[str, Any], releases)
+    typed_releases = cast("dict[str, Any]", releases)
 
     # Get all version strings and filter to those below upper_bound
     valid_versions: list[tuple[tuple[int, ...], str]] = []

@@ -5,13 +5,16 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
 
 from bmk.adapters.stagerunner.helpers._run import _extract_dependency_names, _find_local_dependencies, run_cli
 from bmk.adapters.stagerunner.helpers._toml_config import ProjectSection, PyprojectConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers

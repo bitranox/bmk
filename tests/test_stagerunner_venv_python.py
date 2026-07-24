@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner import venv as venv_mod
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    import pytest
 
 
 def _uv_returns(payload: str | None) -> Callable[..., str | None]:

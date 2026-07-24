@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.actions import PipelineAction
 from bmk.adapters.stagerunner.engine import run_pipeline
 from bmk.adapters.stagerunner.model import Stage, StageContext
 from bmk.domain.enums import ToolOutputFormat
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _ctx(tmp_path: Path) -> StageContext:
