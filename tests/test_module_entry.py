@@ -19,6 +19,16 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+# Hang guard for the subprocess CLI tests - deliberately NOT a performance budget.
+# These spawn a cold interpreter that imports the whole CLI stack (rich-click,
+# pydantic, lib_log_rich). CI runs the Python matrix as several concurrent jobs on
+# one self-hosted Windows VM, and under that contention a cold start has exceeded
+# 30s and failed the run while the CLI itself was fine. Keep this generous: it is
+# here so a genuinely wedged subprocess cannot hang the suite forever, and a
+# slow-but-working start must not turn the build red.
+_SUBPROCESS_TIMEOUT_SECONDS = 300
+
+
 def _get_subprocess_env() -> dict[str, str]:
     """Build environment dict with PYTHONPATH pointing to src/.
 
@@ -121,7 +131,7 @@ def test_module_entry_subprocess_help() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "bmk", "--help"],
         capture_output=True,
-        timeout=30,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
         env=_get_subprocess_env(),
         # Use UTF-8 with error replacement for Windows compatibility
@@ -140,7 +150,7 @@ def test_module_entry_subprocess_version() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "bmk", "--version"],
         capture_output=True,
-        timeout=30,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
         env=_get_subprocess_env(),
         # Use UTF-8 with error replacement for Windows compatibility
