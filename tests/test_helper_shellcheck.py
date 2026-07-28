@@ -200,6 +200,25 @@ def test_find_sh_files_includes_root_files_when_root_itself_has_git(tmp_path: Pa
 
 
 @pytest.mark.os_agnostic
+def test_find_sh_files_includes_root_files_when_root_is_itself_a_worktree(tmp_path: Path) -> None:
+    """A project checked out AS a linked worktree has a ``.git`` FILE at its root, not a directory.
+
+    This is the shape of the case that motivated the exclusion: bmk (or any project) may itself be
+    developed inside a worktree, and the root marker must never exclude the project's own scripts.
+    """
+    (tmp_path / ".git").write_text("gitdir: /elsewhere/.git/worktrees/feature\n")
+
+    project_script = tmp_path / "src" / "scripts"
+    project_script.mkdir(parents=True)
+    (project_script / "build.sh").write_text("# build")
+
+    files = find_sh_files(tmp_path)
+
+    assert len(files) == 1
+    assert files[0].name == "build.sh"
+
+
+@pytest.mark.os_agnostic
 def test_find_sh_files_returns_empty_for_no_files(tmp_path: Path) -> None:
     """Returns empty list when no .sh files exist."""
     (tmp_path / "src").mkdir()

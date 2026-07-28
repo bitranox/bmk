@@ -6,6 +6,19 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.13.2] 2026-07-28 14:49:10
+
+### Fixed
+- **The shell-lint stage no longer crosses into a nested git checkout.** `find_sh_files`
+  walked the whole project directory excluding only `.venv*`, `node_modules` and `.git`, so a
+  git worktree living inside the project (for example `.claude/worktrees/<branch>/`, a path a
+  project's own `.gitignore` typically ignores) had ANOTHER branch's shell scripts linted as
+  part of this branch's gate. A project could then stay red over a file it had already fixed,
+  pointing at a path that is not its source, with no way to exclude it. Any directory that is
+  its own checkout is now skipped: a `.git` directory for a clone or submodule, a `.git` file
+  for a linked worktree. The project root's own `.git` is never treated as a nested checkout,
+  whether the project is a normal clone or is itself checked out as a worktree.
+
 ## [3.13.1] 2026-07-24 18:24:00
 
 ### Fixed
