@@ -144,6 +144,62 @@ def test_find_sh_files_excludes_git(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
+def test_find_sh_files_excludes_linked_worktree(tmp_path: Path) -> None:
+    """A nested directory whose ``.git`` is a FILE (linked git worktree) is excluded.
+
+    A linked worktree's ``.git`` is a file containing a ``gitdir:`` pointer, not a
+    directory. Its contents belong to whatever branch is checked out there, not to
+    this project, so a script inside it must never be linted as this project's source.
+    """
+    worktree_dir = tmp_path / ".claude" / "worktrees" / "other-branch"
+    worktree_dir.mkdir(parents=True)
+    (worktree_dir / ".git").write_text("gitdir: /some/other/repo/.git/worktrees/other-branch\n")
+    (worktree_dir / "vendored.sh").write_text("# belongs to another branch")
+
+    project_script = tmp_path / "src" / "scripts"
+    project_script.mkdir(parents=True)
+    (project_script / "build.sh").write_text("# build")
+
+    files = find_sh_files(tmp_path)
+
+    assert len(files) == 1
+    assert files[0].name == "build.sh"
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_excludes_nested_clone(tmp_path: Path) -> None:
+    """A nested directory whose ``.git`` is a DIRECTORY (a full nested clone/submodule) is excluded."""
+    nested_repo = tmp_path / "vendor" / "some-dependency"
+    nested_repo.mkdir(parents=True)
+    (nested_repo / ".git").mkdir()
+    (nested_repo / "vendored.sh").write_text("# belongs to a nested checkout")
+
+    project_script = tmp_path / "src" / "scripts"
+    project_script.mkdir(parents=True)
+    (project_script / "build.sh").write_text("# build")
+
+    files = find_sh_files(tmp_path)
+
+    assert len(files) == 1
+    assert files[0].name == "build.sh"
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_includes_root_files_when_root_itself_has_git(tmp_path: Path) -> None:
+    """The project root's own ``.git`` must not exclude the project's own scripts (no over-correction)."""
+    (tmp_path / ".git").mkdir()
+
+    project_script = tmp_path / "src" / "scripts"
+    project_script.mkdir(parents=True)
+    (project_script / "build.sh").write_text("# build")
+
+    files = find_sh_files(tmp_path)
+
+    assert len(files) == 1
+    assert files[0].name == "build.sh"
+
+
+@pytest.mark.os_agnostic
 def test_find_sh_files_returns_empty_for_no_files(tmp_path: Path) -> None:
     """Returns empty list when no .sh files exist."""
     (tmp_path / "src").mkdir()

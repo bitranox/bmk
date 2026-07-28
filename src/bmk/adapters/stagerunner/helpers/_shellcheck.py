@@ -98,8 +98,31 @@ def _is_excluded_dir(path: Path) -> bool:
     return any(excluded in parts for excluded in _EXCLUDED_DIRS)
 
 
+def _is_nested_checkout(dir_parts: tuple[str, ...], project_dir: Path) -> bool:
+    """Return True if a directory between ``project_dir`` and the file is its own git checkout.
+
+    A ``.git`` entry marks a separate repository: a plain nested clone or submodule has
+    a ``.git`` directory, a linked git worktree (e.g. ``.claude/worktrees/<branch>``) has
+    a ``.git`` FILE containing a ``gitdir:`` pointer instead. Either way the directory's
+    contents belong to a different branch/repo checkout than ``project_dir`` and must not
+    be linted as this project's own source - that mismatch is exactly what let a
+    tab-indented script from another branch's worktree fail ``main``'s lint stage.
+
+    Only directories STRICTLY BELOW ``project_dir`` are checked (the loop starts by
+    descending from ``project_dir``, never testing it directly), so the project root's
+    own ``.git`` never excludes the project's own files.
+    """
+    current = project_dir
+    for part in dir_parts:
+        current = current / part
+        if (current / ".git").exists():
+            return True
+    return False
+
+
 def find_sh_files(project_dir: Path) -> list[Path]:
-    """Find all ``.sh`` files under ``project_dir``, excluding vendored directories.
+    """Find all ``.sh`` files under ``project_dir``, excluding vendored directories
+    and any nested git checkout (a linked worktree or a nested clone/submodule).
 
     Args:
         project_dir: Root directory to search.
@@ -107,7 +130,14 @@ def find_sh_files(project_dir: Path) -> list[Path]:
     Returns:
         Sorted list of ``.sh`` file paths.
     """
-    files = [p for p in project_dir.rglob("*.sh") if not _is_excluded_dir(p.relative_to(project_dir))]
+    files: list[Path] = []
+    for p in project_dir.rglob("*.sh"):
+        rel = p.relative_to(project_dir)
+        if _is_excluded_dir(rel):
+            continue
+        if _is_nested_checkout(rel.parts[:-1], project_dir):
+            continue
+        files.append(p)
     return sorted(files)
 
 
