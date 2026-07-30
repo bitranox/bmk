@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Sync __init__conf__.py and bundled Makefile version from pyproject.toml.
+"""Sync __init__conf__.py, the bundled Makefile and a shipped plugin version.
 
 Reads the version string from pyproject.toml and patches it into
 __init__conf__.py and src/<pkg>/makefile/Makefile so both stay in sync
-after version bumps.
+after version bumps. A repo that also ships a Claude Code skill carries
+.claude-plugin/plugin.json, whose version is what an install compares to decide
+whether to re-fetch; that one is synced too, but never downward - see
+sync_plugin_version.
 
 Derives the package name using the same heuristics as _btx_stagerunner:
     1. hatch wheel packages
@@ -16,6 +19,7 @@ Writes only when the file content actually changes.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -30,6 +34,9 @@ _MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")
 # backtracking bmk to an ancient release when a project dependency caps something
 # bmk requires.
 _MAKEFILE_MIN_RE = re.compile(r"^(BMK_MIN := )\S+", re.MULTILINE)
+#: A plain release version. Anything else (a pre-release, a local suffix) has no
+#: obvious ordering against a plugin version, so the plugin sync leaves it alone.
+_RE_PLAIN_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def derive_package_name(project_dir: Path) -> str:
@@ -117,15 +124,77 @@ def sync_makefile_version(project_dir: Path) -> bool:
     return True
 
 
+def _semver(version: str) -> tuple[int, ...] | None:
+    """Return a comparable tuple for a plain X.Y.Z version, or None if it is not one."""
+    if not _RE_PLAIN_SEMVER.match(version):
+        return None
+    return tuple(int(part) for part in version.split("."))
+
+
+def sync_plugin_version(project_dir: Path) -> bool:
+    """Raise .claude-plugin/plugin.json to the package version, never lower it.
+
+    A repo that ships a skill publishes it through its own marketplace, and an
+    install only re-fetches when this version CHANGES - so a skill edit that never
+    moves it ships nothing, silently. Slaving it to the package version removes that
+    whole class of mistake.
+
+    The guard matters as much as the sync: a skill legitimately ships more often than
+    the package it documents, so the plugin version can legitimately be AHEAD. Writing
+    the package version there unconditionally would then move an install BACKWARD to a
+    version it already had, which is worse than drift - the number stops meaning
+    anything. Measured across the bitranox fleet before this existed, two repos of
+    seven were in exactly that state.
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        True if plugin.json was updated, False when it is absent, already at or above
+        the package version, or either version is not a plain X.Y.Z.
+    """
+    plugin_path = project_dir / ".claude-plugin" / "plugin.json"
+    if not plugin_path.exists():
+        return False
+
+    config = load_pyproject_config(project_dir / "pyproject.toml")
+    package_version = config.project.version
+    if not package_version:
+        return False
+
+    try:
+        data = json.loads(plugin_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Warning: cannot read {plugin_path.name}: {exc}", file=sys.stderr)
+        return False
+
+    current = str(data.get("version", ""))
+    package_parts, current_parts = _semver(package_version), _semver(current)
+    if package_parts is None or current_parts is None:
+        # One of them is not a plain semver (a pre-release, a date, something bespoke).
+        # Ordering is then undefined, so leave it alone rather than guess.
+        return False
+    if package_parts <= current_parts:
+        return False
+
+    data["version"] = package_version
+    plugin_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"Synced plugin.json version {current} -> {package_version}")
+    return True
+
+
 def main() -> int:
     """CLI entry point."""
-    parser = argparse.ArgumentParser(description="Sync __init__conf__.py and Makefile version from pyproject.toml")
+    parser = argparse.ArgumentParser(
+        description="Sync __init__conf__.py, Makefile and plugin.json versions from pyproject.toml"
+    )
     parser.add_argument("--project-dir", type=Path, default=Path.cwd(), help="Project directory")
     args, _unknown = parser.parse_known_args()
 
     try:
         sync_initconf_version(args.project_dir)
         sync_makefile_version(args.project_dir)
+        sync_plugin_version(args.project_dir)
     except (ValueError, FileNotFoundError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

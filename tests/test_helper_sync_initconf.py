@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,7 @@ from bmk.adapters.stagerunner.helpers._sync_initconf import (
     main,
     sync_initconf_version,
     sync_makefile_version,
+    sync_plugin_version,
 )
 
 if TYPE_CHECKING:
@@ -171,3 +173,77 @@ def test_main_returns_one_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 def test_module_importable() -> None:
     assert _sync_initconf.__name__.endswith("_sync_initconf")
+
+
+# ---------------------------------------------------------------------------
+# The shipped-skill plugin version: slaved to the package, never lowered
+# ---------------------------------------------------------------------------
+
+
+def _write_plugin(project: Path, version: str) -> Path:
+    manifest = project / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({"name": "thing", "version": version}) + "\n", encoding="utf-8")
+    return manifest
+
+
+@pytest.mark.os_agnostic
+def test_plugin_version_follows_the_package_version_upward(tmp_path: Path) -> None:
+    project = _write_project(tmp_path, version="2.0.0")
+    manifest = _write_plugin(project, "1.0.3")
+
+    assert sync_plugin_version(project) is True
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == "2.0.0"
+
+
+@pytest.mark.os_agnostic
+def test_a_plugin_version_ahead_of_the_package_is_never_lowered(tmp_path: Path) -> None:
+    # A skill legitimately ships more often than the package it documents, so the
+    # plugin version can be ahead. Writing the package version there would move an
+    # install BACKWARD to a version it already had.
+    project = _write_project(tmp_path, version="1.1.0")
+    manifest = _write_plugin(project, "1.2.0")
+
+    assert sync_plugin_version(project) is False
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == "1.2.0"
+
+
+@pytest.mark.os_agnostic
+def test_equal_versions_are_left_alone(tmp_path: Path) -> None:
+    project = _write_project(tmp_path, version="1.2.0")
+    manifest = _write_plugin(project, "1.2.0")
+
+    assert sync_plugin_version(project) is False
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == "1.2.0"
+
+
+@pytest.mark.os_agnostic
+def test_a_repo_without_a_plugin_manifest_is_untouched(tmp_path: Path) -> None:
+    assert sync_plugin_version(_write_project(tmp_path)) is False
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(("package", "plugin"), [("1.2.0rc1", "1.0.0"), ("1.2.0", "2026.07.30-1"), ("1.2.0", "")])
+def test_a_version_that_is_not_plain_semver_is_left_alone(tmp_path: Path, package: str, plugin: str) -> None:
+    # Ordering is undefined against a pre-release or a bespoke scheme, and guessing
+    # could lower an install's version. Leave it to the human.
+    project = _write_project(tmp_path, version=package)
+    manifest = _write_plugin(project, plugin)
+
+    assert sync_plugin_version(project) is False
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == plugin
+
+
+@pytest.mark.os_agnostic
+def test_the_manifest_keeps_its_other_fields_and_stays_valid_json(tmp_path: Path) -> None:
+    project = _write_project(tmp_path, version="3.0.0")
+    manifest = project / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps({"name": "thing", "version": "1.0.0", "author": {"name": "bitranox"}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    assert sync_plugin_version(project) is True
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert (data["version"], data["author"]["name"]) == ("3.0.0", "bitranox")

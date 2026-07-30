@@ -21,6 +21,7 @@ stagerunner pipeline. Uses ``_toml_config`` for pyproject parsing and
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 
 _RE_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
-__all__ = ["main", "release"]
+__all__ = ["main", "release", "shipped_skill_needs_a_bump"]
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +134,71 @@ def _get_default_remote(config: PyprojectConfig) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _git_output(project_dir: Path, *args: str) -> str | None:
+    """Return a git command's stdout, or None when git cannot answer."""
+    try:
+        done = subprocess.run(["git", *args], cwd=str(project_dir), capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _plugin_version_pair(project_dir: Path, plugin_path: Path, previous_tag: str) -> tuple[str, str] | None:
+    """Return the plugin version at ``previous_tag`` and the one on disk now.
+
+    None when either cannot be read - the manifest is newer than the tag, or one side
+    is not JSON - because there is then no honest comparison to make.
+    """
+    old_blob = _git_output(project_dir, "show", f"{previous_tag}:.claude-plugin/plugin.json")
+    if old_blob is None:
+        return None
+    try:
+        was = str(json.loads(old_blob).get("version", ""))
+        now = str(json.loads(plugin_path.read_text(encoding="utf-8")).get("version", ""))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return was, now
+
+
+def shipped_skill_needs_a_bump(project_dir: Path) -> str | None:
+    """Return why the release must stop, or None when it may proceed.
+
+    A repo that ships a Claude Code skill publishes it through its own marketplace,
+    and an install re-fetches only when ``.claude-plugin/plugin.json`` changes version.
+    So a release that edits ``skills/`` without moving that version ships the code and
+    leaves every install on the old skill - no error, nothing to notice, and the skill
+    then documents behaviour the tool no longer has.
+
+    The version sync raises the plugin version to the package version, which covers
+    almost every case. It cannot cover one: when the two are already equal there is
+    nothing to raise, and the skill edit would ship unannounced. That is what this
+    catches.
+
+    Silent (returns None) when there is nothing to judge: no plugin manifest, no
+    skills dir, no git, no previous tag, or the skill was not touched.
+    """
+    plugin_path = project_dir / ".claude-plugin" / "plugin.json"
+    if not plugin_path.exists() or not (project_dir / "skills").is_dir():
+        return None
+
+    previous_tag = (_git_output(project_dir, "describe", "--tags", "--abbrev=0") or "").strip()
+    if not previous_tag:
+        return None  # first release: nothing to have drifted from
+
+    changed = (_git_output(project_dir, "diff", "--name-only", f"{previous_tag}..HEAD", "--", "skills") or "").strip()
+    versions = _plugin_version_pair(project_dir, plugin_path, previous_tag) if changed else None
+    if versions is None or versions[0] != versions[1]:
+        return None
+
+    files = ", ".join(sorted(changed.split())[:3])
+    return (
+        f"skills/ changed since {previous_tag} ({files}) but .claude-plugin/plugin.json is still {versions[1]}. "
+        "An install re-fetches a skill only when that version changes, so this release would "
+        "ship the code and leave every install on the old skill. Bump the plugin version "
+        "(semver) and commit it, then release again."
+    )
+
+
 def release(*, project_dir: Path, remote: str | None = None) -> int:
     """Create a versioned release with git tag and GitHub release.
 
@@ -149,6 +215,11 @@ def release(*, project_dir: Path, remote: str | None = None) -> int:
     version = config.project.version
     if not version or not _looks_like_semver(version):
         print("[release] Could not read version X.Y.Z from pyproject.toml", file=sys.stderr)
+        return 1
+
+    stale_skill = shipped_skill_needs_a_bump(project_dir)
+    if stale_skill is not None:
+        print(f"[release] {stale_skill}", file=sys.stderr)
         return 1
 
     if remote is None:
