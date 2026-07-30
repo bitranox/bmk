@@ -6,6 +6,35 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.14.0] 2026-07-30 17:37:50
+
+### Added
+
+- **A shipped skill's plugin version now follows the package version, and never moves backward.**
+  A repo that ships a Claude Code skill publishes it through its own marketplace, and an install
+  re-fetches only when `.claude-plugin/plugin.json` changes version - so a release that edits
+  `skills/` without moving that version ships the code and leaves every install on the old skill,
+  silently. `sync_plugin_version` raises the plugin version to the package version wherever it lags,
+  alongside the existing `__init__conf__.py` and Makefile sync, and refuses to lower it: a skill
+  legitimately ships more often than the package it documents, so the plugin version can be
+  legitimately ahead, and writing the package version there unconditionally would move an install
+  BACKWARD to a version it already had. Measured across seven bitranox repos that ship a skill, two
+  were in exactly that state. A version that is not a plain `X.Y.Z` on either side is left alone
+  rather than ordered by guesswork.
+- **`release` refuses to ship a skill edit the installs would never fetch.** The sync covers every
+  case but one: when the package and plugin versions are already equal there is nothing to raise, so
+  the edit would ship unannounced. `shipped_skill_needs_a_bump` stops the release there, naming the
+  changed files and the version that did not move. It stays silent where there is nothing to judge -
+  no plugin manifest, no `skills/` directory, no git, no previous tag, or an untouched skill - so it
+  cannot block a repo it does not concern.
+
+### Changed
+
+- Dependency floors raised to the current releases of `lib_cli_exit_tools` and `hypothesis`.
+- The bundled `devops-bmk` skill carries the `.sh` shell-lint gate's actual settings (`shfmt -i 4
+  -ci`, `bashate --max-line-length 120`, and that bashate reads no config file) and the pre-3.13.2
+  nested-worktree file discovery. Both had been written into the bitranox-skills mirror only.
+
 ## [3.13.2] 2026-07-28 14:49:10
 
 ### Fixed
