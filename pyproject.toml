@@ -25,6 +25,14 @@ dependencies = [
     "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
     "httpx2>=2.10.0",               # PyPI version lookups
     "python-dotenv>=1.2.3",        # reads CODECOV_TOKEN from .env
+    "filelock>=3.32.3",              # the cross-process lock serialising venv provisioning
+                                   # (adapters/stagerunner/venv.py). It already arrived here
+                                   # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
+                                   # far too fragile a provenance for something bmk imports: drop
+                                   # pip-audit and the lock vanishes. bmk's deps stage keeps this
+                                   # floor at the latest release; the real MINIMUM is 3.21, where
+                                   # the cross-process ReadWriteLock landed - do not lower it past
+                                   # that, the shared/exclusive tool-env work needs it
     "packaging>=26.3",             # PEP 440 parsing/ordering of the PROJECT's own version in
                                    # domain/version.py (release gate, bump, plugin sync). Already
                                    # arrives transitively via build/hatchling/pip-audit/pytest;

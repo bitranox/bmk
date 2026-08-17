@@ -15,25 +15,38 @@ that follow it in the same run.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Generator, Mapping
 
 # Sync targets, tried in order: a project with no ``[dev]`` extra (bmk itself is
 # one - all its tooling is a runtime dependency by design) must still sync.
 # Mirrors the fallback chain in ``src/bmk/makefile/Makefile``.
 _INSTALL_TARGETS: tuple[str, ...] = (".[dev]", ".")
+
+#: How long a bmk waits for another bmk to finish mutating the same venv. Generous,
+#: because the thing being waited on is a full resolve-and-install on a cold start,
+#: which is minutes on a heavy dependency tree. Overridable for tests and for a
+#: caller that would rather fail fast.
+_LOCK_TIMEOUT_ENV = "BMK_VENV_LOCK_TIMEOUT"
+#: Where the lock files live; overridable so a test never touches the real one.
+_LOCK_DIR_ENV = "BMK_VENV_LOCK_DIR"
+_DEFAULT_LOCK_TIMEOUT = 600.0
 
 
 def resolve_project_venv(cwd: Path, env: Mapping[str, str]) -> Path:
@@ -544,6 +557,93 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
     return ensure_project_venv_at(cwd, venv, desired_python_minor(cwd), quiet=quiet)
 
 
+def _lock_dir() -> Path:
+    """Directory holding the venv locks, per user, outside every repository."""
+    override = os.environ.get(_LOCK_DIR_ENV)
+    return Path(override) if override else Path.home() / ".cache" / "bmk" / "venv-locks"
+
+
+def sync_lock_path(venv: Path) -> Path:
+    """The lock file guarding every mutation of ``venv``.
+
+    Deliberately OUTSIDE the project, keyed by a digest of the venv's absolute path.
+    A lock is machine state, not project content, and the two repo-local options both
+    fail: inside the venv is destroyed by the rebuild this very lock has to guard
+    (``_discard_venv_on_wrong_python`` ``rmtree``s it), and beside the venv leaves an
+    untracked file in the user's ``git status`` - ``_append_to_gitignore`` writes every
+    entry with a trailing slash, so the existing ``.venv*`` rules match DIRECTORIES
+    only and cannot cover a lock file however it is named.
+
+    Out-of-repo also means provisioning still serialises when the checkout is read-only.
+
+    Scope note: the directory is per USER, so two people sharing one checkout do not
+    exclude each other. They would already be sharing one venv, which is broken for
+    other reasons; the case this exists for - a subagent and the main agent, or two
+    repos gated at once - runs as one user and shares the lock correctly.
+    """
+    digest = hashlib.sha256(str(venv.resolve()).encode("utf-8")).hexdigest()[:16]
+    return _lock_dir() / f"{digest}.lock"
+
+
+def _lock_timeout() -> float:
+    """Seconds to wait for another bmk, from the environment or the default."""
+    raw = os.environ.get(_LOCK_TIMEOUT_ENV)
+    if raw is None:
+        return _DEFAULT_LOCK_TIMEOUT
+    try:
+        return float(raw)
+    except ValueError:
+        return _DEFAULT_LOCK_TIMEOUT
+
+
+@contextmanager
+def _venv_sync_lock(venv: Path, *, quiet: bool) -> Generator[bool, None, None]:
+    """Hold the exclusive lock for ``venv``; yield False if another bmk holds it.
+
+    Scope is deliberately the SYNC ONLY, never the caller's whole gate. A lock held for
+    a gate's lifetime would deadlock bmk against itself, because ``push`` runs the test
+    pipeline and ``test-all`` spawns a cell per Python version, all inside one process
+    tree. A rare flake is better than a reliable hang.
+
+    A timeout does NOT fall through to syncing anyway. Provisioning is allowed to fail
+    (the caller degrades to bmk's own interpreter), but it is never allowed to run
+    concurrently with another bmk's sync, which is the corruption this exists to stop.
+    """
+    path = sync_lock_path(venv)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        if not quiet:
+            print(f"[venv] no lock directory ({exc}); proceeding unguarded", file=sys.stderr)
+        yield True
+        return
+    lock = FileLock(str(path), timeout=_lock_timeout())
+    try:
+        lock.acquire()
+    except Timeout:
+        # stderr, always: the caller degrades silently to another interpreter, so this
+        # message is the only thing that tells anyone the gate is about to be weaker.
+        print(
+            f"[venv] another bmk is still provisioning {venv.name}; "
+            f"waited {_lock_timeout():g}s for {path} and gave up. "
+            "Nothing was changed. Re-run once the other command finishes.",
+            file=sys.stderr,
+        )
+        yield False
+        return
+    except OSError as exc:
+        # An unlockable location (a filesystem without the primitive) must not make bmk
+        # unusable there; degrade to the old unguarded behaviour and say so.
+        if not quiet:
+            print(f"[venv] could not lock {path} ({exc}); proceeding unguarded", file=sys.stderr)
+        yield True
+        return
+    try:
+        yield True
+    finally:
+        lock.release()
+
+
 def ensure_project_venv_at(cwd: Path, venv: Path, minor: str | None, *, quiet: bool = True) -> Path | None:
     """Provision a venv at an EXPLICIT path on an EXPLICIT Python minor, then sync it.
 
@@ -562,8 +662,23 @@ def ensure_project_venv_at(cwd: Path, venv: Path, minor: str | None, *, quiet: b
     Returns the venv path, or ``None`` if it could not be provisioned. Never raises: a
     failure degrades rather than aborting the command.
     """
+    # Outside the lock on purpose: this installs into uv's machine-wide Python store,
+    # a DIFFERENT shared resource from this venv, and it is idempotent.
     if minor:
         _ensure_minor_installed(minor, cwd, quiet=quiet)
+
+    with _venv_sync_lock(venv, quiet=quiet) as acquired:
+        if not acquired:
+            return None
+        return _provision_locked(cwd, venv, minor, quiet=quiet)
+
+
+def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) -> Path | None:
+    """Everything that MUTATES the venv, run under :func:`_venv_sync_lock`.
+
+    The rebuild belongs in here as much as the sync does: an interpreter change
+    ``rmtree``s the whole venv, which is the widest window of all.
+    """
     _discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
 
     create = ["uv", "venv", *(["--python", minor] if minor else []), str(venv)]
