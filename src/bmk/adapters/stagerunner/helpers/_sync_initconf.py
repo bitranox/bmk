@@ -24,6 +24,8 @@ import re
 import sys
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
+
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.project import derive_package_name as _derive
 
@@ -34,9 +36,6 @@ _MAKEFILE_VERSION_RE = re.compile(r"^(# BMK MAKEFILE )\S+")
 # backtracking bmk to an ancient release when a project dependency caps something
 # bmk requires.
 _MAKEFILE_MIN_RE = re.compile(r"^(BMK_MIN := )\S+", re.MULTILINE)
-#: A plain release version. Anything else (a pre-release, a local suffix) has no
-#: obvious ordering against a plugin version, so the plugin sync leaves it alone.
-_RE_PLAIN_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def derive_package_name(project_dir: Path) -> str:
@@ -124,11 +123,33 @@ def sync_makefile_version(project_dir: Path) -> bool:
     return True
 
 
-def _semver(version: str) -> tuple[int, ...] | None:
-    """Return a comparable tuple for a plain X.Y.Z version, or None if it is not one."""
-    if not _RE_PLAIN_SEMVER.match(version):
+def _ordered(version: str) -> Version | None:
+    """Return ``version`` as a comparable PEP 440 version, or None if it is not one.
+
+    Wider than the three-part regex this replaced: ``1.0`` and ``2026.07.30-1`` are
+    real versions with a defined ordering, and dropping them used to skip the sync
+    entirely, letting a skill edit ship unannounced.
+    """
+    try:
+        return Version(version)
+    except InvalidVersion:
         return None
-    return tuple(int(part) for part in version.split("."))
+
+
+def _may_raise_manifest(package_version: str, current: str) -> bool:
+    """Whether the manifest may be raised from ``current`` to ``package_version``.
+
+    False on every reason not to write, so the caller stays a single decision:
+    either side unreadable, the package version non-final, or the manifest already
+    at or above it. See :func:`sync_plugin_version` for why non-final is excluded.
+    """
+    package_order, current_order = _ordered(package_version), _ordered(current)
+    if package_order is None or current_order is None:
+        # One of them is not a version at all; there is nothing to order against.
+        return False
+    if package_order.is_prerelease:
+        return False
+    return package_order > current_order
 
 
 def sync_plugin_version(project_dir: Path) -> bool:
@@ -146,12 +167,19 @@ def sync_plugin_version(project_dir: Path) -> bool:
     anything. Measured across the bitranox fleet before this existed, two repos of
     seven were in exactly that state.
 
+    A non-final package version is deliberately NOT written. Ordering it is no longer
+    the problem - PEP 440 defines that - but this manifest is read by Claude Code's
+    marketplace machinery, and every plugin version seen in the wild is a plain X.Y.Z.
+    bmk will not be the first to write ``1.2.0rc1`` there and risk freezing installs;
+    the final release that follows carries the skill.
+
     Args:
         project_dir: Project root directory.
 
     Returns:
-        True if plugin.json was updated, False when it is absent, already at or above
-        the package version, or either version is not a plain X.Y.Z.
+        True if plugin.json was updated, False when it is absent, the package version
+        is non-final, either version is unreadable, or the manifest is already at or
+        above the package version.
     """
     plugin_path = project_dir / ".claude-plugin" / "plugin.json"
     if not plugin_path.exists():
@@ -169,12 +197,7 @@ def sync_plugin_version(project_dir: Path) -> bool:
         return False
 
     current = str(data.get("version", ""))
-    package_parts, current_parts = _semver(package_version), _semver(current)
-    if package_parts is None or current_parts is None:
-        # One of them is not a plain semver (a pre-release, a date, something bespoke).
-        # Ordering is then undefined, so leave it alone rather than guess.
-        return False
-    if package_parts <= current_parts:
+    if not _may_raise_manifest(package_version, current):
         return False
 
     data["version"] = package_version

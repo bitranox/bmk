@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from bmk.domain.enums import BumpPart
+from bmk.domain.version import next_version
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,83 +24,48 @@ def bump_module() -> Any:
 
 
 # =============================================================================
-# parse_version tests
-# =============================================================================
-
-
-@pytest.mark.os_agnostic
-class TestParseVersion:
-    """Tests for parse_version function."""
-
-    def test_parse_version_valid(self, bump_module: Any) -> None:
-        """Valid semantic version string is parsed correctly."""
-        assert bump_module.parse_version("1.2.3") == (1, 2, 3)
-
-    def test_parse_version_zeros(self, bump_module: Any) -> None:
-        """Version with zeros is parsed correctly."""
-        assert bump_module.parse_version("0.0.0") == (0, 0, 0)
-
-    def test_parse_version_large_numbers(self, bump_module: Any) -> None:
-        """Large version numbers are parsed correctly."""
-        assert bump_module.parse_version("100.200.300") == (100, 200, 300)
-
-    def test_parse_version_invalid_format_two_parts(self, bump_module: Any) -> None:
-        """Version with two parts raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid version format"):
-            bump_module.parse_version("1.2")
-
-    def test_parse_version_invalid_format_four_parts(self, bump_module: Any) -> None:
-        """Version with four parts raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid version format"):
-            bump_module.parse_version("1.2.3.4")
-
-    def test_parse_version_invalid_format_non_numeric(self, bump_module: Any) -> None:
-        """Version with non-numeric parts raises ValueError."""
-        with pytest.raises(ValueError):
-            bump_module.parse_version("1.2.a")
-
-
-# =============================================================================
-# bump_version tests
+# Version arithmetic
+#
+# The rules live in bmk.domain.version (tested in tests/test_domain_version.py).
+# These cover the ordinary final-version cases as this helper drives them, plus the
+# enum boundary; the non-final cases are exercised end to end through main() below.
 # =============================================================================
 
 
 @pytest.mark.os_agnostic
 class TestBumpVersion:
-    """Tests for bump_version function."""
+    """Tests for the version arithmetic the bump helper drives."""
 
-    def test_bump_major(self, bump_module: Any) -> None:
+    def test_bump_major(self) -> None:
         """Major bump resets minor and patch to zero."""
-        result = bump_module.bump_version((1, 2, 3), BumpPart.MAJOR)
-        assert result == "2.0.0"
+        assert next_version("1.2.3", BumpPart.MAJOR) == "2.0.0"
 
-    def test_bump_major_from_zero(self, bump_module: Any) -> None:
+    def test_bump_major_from_zero(self) -> None:
         """Major bump from 0.x.y produces 1.0.0."""
-        result = bump_module.bump_version((0, 5, 10), BumpPart.MAJOR)
-        assert result == "1.0.0"
+        assert next_version("0.5.10", BumpPart.MAJOR) == "1.0.0"
 
-    def test_bump_minor(self, bump_module: Any) -> None:
+    def test_bump_minor(self) -> None:
         """Minor bump resets patch to zero."""
-        result = bump_module.bump_version((1, 2, 3), BumpPart.MINOR)
-        assert result == "1.3.0"
+        assert next_version("1.2.3", BumpPart.MINOR) == "1.3.0"
 
-    def test_bump_minor_from_zero(self, bump_module: Any) -> None:
+    def test_bump_minor_from_zero(self) -> None:
         """Minor bump from x.0.y produces x.1.0."""
-        result = bump_module.bump_version((1, 0, 5), BumpPart.MINOR)
-        assert result == "1.1.0"
+        assert next_version("1.0.5", BumpPart.MINOR) == "1.1.0"
 
-    def test_bump_patch(self, bump_module: Any) -> None:
+    def test_bump_patch(self) -> None:
         """Patch bump increments only the patch number."""
-        result = bump_module.bump_version((1, 2, 3), BumpPart.PATCH)
-        assert result == "1.2.4"
+        assert next_version("1.2.3", BumpPart.PATCH) == "1.2.4"
 
-    def test_bump_patch_from_zero(self, bump_module: Any) -> None:
+    def test_bump_patch_from_zero(self) -> None:
         """Patch bump from x.y.0 produces x.y.1."""
-        result = bump_module.bump_version((1, 2, 0), BumpPart.PATCH)
-        assert result == "1.2.1"
+        assert next_version("1.2.0", BumpPart.PATCH) == "1.2.1"
+
+    def test_bump_large_numbers(self) -> None:
+        """Multi-digit components survive the round trip."""
+        assert next_version("100.200.300", BumpPart.PATCH) == "100.200.301"
 
     def test_bumppart_rejects_unknown_value(self) -> None:
-        """An unknown bump part is rejected at the enum boundary, not in bump_version."""
+        """An unknown bump part is rejected at the enum boundary, not in next_version."""
         with pytest.raises(ValueError, match="is not a valid BumpPart"):
             BumpPart("invalid")
 
@@ -333,3 +299,29 @@ def test_main_returns_one_on_invalid_version(bump_module: Any, tmp_path: Path, m
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "not.a.version"\n', encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
     assert bump_module.main() == 1
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("current", "part", "expected"),
+    [
+        ("1.2.3rc1", "patch", "1.2.3"),
+        ("1.3.0b2", "patch", "1.3.0"),
+        ("1.2.3.dev4", "patch", "1.2.3"),
+        ("1.2.3.post1", "patch", "1.2.4"),
+        ("2.0.0rc1", "major", "2.0.0"),
+        ("1.2.3rc1", "minor", "1.3.0"),
+    ],
+)
+def test_main_finalizes_a_non_final_version_instead_of_crashing(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current: str, part: str, expected: str
+) -> None:
+    """Bumping used to die on int('3rc1'); a non-final version now finalizes to its release."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(f'[project]\nname = "x"\nversion = "{current}"\n', encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", part, "--project-dir", str(tmp_path)])
+
+    assert bump_module.main() == 0
+    assert f'version = "{expected}"' in pyproject.read_text(encoding="utf-8")
+    assert f"## [{expected}]" in (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")

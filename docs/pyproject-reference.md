@@ -17,12 +17,48 @@ Two rules before the tables:
 | Key                                   | Type   | What bmk does                                                                                                                               | Missing?                                                                             |
 |---------------------------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
 | `[project].name`                      | string | Derives the package name, which is what bandit scans (`bandit -r src/<package>`) and what coverage measures. See "Package name derivation". | `bmk run` fails with "Could not read project name"                                   |
-| `[project].version`                   | string | Read by `bump` and `release`.                                                                                                               | `bump` and `release` abort                                                           |
+| `[project].version`                   | string | Read by `bump` and `release`. Any canonical PEP 440 version, not only `X.Y.Z` - see "Version format" below.                                 | `bump` and `release` abort                                                           |
 | `[project.optional-dependencies].dev` | list   | bmk syncs `.[dev]` into your `.venv`, falling back to `.` if there is no `dev` extra.                                                       | Only the project itself is installed - so pytest is absent and `bmk test` cannot run |
 
 `[dev]` is special: it is the only extra bmk installs by name. **Your test tooling
 (`pytest`, `pytest-cov`) must be declared there**, because the suite runs in your venv, not
 in bmk's. bmk's environment holds bmk's toolchain and nothing of yours.
+
+### Version format
+
+`[project].version` may be any **canonical** PEP 440 version. Pre-releases, dev releases,
+post releases, a short release segment and an epoch are all fine, because that is what
+hatchling builds and PyPI accepts:
+
+```toml
+version = "1.2.3"       # ok        version = "1.2.3.dev4"   # ok
+version = "1.2.3rc1"    # ok        version = "1.2.3.post1"  # ok
+version = "1.0"         # ok        version = "1!2.0.0"      # ok
+```
+
+Two shapes are refused, each with the fix in the message:
+
+| Written as                         | Refused because                                                                                                                                                                                                                              |
+|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `v1.0.0`, `1.0.0-beta`, `1.2.3RC1` | Not canonical. `packaging` parses these but normalises them, so the release tag (`v` + this string) and the artifact hatchling uploads would disagree, and a `v` prefix would tag `vv1.0.0`. Write the canonical spelling the message names. |
+| `1.2.3+local`                      | A local version. It would tag fine and then fail in CI, because PyPI rejects a local version on upload.                                                                                                                                      |
+
+**What a bump produces.** `bump` always lands on a plain three-part release, and a
+non-final version is FINALIZED rather than stepped past, so the release an rc was
+rehearsing stays reachable:
+
+| current       | `bump patch` | `bump minor` | `bump major` |
+|---------------|--------------|--------------|--------------|
+| `1.2.3`       | `1.2.4`      | `1.3.0`      | `2.0.0`      |
+| `1.2.3rc1`    | `1.2.3`      | `1.3.0`      | `2.0.0`      |
+| `1.3.0b2`     | `1.3.0`      | `1.3.0`      | `2.0.0`      |
+| `1.2.3.dev4`  | `1.2.3`      | `1.3.0`      | `2.0.0`      |
+| `1.2.3.post1` | `1.2.4`      | `1.3.0`      | `2.0.0`      |
+| `2.0.0rc1`    | `2.0.0`      | `2.0.0`      | `2.0.0`      |
+
+A post release is final, hence `1.2.3.post1 -> 1.2.4`. The epoch survives a bump; any
+pre, dev, post or local segment is dropped. `bmk` has no command that CREATES a
+pre-release: write one into `pyproject.toml` yourself, then bump to finalize it.
 
 ## The Python version of your venv
 

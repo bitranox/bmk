@@ -22,7 +22,6 @@ stagerunner pipeline. Uses ``_toml_config`` for pyproject parsing and
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -30,11 +29,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.domain.version import version_problem
 
 if TYPE_CHECKING:
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
-
-_RE_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 __all__ = ["main", "release", "shipped_skill_needs_a_bump"]
 
@@ -104,11 +102,6 @@ def _ensure_clean() -> None:
     if unstaged.returncode != 0 or staged.returncode != 0:
         print("[release] Working tree not clean. Commit or stash changes first.", file=sys.stderr)
         raise SystemExit(1)
-
-
-def _looks_like_semver(v: str) -> bool:
-    """Validate that a version string matches X.Y.Z format."""
-    return bool(_RE_SEMVER.match(v))
 
 
 def _get_default_remote(config: PyprojectConfig) -> str:
@@ -213,8 +206,9 @@ def release(*, project_dir: Path, remote: str | None = None) -> int:
     config = load_pyproject_config(pyproject_path)
 
     version = config.project.version
-    if not version or not _looks_like_semver(version):
-        print("[release] Could not read version X.Y.Z from pyproject.toml", file=sys.stderr)
+    problem = version_problem(version)
+    if problem is not None:
+        print(f"[release] pyproject.toml version: {problem}", file=sys.stderr)
         return 1
 
     stale_skill = shipped_skill_needs_a_bump(project_dir)

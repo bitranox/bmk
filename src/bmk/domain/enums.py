@@ -59,10 +59,14 @@ class BumpPart(str, Enum):
     (argparse ``choices`` and the ``_bump_version`` helper argv both use the wire
     strings) while business logic dispatches on typed members.
 
+    Which component a bump ADVANCES. It does not always increment: from a non-final
+    version the same part finalizes instead, so ``1.2.3rc1`` patch-bumps to ``1.2.3``.
+    :func:`bmk.domain.version.next_version` owns that rule.
+
     Attributes:
-        MAJOR: Increment the major component (X+1.0.0).
-        MINOR: Increment the minor component (X.Y+1.0).
-        PATCH: Increment the patch component (X.Y.Z+1).
+        MAJOR: Advance the major component (X+1.0.0).
+        MINOR: Advance the minor component (X.Y+1.0).
+        PATCH: Advance the patch component (X.Y.Z+1).
 
     Example:
         >>> BumpPart.MINOR.value

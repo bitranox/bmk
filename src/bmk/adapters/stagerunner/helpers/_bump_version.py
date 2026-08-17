@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Version bump utility for pyproject.toml and CHANGELOG.md.
 
-Standalone script that bumps semantic versions in project files:
+Standalone script that bumps the project version in project files:
 - Updates version in pyproject.toml (preserves file formatting)
 - Renames [Unreleased] section in CHANGELOG.md to new version with timestamp
 - Creates new [Unreleased] section above the versioned entry
+
+The version rules themselves live in ``bmk.domain.version``, shared with the release
+gate so the two cannot disagree about what a project version may be. A bump always
+lands on a plain release: a non-final version (``1.2.3rc1``, ``1.2.3.dev4``) is
+FINALIZED to ``1.2.3`` rather than stepped past it.
 
 Uses _toml_config for TOML parsing to centralize configuration access,
 and native string operations to preserve file formatting when writing.
 
 Contents:
-    * :func:`parse_version` - Parse semantic version string to tuple.
-    * :func:`bump_version` - Increment version by specified part.
     * :func:`update_pyproject` - Update version in pyproject.toml.
     * :func:`update_changelog` - Update CHANGELOG.md with new version section.
     * :func:`main` - CLI entry point.
@@ -26,58 +29,7 @@ from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import BumpPart
-
-
-def parse_version(version_str: str) -> tuple[int, int, int]:
-    """Parse semantic version string to tuple.
-
-    Args:
-        version_str: Version string in X.Y.Z format.
-
-    Returns:
-        Tuple of (major, minor, patch) integers.
-
-    Raises:
-        ValueError: If version string is not in X.Y.Z format.
-
-    Example:
-        >>> parse_version("1.2.3")
-        (1, 2, 3)
-        >>> parse_version("0.0.1")
-        (0, 0, 1)
-    """
-    semver_parts_count = 3
-    parts = version_str.split(".")
-    if len(parts) != semver_parts_count:
-        msg = f"Invalid version format: {version_str}"
-        raise ValueError(msg)
-    return int(parts[0]), int(parts[1]), int(parts[2])
-
-
-def bump_version(current: tuple[int, int, int], part: BumpPart) -> str:
-    """Bump version by specified part.
-
-    Args:
-        current: Current version as (major, minor, patch) tuple.
-        part: Which component to increment.
-
-    Returns:
-        New version string in X.Y.Z format.
-
-    Example:
-        >>> bump_version((1, 2, 3), BumpPart.MAJOR)
-        '2.0.0'
-        >>> bump_version((1, 2, 3), BumpPart.MINOR)
-        '1.3.0'
-        >>> bump_version((1, 2, 3), BumpPart.PATCH)
-        '1.2.4'
-    """
-    major, minor, patch = current
-    if part is BumpPart.MAJOR:
-        return f"{major + 1}.0.0"
-    if part is BumpPart.MINOR:
-        return f"{major}.{minor + 1}.0"
-    return f"{major}.{minor}.{patch + 1}"
+from bmk.domain.version import next_version
 
 
 def update_pyproject(project_dir: Path, new_version: str) -> str:
@@ -137,7 +89,7 @@ def find_unreleased_line(lines: list[str]) -> int | None:
 
 
 def find_first_version_line(lines: list[str]) -> int | None:
-    """Find index of first ## [X.Y.Z] version line.
+    """Find index of the first versioned ``## [...]`` line (any version spelling).
 
     Args:
         lines: List of lines from CHANGELOG.md.
@@ -215,8 +167,7 @@ def main() -> int:
             print("Error: Could not find [project].version in pyproject.toml", file=sys.stderr)
             return 1
 
-        current = parse_version(current_version)
-        new_version = bump_version(current, BumpPart(args.part))
+        new_version = next_version(current_version, BumpPart(args.part))
 
         # Update files
         old_version = update_pyproject(args.project_dir, new_version)

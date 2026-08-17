@@ -6,6 +6,40 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.15.0] 2026-08-17 15:47:15
+
+### Added
+
+- **A project version may now be any canonical PEP 440 version, not only `X.Y.Z`.** `release`
+  refused `0.1.0rc1` outright ("Could not read version X.Y.Z from pyproject.toml"), `bump` crashed
+  on it (`invalid literal for int() with base 10: '0rc1'`), and the plugin-version sync silently
+  stopped running - three gates, three different failures, so fixing only the loud one would have
+  left a project able to release a pre-release but not to bump it. hatchling builds
+  `pkg-0.1.0rc1.tar.gz` and PyPI accepts it; bmk was the only thing saying no. Pre-releases, dev
+  releases, post releases, a short release segment (`1.0`) and an epoch (`1!2.0.0`) are all
+  accepted now. The rules live in one place, `bmk.domain.version`, shared by all three gates.
+
+- **`bump` finalizes a non-final version instead of stepping past it.** `1.2.3rc1` patch-bumps to
+  `1.2.3`, not `1.2.4`, so the release an rc was rehearsing stays reachable; a post release is
+  final, so `1.2.3.post1` still goes to `1.2.4`. The epoch survives; pre, dev, post and local
+  segments are dropped. Full table in `docs/pyproject-reference.md`.
+
+### Changed
+
+- **`release` refuses a non-canonical spelling and names the canonical one.** `packaging` accepts
+  more spellings than it round-trips: `v1.0.0` parses and normalises to `1.0.0`, `1.0.0-beta` to
+  `1.0.0b0`. Accepting the raw string would have tagged `vv1.0.0` (the tag is built as
+  `f"v{version}"`) and, for the respelled ones, made the git tag disagree with the artifact
+  hatchling uploads. A local version (`1.2.3+local`) is refused too, because PyPI rejects it on
+  upload - previously it would have tagged cleanly and died in CI. Each refusal prints the fix.
+
+- **The plugin-version sync orders with PEP 440 instead of a three-part regex.** A manifest version
+  the old regex could not read (`1.0`, `2026.07.30-1`) was dropped on the floor and the sync
+  skipped, which is the exact silent-skill-drift this feature exists to prevent; those now compare
+  correctly. A non-final PACKAGE version is still not written into `.claude-plugin/plugin.json`:
+  ordering it is no longer the problem, but that manifest is read by Claude Code's marketplace
+  machinery and is only ever seen carrying a plain `X.Y.Z`.
+
 ## [3.14.0] 2026-07-30 17:37:50
 
 ### Added

@@ -114,11 +114,14 @@ def _make_bump_group(name: str, help_text: str) -> click.Group:
 cli_bump: click.Group = _make_bump_group(
     "bump",
     "Bump project version (major, minor, or patch).\n\n"
-    "Updates version in pyproject.toml and CHANGELOG.md.\n\n"
+    "Updates version in pyproject.toml and CHANGELOG.md. A non-final version "
+    "(a pre-release or dev release) is FINALIZED rather than stepped past, so the "
+    "release it was rehearsing stays reachable.\n\n"
     "Example:\n"
     "    bmk bump major      # 1.3.0 -> 2.0.0\n"
     "    bmk bump minor      # 1.3.0 -> 1.4.0\n"
-    "    bmk bump patch      # 1.3.0 -> 1.3.1",
+    "    bmk bump patch      # 1.3.0 -> 1.3.1\n"
+    "    bmk bump patch      # 1.3.0b2 -> 1.3.0   (finalized, not 1.3.1)",
 )
 
 cli_bmp: click.Group = _make_bump_group(

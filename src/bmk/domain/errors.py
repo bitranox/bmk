@@ -49,8 +49,25 @@ class InvalidRecipientError(ValueError):
     """
 
 
+class InvalidProjectVersionError(ValueError):
+    """A project version bmk will not act on.
+
+    Raised by :mod:`bmk.domain.version` when ``[project].version`` is not a version
+    at all, is spelled non-canonically, carries a local segment, or cannot be bumped.
+    Inherits from ValueError so the existing ``except ValueError`` handlers in the
+    bump helper keep catching it.
+
+    Example:
+        >>> from bmk.domain.errors import InvalidProjectVersionError
+        >>> err = InvalidProjectVersionError('"v1.0.0" is not canonical; write it as "1.0.0"')
+        >>> isinstance(err, ValueError)
+        True
+    """
+
+
 __all__ = [
     "ConfigurationError",
     "DeliveryError",
+    "InvalidProjectVersionError",
     "InvalidRecipientError",
 ]

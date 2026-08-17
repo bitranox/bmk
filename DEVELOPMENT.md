@@ -213,7 +213,9 @@ secret is still present and must be deleted.
 To publish a release:
 
 1. `make bump-patch` (or `-minor` / `-major`) to update `pyproject.toml` and `CHANGELOG.md`.
-2. `make release` to tag `vX.Y.Z`, push, and create the GitHub release.
+   A non-final version is finalized rather than stepped past (`1.2.3rc1` patch-bumps to
+   `1.2.3`); see `docs/pyproject-reference.md` for the full table.
+2. `make release` to tag `v` + the project version, push, and create the GitHub release.
 3. Or `make ship` to push, wait for CI, release, and wait for the release workflow - CI-gated end to
    end.
 

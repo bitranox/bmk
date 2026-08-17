@@ -223,15 +223,39 @@ def test_a_repo_without_a_plugin_manifest_is_untouched(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
-@pytest.mark.parametrize(("package", "plugin"), [("1.2.0rc1", "1.0.0"), ("1.2.0", "2026.07.30-1"), ("1.2.0", "")])
-def test_a_version_that_is_not_plain_semver_is_left_alone(tmp_path: Path, package: str, plugin: str) -> None:
-    # Ordering is undefined against a pre-release or a bespoke scheme, and guessing
-    # could lower an install's version. Leave it to the human.
+@pytest.mark.parametrize(
+    ("package", "plugin"),
+    [("1.2.0rc1", "1.0.0"), ("1.2.0", "2026.07.30-1"), ("1.2.0", ""), ("3.0.0", "1!0.9.0")],
+)
+def test_the_manifest_is_left_alone_when_the_sync_cannot_honestly_raise_it(
+    tmp_path: Path, package: str, plugin: str
+) -> None:
+    # Four distinct reasons, all ending in "do not write":
+    #   1.2.0rc1 -> the PACKAGE is non-final, and a Claude Code plugin version is read by
+    #               the marketplace machinery, which is only ever seen carrying a plain
+    #               X.Y.Z. bmk will not be the first to write a pre-release there.
+    #   2026.07.30-1 -> parses as 2026.7.30.post1, which is ABOVE 1.2.0; never lower a
+    #               manifest, an install would move backward.
+    #   ""       -> not a version at all; nothing to order against.
+    #   1!0.9.0  -> an EPOCH outranks the release segment, so this sits above 3.0.0
+    #               however small it looks. Comparing the digits would lower it.
     project = _write_project(tmp_path, version=package)
     manifest = _write_plugin(project, plugin)
 
     assert sync_plugin_version(project) is False
     assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == plugin
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("plugin", ["1.0", "1.0.0rc1", "2.9.0.post3", "3.0.0.dev1"])
+def test_a_manifest_version_bmk_could_not_previously_read_is_still_raised(tmp_path: Path, plugin: str) -> None:
+    # The old three-part regex dropped these on the floor and skipped the sync, leaving a
+    # skill edit to ship unannounced. PEP 440 orders every one of them below 3.0.0.
+    project = _write_project(tmp_path, version="3.0.0")
+    manifest = _write_plugin(project, plugin)
+
+    assert sync_plugin_version(project) is True
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == "3.0.0"
 
 
 @pytest.mark.os_agnostic

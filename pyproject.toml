@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.14.0"
+version = "3.15.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,21 +16,25 @@ dependencies = [
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.3.4",
-    "lib_log_rich>=6.3.6",
-    "lib_layered_config>=5.6.1",
-    "btx_lib_mail>=1.5.1",         # send-email / send-notification (SecretStr password + Transport seam)
+    "lib_log_rich>=6.3.7",
+    "lib_layered_config>=5.6.2",
+    "btx_lib_mail>=1.5.2",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.13.4",            # the pipeline-overlay and email schemas
-    "orjson>=3.11.9",              # JSON: PyPI responses, CLI output
+    "orjson>=3.12.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
     "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
-    "httpx2>=2.9.1",               # PyPI version lookups
-    "python-dotenv>=1.2.2",        # reads CODECOV_TOKEN from .env
+    "httpx2>=2.10.0",               # PyPI version lookups
+    "python-dotenv>=1.2.3",        # reads CODECOV_TOKEN from .env
+    "packaging>=26.3",             # PEP 440 parsing/ordering of the PROJECT's own version in
+                                   # domain/version.py (release gate, bump, plugin sync). Already
+                                   # arrives transitively via build/hatchling/pip-audit/pytest;
+                                   # declared because bmk imports it, not because it was missing
 
     # --- invoked as tools, never imported ---------------------------------------------
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.16.0",
+    "ruff>=0.16.3",
     "pyright[nodejs]>=1.1.411",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
@@ -40,7 +44,7 @@ dependencies = [
     "bashate>=2.1.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",           # a pytest PLUGIN, activated by CI's --cov flags
-    "hypothesis>=6.164.0",         # property tests in bmk's own suite
+    "hypothesis>=6.165.10",         # property tests in bmk's own suite
     # Floor stays at 1.5.0, NOT 1.5.1: PyPI yanked 1.5.1 (upstream shipped unintended breaking
     # changes and will re-release them as a new major). A yanked release is invisible to a range
     # resolve, and nothing newer exists, so a >=1.5.1 floor has ZERO candidates and makes bmk
@@ -54,7 +58,7 @@ dependencies = [
     # ephemeral venv, which pip-audit never sees - pip-audit audits the project's real .venv.
     # Declaring hatchling again HERE is what puts it in the audited env, so a future hatchling
     # CVE is actually caught. Not redundant with [build-system].
-    "hatchling>=1.31.0",
+    "hatchling>=1.32.0",
     # A transitive of pip-audit, floored for CVE-2025-66471, CVE-2025-66418, CVE-2026-21441.
     # bmk never imports urllib3; httpx2 is its HTTP client. This is a floor, not a choice of
     # library, so "replace it with httpx2" is not a thing that can be done.
@@ -122,7 +126,7 @@ bmk = "bmk.entry:main"
 mk = "bmk.entry:main"
 
 [build-system]
-requires = ["hatchling>=1.31.0"]
+requires = ["hatchling>=1.32.0"]
 build-backend = "hatchling.build"
 
 

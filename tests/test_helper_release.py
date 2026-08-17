@@ -1,4 +1,4 @@
-"""Behaviour tests for makescripts._release: semver validation, default remote, command existence."""
+"""Behaviour tests for makescripts._release: version validation, default remote, command existence."""
 
 # pyright: reportPrivateUsage=false
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from bmk.adapters.stagerunner.helpers._release import _cmd_exists, _get_default_remote, _looks_like_semver
+from bmk.adapters.stagerunner.helpers._release import _cmd_exists, _get_default_remote
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 if TYPE_CHECKING:
@@ -18,57 +18,9 @@ if TYPE_CHECKING:
 
     from pytest import CaptureFixture
 
-# ---------------------------------------------------------------------------
-# _looks_like_semver
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_accepts_stable_version() -> None:
-    """Standard X.Y.Z version strings are accepted."""
-    assert _looks_like_semver("1.0.0") is True
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_accepts_zero_minor() -> None:
-    """Version with zero minor component is accepted."""
-    assert _looks_like_semver("0.1.0") is True
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_accepts_large_numbers() -> None:
-    """Multi-digit version components are accepted."""
-    assert _looks_like_semver("10.20.30") is True
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_rejects_two_part_version() -> None:
-    """Two-part version string is rejected."""
-    assert _looks_like_semver("1.0") is False
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_rejects_v_prefix() -> None:
-    """Version with 'v' prefix is rejected."""
-    assert _looks_like_semver("v1.0.0") is False
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_rejects_prerelease_suffix() -> None:
-    """Version with prerelease suffix is rejected."""
-    assert _looks_like_semver("1.0.0-beta") is False
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_rejects_alphabetic_string() -> None:
-    """Non-numeric string is rejected."""
-    assert _looks_like_semver("abc") is False
-
-
-@pytest.mark.os_agnostic
-def test_looks_like_semver_rejects_empty_string() -> None:
-    """Empty string is rejected."""
-    assert _looks_like_semver("") is False
+# The version rules themselves are owned by bmk.domain.version and tested in
+# tests/test_domain_version.py. What is tested HERE is that release() consults them and
+# stops before tagging - see TestReleaseOrchestrator at the bottom of this file.
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +261,11 @@ class TestReleaseOrchestrator:
     def test_returns_one_for_invalid_version(
         self, release_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Returns 1 when version is not valid semver."""
-        config = _make_config({"project": {"name": "test", "version": "1.0"}})
+        """Returns 1 when the version is not a version at all.
+
+        Not "1.0": that is a legal PEP 440 version and is now released normally.
+        """
+        config = _make_config({"project": {"name": "test", "version": "not-a-version"}})
         monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
 
         result = release_module.release(project_dir=tmp_path)
@@ -422,3 +377,59 @@ class TestReleaseOrchestrator:
         assert "gh CLI not found" in capsys.readouterr().out
         assert mock_release_deps["gh_create"] == []
         assert mock_release_deps["gh_edit"] == []
+
+    @pytest.mark.os_agnostic
+    @pytest.mark.parametrize("version", ["0.1.0rc1", "1.0.0a1", "1.3.0b2", "1.2.3.dev4", "1.2.3.post1", "1!2.0.0"])
+    def test_a_canonical_pep440_version_is_released_and_tagged(
+        self,
+        release_module: Any,
+        mock_release_deps: dict[str, list[Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        version: str,
+    ) -> None:
+        """hatchling builds these and PyPI accepts them, so bmk must not be the one to refuse."""
+        config = _make_config({"project": {"name": "test", "version": version}})
+        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+
+        result = release_module.release(project_dir=tmp_path)
+
+        assert result == 0
+        assert f"v{version}" in mock_release_deps["tag_create"]
+        assert ("origin", f"v{version}") in mock_release_deps["push"]
+
+    @pytest.mark.os_agnostic
+    def test_a_v_prefixed_version_is_refused_before_it_can_tag_vv(
+        self,
+        release_module: Any,
+        mock_release_deps: dict[str, list[Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: CaptureFixture[str],
+    ) -> None:
+        """packaging PARSES "v1.0.0"; accepting it would tag "vv1.0.0" (tag = f"v{version}")."""
+        config = _make_config({"project": {"name": "test", "version": "v1.0.0"}})
+        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+
+        result = release_module.release(project_dir=tmp_path)
+
+        assert result == 1
+        assert mock_release_deps["tag_create"] == []
+        assert "1.0.0" in capsys.readouterr().err
+
+    @pytest.mark.os_agnostic
+    def test_a_local_version_is_refused_because_pypi_would_reject_the_upload(
+        self,
+        release_module: Any,
+        mock_release_deps: dict[str, list[Any]],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A local version tags fine and then dies in CI at publish; refuse it here instead."""
+        config = _make_config({"project": {"name": "test", "version": "1.2.3+local"}})
+        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+
+        result = release_module.release(project_dir=tmp_path)
+
+        assert result == 1
+        assert mock_release_deps["tag_create"] == []
