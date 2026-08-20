@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.15.0"
+version = "3.16.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,16 +23,21 @@ dependencies = [
     "orjson>=3.12.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
     "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
-    "httpx2>=2.10.0",               # PyPI version lookups
+    "httpx2>=2.12.0",               # PyPI version lookups
     "python-dotenv>=1.2.3",        # reads CODECOV_TOKEN from .env
     "filelock>=3.32.3",              # the cross-process lock serialising venv provisioning
                                    # (adapters/stagerunner/venv.py). It already arrived here
                                    # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
                                    # far too fragile a provenance for something bmk imports: drop
                                    # pip-audit and the lock vanishes. bmk's deps stage keeps this
-                                   # floor at the latest release; the real MINIMUM is 3.21, where
-                                   # the cross-process ReadWriteLock landed - do not lower it past
-                                   # that, the shared/exclusive tool-env work needs it
+                                   # floor at the latest release. What the code actually uses is
+                                   # FileLock + Timeout, an API far older than this floor, so the
+                                   # floor is "current", not a hard requirement. It is NOT held up
+                                   # by ReadWriteLock (3.21): that one is SQLite-backed, and this
+                                   # repo already relocates a SQLite file off network mounts in
+                                   # tests/conftest.py because network filesystems do not give
+                                   # SQLite the locking semantics it needs - so a lock file that
+                                   # can land on such a mount must not be built on it
     "packaging>=26.3",             # PEP 440 parsing/ordering of the PROJECT's own version in
                                    # domain/version.py (release gate, bump, plugin sync). Already
                                    # arrives transitively via build/hatchling/pip-audit/pytest;

@@ -6,6 +6,43 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.16.0] 2026-08-20 17:05:36
+
+### Fixed
+
+- **Two bmk processes could provision the same venv at once, and the one that lost went on to
+  test a different environment without saying so.** `ensure_project_venv_at` ran `uv venv` and
+  `uv pip install --exact --upgrade` with no cross-process guard, so a subagent's `make test`
+  beside the main agent's, or `test-all` beside `test`, could pull the environment out from under
+  a running gate. Measured on the unguarded code, driving the real function from two separate
+  processes on a cold start: one of the two returned a provisioning failure in 5 of 8 rounds; with
+  the lock, 8 of 8 succeed. The failure was silent, which is what made it worth fixing -
+  provisioning never raises, by design, so the losing gate degraded to bmk's own interpreter and
+  type-checked, audited and tested the wrong environment with nothing in its output saying so.
+  Provisioning is now serialised by an exclusive lock whose scope is one venv path, so the version
+  matrix still provisions its cells in parallel. The lock covers the sync only, never a whole
+  gate: a gate-lifetime lock would deadlock bmk against itself, because `push` runs the test
+  pipeline and `test-all` spawns a cell per Python version inside one process tree. A timeout does
+  not fall through to syncing anyway - provisioning may fail, but it may never run concurrently
+  with another bmk's sync, which is the corruption being prevented. Editing `pyproject.toml` while
+  a gate is already running remains unguarded; closing that needs a reader-writer design and is
+  deliberately not attempted here.
+
+### Added
+
+- **`BMK_VENV_LOCK_TIMEOUT` and `BMK_VENV_LOCK_DIR`.** How long to wait for another bmk that is
+  provisioning the same venv (default 600 seconds), and where the lock files live (default
+  `~/.cache/bmk/venv-locks`). The directory is deliberately outside every repository: inside the
+  venv is destroyed by the rebuild the lock exists to guard, and beside the venv leaves an
+  untracked file in `git status`, because the existing `.venv*` rules are written with a trailing
+  slash and so match directories only.
+
+### Changed
+
+- **`filelock` is a declared dependency rather than a transitive one.** It arrived via
+  `pip-audit -> cachecontrol[filecache]`, far too fragile a provenance for something bmk imports:
+  dropping pip-audit would have taken the lock with it.
+
 ## [3.15.0] 2026-08-17 15:47:15
 
 ### Added
