@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.16.0"
+version = "3.17.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -149,7 +149,7 @@ build-backend = "hatchling.build"
 # it as `python -m bmk_selfcheck` without importing `bmk` (whose __init__ costs 0.7s and is
 # the very thing the check audits). `packages` cannot carry a lone module, hence the
 # only-include/sources pair - which is exactly what `packages = ["src/bmk"]` desugars to.
-only-include = ["src/bmk", "src/bmk_selfcheck.py"]
+only-include = ["src/bmk", "src/bmk_selfcheck.py", "src/bmk_toollock.py"]
 sources = ["src"]
 include = [
     "src/bmk/py.typed",
@@ -226,6 +226,14 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # venv runs uv and git (partial paths, on PATH) and prints user-facing provisioning output;
 # the untrack notice in particular must reach the user, since it stages index deletions
 "src/bmk/adapters/stagerunner/venv.py" = ["PLR0913", "T201", "S603", "S607"]
+# The tool-env guard: its stderr messages ARE the user-facing signal (an unexplained
+# multi-minute wait and a hang look identical to a person), and running the wrapped
+# upgrade argv is the whole job. Stdlib-only by design, so it cannot route through click.
+"src/bmk_toollock.py" = ["T201", "S603"]
+# The CLI entry point prints one line when bmk's own environment was replaced mid-run.
+# It must reach stderr even when the failure came from a spawned tool rather than an
+# exception, so it cannot go through the normal error-rendering path.
+"src/bmk/adapters/cli/main.py" = ["T201"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

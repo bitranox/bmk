@@ -6,6 +6,52 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.17.0] 2026-08-20 17:51:25
+
+### Fixed
+
+- **A new bmk release could rebuild the shared tool environment under a gate running in
+  another repo.** bmk installs itself once per machine, into uv's tool dir, and the generated
+  Makefile upgrades that environment before EVERY target. The moment a new version reached
+  PyPI, the first `make` that noticed rebuilt it in place while any other bmk - another repo's
+  gate, a subagent's `make test` beside the main agent's - was still running out of it. What
+  the victim reported was an ImportError inside bmk's OWN dependencies (`pip_api._hash`,
+  `pydantic.functional_serializers`) that cleared on a re-run, so it read as a flake rather
+  than as its interpreter's site-packages being deleted mid-gate. Every bmk process now holds
+  a SHARED lock on the tools root for its lifetime, and the Makefile takes the same lock
+  EXCLUSIVE around the upgrade. Readers never exclude each other, so two repos still gate
+  concurrently - a guard that serialised gates would be the machine-wide stall this removes.
+  The wait is bounded in both directions: an upgrade that cannot get the lock is SKIPPED,
+  because a deferred upgrade costs nothing and blocking would serialise every repo's `make`
+  behind the longest gate on the machine, while a REPAIR that cannot get it FAILS, because
+  skipping would continue on a damaged environment.
+
+### Added
+
+- **`bmk_toollock`, a second stdlib-only top-level module, and `BMK_TOOL_LOCK`.** The guard has
+  to run from the Makefile before bmk's Python starts, and it must keep working when the
+  environment it guards is the damaged thing being repaired - so it imports nothing, not even
+  bmk. That is not circular: a uv tool env's `bin/python` is a symlink to a base interpreter
+  OUTSIDE the tool dir, so the stdlib it runs on is not part of the tree uv replaces. POSIX uses
+  `fcntl.flock`; Windows uses `LockFileEx` through `ctypes`, because `msvcrt.locking` cannot
+  express a shared lock at all. `BMK_TOOL_LOCK=0` disables it.
+- **bmk now says when its own environment was replaced mid-run.** A lock only helps once both
+  sides take it, and two writers are permanently out of reach: a repo whose Makefile predates
+  this change, until its next `make` regenerates it, and a hand-run `uv tool install bmk`. When
+  a command fails and the tool env's receipt turns out to have changed since the run started,
+  bmk prints one line saying so. It is checked on any failure rather than only on an ImportError,
+  because a replaced environment usually kills a spawned pyright or pip-audit and surfaces as a
+  non-zero stage instead.
+
+### Changed
+
+- **bmk's own `Makefile` guards its editable rebuild too.** Its stamp makes that rebuild rare,
+  not safe; when it does fire it still tears the environment down, and its own comment names the
+  case - a subagent and the main agent both running `make` in this repo. The lock resolves to
+  `.venv-bmk/.bmk-tool.lock` there and to uv's shared tools root for the template, with no branch
+  in the code: `uv-receipt.toml` is what marks a tool environment, and its parent is where the
+  lock goes.
+
 ## [3.16.0] 2026-08-20 17:05:36
 
 ### Fixed

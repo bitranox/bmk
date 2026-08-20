@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import lib_cli_exit_tools
 import lib_log_rich.runtime
 
+import bmk_toollock
 from bmk import __init__conf__
 
 from .constants import TRACEBACK_SUMMARY_LIMIT, TRACEBACK_VERBOSE_LIMIT
@@ -79,6 +80,25 @@ def _run_cli(argv: Sequence[str] | None, *, services_factory: Callable[[], AppSe
         restore_signals()
 
 
+def _warn_if_environment_was_replaced(installation: tuple[int, int, int] | None) -> None:
+    """Say so when bmk's own environment was rebuilt mid-run, rather than leaving a riddle.
+
+    Checked on FAILURE only, and on any failure rather than only on an ImportError: a
+    replaced environment usually kills a spawned tool (pyright, pip-audit) and so surfaces
+    as a non-zero stage, not as an exception inside bmk. The lock cannot prevent every such
+    rebuild - an old Makefile or a hand-run ``uv tool install`` is an unguarded writer - so
+    this covers what the lock structurally cannot.
+    """
+    if not bmk_toollock.env_changed(installation):
+        return
+    print(
+        "[bmk] NOTE: bmk's own environment was replaced while this command was running "
+        "(another repo's make, or a manual `uv tool install`, upgraded the shared bmk "
+        "install). This failure is probably not your project's - re-run to confirm.",
+        file=sys.stderr,
+    )
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -111,9 +131,20 @@ def main(
     if services_factory is None:
         raise ValueError("services_factory is required. Pass build_production from composition layer.")
 
+    # Hold a SHARED lock on bmk's own machine-wide tool env for this whole run, so the
+    # Makefile's upgrade in another repo waits instead of deleting site-packages out from
+    # under us. Best-effort: refusing to run bmk because a lock is busy would be worse than
+    # the race. Taken here rather than in `_run_cli` so it covers the console script and
+    # `python -m bmk` alike, and before the CLI imports anything it will need later.
+    bmk_toollock.hold_shared()
+    installation = bmk_toollock.env_fingerprint()
+
     previous_state = snapshot_traceback_state()
     try:
-        return _run_cli(argv, services_factory=services_factory)
+        result = _run_cli(argv, services_factory=services_factory)
+        if result != 0:
+            _warn_if_environment_was_replaced(installation)
+        return result
     finally:
         if restore_traceback:
             restore_traceback_state(previous_state)

@@ -550,3 +550,129 @@ def test_windows_executable_suffix_is_handled() -> None:
 
     assert "ifeq ($(OS),Windows_NT)" in text
     assert "BMK_EXE := .exe" in text
+
+
+@pytest.mark.os_agnostic
+def test_every_top_level_module_the_makefile_runs_is_in_the_wheel() -> None:
+    """`_ensure_bmk` runs two top-level modules; both must actually ship.
+
+    `packages = ["src/bmk"]` does NOT carry a lone module, so each one needs its own
+    `only-include` entry. If one is missing, the deployed Makefile runs
+    `python -m <module>` against a module that is not installed, both guarded attempts
+    fail, and EVERY make in EVERY repo falls through to a full `--reinstall` of the shared
+    environment - forever, and self-perpetuating, since the reinstall cannot add a file the
+    wheel does not contain. That is the fleet-wide brick ADR 0002 exists to prevent.
+    """
+    config = rtoml.loads(PROJECT_DIR.joinpath("pyproject.toml").read_text(encoding="utf-8"))
+    only_include = config["tool"]["hatch"]["build"]["targets"]["wheel"]["only-include"]
+
+    for module in ("src/bmk_selfcheck.py", "src/bmk_toollock.py"):
+        assert module in only_include, f"{module} is run by the Makefile but is not in the wheel"
+
+
+@pytest.mark.os_agnostic
+def test_the_upgrade_waits_for_bmk_processes_running_out_of_the_shared_env() -> None:
+    """The mutation must be serialised against every bmk running out of that env.
+
+    The environment is shared by every repo on the machine. Unguarded, a `make` here
+    deleted the site-packages out from under a bmk minutes into a test suite in an
+    unrelated repo, surfacing as an ImportError in bmk's OWN dependencies that cleared on
+    a re-run and so read as a flake.
+    """
+    text = _template_text()
+    recipe = _install_recipe(text)
+    upgrade_line = next(line for line in recipe.splitlines() if "uv tool upgrade" in line)
+
+    assert "$(BMK_LOCK)" in upgrade_line, "the upgrade is unguarded"
+    guard = next(line for line in text.splitlines() if line.startswith("BMK_LOCK :="))
+    assert "-m bmk_toollock" in guard, "the guard variable does not run the lock module"
+    assert "--exclusive" in guard, "the guard must exclude the shared readers, not join them"
+
+
+@pytest.mark.os_agnostic
+def test_the_guard_runs_on_the_tool_envs_own_interpreter() -> None:
+    """It must be `$(BMK_PY)`, not `$(BMK)`.
+
+    `$(BMK)` is the bmk entry point, which imports the package whose environment is being
+    guarded. `$(BMK_PY)` is the env's interpreter, and it is a SYMLINK to a base
+    interpreter outside the tool dir, so the stdlib the guard runs on is not part of the
+    tree uv replaces.
+    """
+    text = _template_text()
+    guard_lines = [line for line in text.splitlines() if "bmk_toollock" in line and ":=" in line]
+
+    assert guard_lines, "no guard variable defined"
+    for line in guard_lines:
+        assert "$(BMK_PY)" in line, f"the guard must run on the env's own interpreter: {line}"
+        assert "$(BMK)" not in line.replace("$(BMK_PY)", ""), f"must not go through the bmk CLI: {line}"
+
+
+@pytest.mark.os_agnostic
+def test_the_upgrade_wait_is_bounded_and_skippable() -> None:
+    """An unbounded wait would serialise every repo's make behind the longest gate.
+
+    A SKIPPED upgrade costs nothing - the next make picks it up - so the upgrade skips
+    rather than blocking or failing.
+    """
+    text = _template_text()
+    upgrade_guard = next(line for line in text.splitlines() if "BMK_LOCK :=" in line)
+
+    assert "--timeout" in upgrade_guard, "an unbounded wait can stall every repo on the machine"
+    assert "--on-timeout skip" in upgrade_guard, "a deferred upgrade is free; blocking is not"
+
+
+@pytest.mark.os_agnostic
+def test_the_repair_may_not_silently_skip() -> None:
+    """Skipping a REPAIR would proceed on a damaged environment.
+
+    It fails instead, and the recipe falls through to the unguarded last resort.
+    """
+    text = _template_text()
+    repair_guard = next(line for line in text.splitlines() if "BMK_LOCK_REPAIR :=" in line)
+
+    assert "--on-timeout fail" in repair_guard, "a skipped repair leaves the env damaged"
+
+
+@pytest.mark.os_agnostic
+def test_the_last_repair_attempt_is_deliberately_unguarded() -> None:
+    """Pins a LIMITATION so nobody "completes" it later and bricks `make` fleet-wide.
+
+    The guard lives inside the environment being repaired. On the path where that
+    environment is absent or broken, the guard may be broken too - an unguarded last resort
+    is what stops a defective guard from making `make` unrunnable everywhere.
+    """
+    recipe = _install_recipe(_template_text())
+    attempts = [line for line in recipe.splitlines() if "uv tool install" in line]
+
+    assert len(attempts) == 2, f"expected exactly two install attempts, got {len(attempts)}"
+    assert "$(BMK_LOCK" not in attempts[-1], "the last resort must stay unguarded"
+    assert "$(BMK_LOCK_REPAIR)" in attempts[0], "the first repair attempt must be guarded"
+
+
+@pytest.mark.os_agnostic
+def test_a_machine_with_no_tool_env_yet_runs_the_install_bare() -> None:
+    """On a first-ever make there is no interpreter to run the guard with.
+
+    `$(wildcard ...)` expands to nothing there, so both wrappers vanish and the install
+    runs bare rather than failing on a missing module.
+    """
+    text = _template_text()
+    guard_lines = [line for line in text.splitlines() if "bmk_toollock" in line and ":=" in line]
+
+    assert guard_lines, "no guard variable defined, so this test would assert nothing"
+    for line in guard_lines:
+        assert "$(wildcard $(BMK_PY))" in line, f"guard must vanish when there is no tool env: {line}"
+
+
+@pytest.mark.os_agnostic
+def test_the_root_makefile_guards_its_rebuild_too() -> None:
+    """bmk's own Makefile is hand-authored and nothing copies fixes into it.
+
+    Its stamp makes the rebuild rare, not safe: when it does fire, it tears the env down,
+    and its own comment names the case - a subagent and the main agent both running make in
+    this repo. So it takes the same exclusive lock, and must not drift back.
+    """
+    recipe = _install_recipe(_root_makefile_text())
+
+    assert "$(BMK_LOCK_REPAIR)" in recipe, "bmk's own rebuild is unguarded"
+    assert "--on-timeout fail" in _root_makefile_text(), "a repair may not silently skip"

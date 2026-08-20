@@ -15,22 +15,28 @@ or PowerShell stage scripts.
 
 These are the variables you can set. Anything not listed here is not consulted as input.
 
-| Variable                 | Default                   | Effect                                                                                                                        |
-|--------------------------|---------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `BMK_OUTPUT_FORMAT`      | `json`                    | `json` or `text`. JSON suppresses tool output on success. `--human` forces text.                                              |
-| `UV_PROJECT_ENVIRONMENT` | `.venv`                   | Project venv path, absolute or relative to the project.                                                                       |
-| `BMK_NO_VENV_SYNC`       | unset                     | `1` skips creating/syncing the project venv; use the environment as-is.                                                       |
-| `BMK_VENV_LOCK_TIMEOUT`  | `600`                     | Seconds to wait for another bmk that is provisioning the same venv. On timeout bmk changes nothing and says so on stderr.     |
-| `BMK_VENV_LOCK_DIR`      | `~/.cache/bmk/venv-locks` | Where the venv lock files live. Deliberately outside every repository; override it in tests so they never touch the real one. |
-| `BMK_COMMIT_MESSAGE`     | unset                     | Commit message for `commit` / `push`. `MSG="..."` sets this for you.                                                          |
-| `BMK_GIT_REMOTE`         | `origin`                  | Remote that `push` targets.                                                                                                   |
-| `BMK_GIT_BRANCH`         | current                   | Branch that `push` targets.                                                                                                   |
-| `CODECOV_TOKEN`          | unset                     | Token for Codecov upload; also read from `.env`.                                                                              |
-| `DEVELOPMENT_MODE`       | unset                     | `1` re-raises unexpected exceptions in email commands with full tracebacks.                                                   |
+| Variable                 | Default                   | Effect                                                                                                                                                                 |
+|--------------------------|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `BMK_OUTPUT_FORMAT`      | `json`                    | `json` or `text`. JSON suppresses tool output on success. `--human` forces text.                                                                                       |
+| `UV_PROJECT_ENVIRONMENT` | `.venv`                   | Project venv path, absolute or relative to the project.                                                                                                                |
+| `BMK_NO_VENV_SYNC`       | unset                     | `1` skips creating/syncing the project venv; use the environment as-is.                                                                                                |
+| `BMK_VENV_LOCK_TIMEOUT`  | `600`                     | Seconds to wait for another bmk that is provisioning the same venv. On timeout bmk changes nothing and says so on stderr.                                              |
+| `BMK_VENV_LOCK_DIR`      | `~/.cache/bmk/venv-locks` | Where the venv lock files live. Deliberately outside every repository; override it in tests so they never touch the real one.                                          |
+| `BMK_TOOL_LOCK`          | unset                     | `0` disables the lock guarding bmk's own shared tool environment. The guard is what stops another repo's `make` from rebuilding that environment under a running gate. |
+| `BMK_COMMIT_MESSAGE`     | unset                     | Commit message for `commit` / `push`. `MSG="..."` sets this for you.                                                                                                   |
+| `BMK_GIT_REMOTE`         | `origin`                  | Remote that `push` targets.                                                                                                                                            |
+| `BMK_GIT_BRANCH`         | current                   | Branch that `push` targets.                                                                                                                                            |
+| `CODECOV_TOKEN`          | unset                     | Token for Codecov upload; also read from `.env`.                                                                                                                       |
+| `DEVELOPMENT_MODE`       | unset                     | `1` re-raises unexpected exceptions in email commands with full tracebacks.                                                                                            |
 
 Configuration settings additionally accept `BMK___<SECTION>__<KEY>` environment overrides and
 `.env` entries - see [docs/pyproject-reference.md](docs/pyproject-reference.md) and
 `src/bmk/adapters/config/`.
+
+`BMK_TOOL_LOCK_HELD` is also **set by** bmk - to its own pid, once it holds the shared
+tool-environment lock - and inherited by every child, so a nested `make` skips the upgrade
+instead of rebuilding the environment its parent is running out of. `BMK_TOOL_LOCK_PATH`
+exists only so the test suite can point the guard at a throwaway lock file.
 
 `BMK_PROJECT_DIR`, `BMK_PYTHON_CMD` and `BMK_COMMAND_PREFIX` are **set by** bmk into each stage's
 child environment (`build_context()` in `stagerunner/context.py`), not read from yours - do not set them.

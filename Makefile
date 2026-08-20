@@ -116,11 +116,26 @@ BMK_PY := $(BMK_TOOL_DIR)/bmk/$(BMK_ENV_BIN)/python$(BMK_EXE)
 BMK_STAMP := $(BMK_TOOL_DIR)/.bmk-editable-install
 BMK_INTACT := test -x "$(BMK_PY)" && "$(BMK_PY)" -m bmk_selfcheck
 
+# The stamp makes the rebuild RARE; it does not make it SAFE. When it does fire - a changed
+# pyproject.toml, a damaged env - it still tears the env down, and the scenario named above
+# (a subagent and the main agent both running make in this repo) is exactly two processes
+# reaching that point together. So the rebuild takes the same exclusive lock the template
+# uses, and every bmk running out of this env holds it shared for its lifetime.
+#
+# `tool_env_root()` resolves this to .venv-bmk on its own: uv writes a uv-receipt.toml into
+# .venv-bmk/bmk, so the lock lands at .venv-bmk/.bmk-tool.lock and is per-project here,
+# machine-wide for the template, with no branch in the code to say so.
+#
+# `--on-timeout fail` because this path is a REPAIR: skipping it would continue on a stale
+# or damaged env. It drops through to the deliberately unguarded second attempt, for the
+# same reason the template's does. $(wildcard) makes both vanish on a fresh clone.
+BMK_LOCK_REPAIR := $(if $(wildcard $(BMK_PY)),"$(BMK_PY)" -m bmk_toollock --exclusive --timeout 60 --on-timeout fail --,)
+
 .PHONY: _ensure_bmk
 _ensure_bmk:
 	@if $(BMK_INTACT) && [ -f "$(BMK_STAMP)" ] && [ ! pyproject.toml -nt "$(BMK_STAMP)" ]; then exit 0; fi; \
 	  { UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
-	      uv tool install --reinstall --force --editable ./ \
+	      $(BMK_LOCK_REPAIR) uv tool install --reinstall --force --editable ./ \
 	    || UV_TOOL_DIR="$(BMK_TOOL_DIR)" UV_TOOL_BIN_DIR="$(BMK_TOOL_DIR)/bin" \
 	      uv tool install --reinstall --force --editable ./; } \
 	  && touch "$(BMK_STAMP)"
