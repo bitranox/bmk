@@ -58,12 +58,11 @@ dependencies = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",           # a pytest PLUGIN, activated by CI's --cov flags
     "hypothesis>=6.167.1",         # property tests in bmk's own suite
-    # Floor stays at 1.5.0, NOT 1.5.1: PyPI yanked 1.5.1 (upstream shipped unintended breaking
-    # changes and will re-release them as a new major). A yanked release is invisible to a range
-    # resolve, and nothing newer exists, so a >=1.5.1 floor has ZERO candidates and makes bmk
-    # itself uninstallable - which bricked `make` fleet-wide once already. This is a toolchain
-    # floor, not a CVE floor, so 1.5.0 gives up nothing. Do not raise it in a dependency sweep;
-    # only a real 1.5.2+ release should move it.
+    # NEVER floor this at exactly 1.5.1: PyPI yanked that release (upstream shipped unintended
+    # breaking changes), and a yanked release is invisible to a range resolve, so a >=1.5.1 floor
+    # has ZERO candidates and makes bmk itself uninstallable - which bricked `make` fleet-wide
+    # once already. 1.6.0 is a real unyanked release, so this floor resolves. The rule is about
+    # the yanked version, not about staying low: check a candidate is unyanked before moving it.
     "build>=1.6.0",
 
     # --- neither imported nor invoked, and here on purpose -----------------------------
