@@ -6,6 +6,21 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.17.1] 2026-09-02 12:12:33
+
+## [3.17.1]
+
+### Added
+
+- **`devops-bmk`: how to prove a gate actually enforces.** Two readings of a green `make test` that
+  are wrong, both verified against the installed source. `ruff_fix_apply` is stage order 30 while
+  `bandit`, `lint_imports`, `pip_audit`, `pyright`, `pytest` and `ruff_lint` are all 40, so a probe
+  planted to prove a checker fires can be deleted before that checker ever sees it. And an
+  undeclared tool does NOT mean its stage was skipped: `context._prepend_tool_bin_to_path` puts
+  bmk's own venv bin dir first on the child PATH so bare-name stages resolve to bmk's pinned
+  toolchain, and `lint_imports_argv` returns a bare argv, so a missing tool fails loudly rather
+  than silently skipping. Mirrors the same section in the bitranox-skills copy of this skill.
+
 ## [3.17.0] 2026-08-20 17:51:25
 
 ### Fixed

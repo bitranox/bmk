@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.17.0"
+version = "3.17.1"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,20 +12,20 @@ requires-python = ">=3.10"
 dependencies = [
     # --- imported by bmk's own code ---------------------------------------------------
     "rich-click>=1.9.8",           # the CLI surface
-    "click>=8.4.2",                # imported directly in cli/main.py for cli.main(obj=...);
+    "click>=8.5.0",                # imported directly in cli/main.py for cli.main(obj=...);
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.3.4",
     "lib_log_rich>=6.3.7",
     "lib_layered_config>=5.6.2",
     "btx_lib_mail>=1.5.2",         # send-email / send-notification (SecretStr password + Transport seam)
-    "pydantic>=2.13.4",            # the pipeline-overlay and email schemas
+    "pydantic>=2.13.5",            # the pipeline-overlay and email schemas
     "orjson>=3.12.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
     "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
     "httpx2>=2.12.0",               # PyPI version lookups
     "python-dotenv>=1.2.3",        # reads CODECOV_TOKEN from .env
-    "filelock>=3.32.3",              # the cross-process lock serialising venv provisioning
+    "filelock>=3.32.5",              # the cross-process lock serialising venv provisioning
                                    # (adapters/stagerunner/venv.py). It already arrived here
                                    # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
                                    # far too fragile a provenance for something bmk imports: drop
@@ -47,24 +47,24 @@ dependencies = [
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.16.3",
+    "ruff>=0.16.5",
     "pyright[nodejs]>=1.1.411",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
-    "import-linter>=2.13",
+    "import-linter>=2.14",
     "shellcheck-py>=0.11.0.1",
-    "shfmt-py>=4.0.0",
+    "shfmt-py>=4.1.0",
     "bashate>=2.1.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",           # a pytest PLUGIN, activated by CI's --cov flags
-    "hypothesis>=6.165.10",         # property tests in bmk's own suite
+    "hypothesis>=6.167.1",         # property tests in bmk's own suite
     # Floor stays at 1.5.0, NOT 1.5.1: PyPI yanked 1.5.1 (upstream shipped unintended breaking
     # changes and will re-release them as a new major). A yanked release is invisible to a range
     # resolve, and nothing newer exists, so a >=1.5.1 floor has ZERO candidates and makes bmk
     # itself uninstallable - which bricked `make` fleet-wide once already. This is a toolchain
     # floor, not a CVE floor, so 1.5.0 gives up nothing. Do not raise it in a dependency sweep;
     # only a real 1.5.2+ release should move it.
-    "build>=1.5.0",
+    "build>=1.6.0",
 
     # --- neither imported nor invoked, and here on purpose -----------------------------
     # `python -m build` resolves the backend from [build-system].requires into its own
