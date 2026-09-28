@@ -23,8 +23,9 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
     ensure_project_venv,
@@ -34,12 +35,17 @@ from bmk.adapters.stagerunner.venv import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
-__all__ = ["CellResult", "CellStatus", "main"]
+__all__ = ["CellResult", "CellStatus", "main", "resolve_workers"]
 
 _MAX_DETAIL_LINES = 40  # how much of a failing tool's output to surface per cell
+
+#: Overrides `[tool.scripts.test-all].workers` for one run; empty/unset means "read
+#: pyproject.toml instead". Named after the setting it overrides, like `BMK_GIT_REMOTE`
+#: overrides `[tool.git].default-remote` - see `git_ops.py`.
+_WORKERS_ENV = "BMK_TEST_ALL_WORKERS"
 
 
 class CellStatus(str, Enum):
@@ -170,7 +176,99 @@ def _exit_code(results: list[CellResult]) -> int:
     return 0 if all(r.status is CellStatus.PASSED for r in results) else 1
 
 
-def main(*, project_dir: Path, quiet: bool = True, run_cell: Callable[..., CellResult] = _run_cell) -> int:
+def _workers_from_pyproject(project_dir: Path) -> object:
+    """Raw ``[tool.scripts.test-all].workers`` value, or ``None`` if unset/unreadable.
+
+    Read straight out of ``PyprojectConfig.raw_data`` (like ``_release.py``'s
+    ``[tool.git].default-remote``) rather than adding a dedicated pydantic field for a
+    single key - the same "one field, no new model" call the note in
+    ``_toml_config.py`` asks for. Never raises: a missing file, malformed TOML, or a
+    wrong-shaped table all degrade to ``None``, same as every other ``[tool.*]`` reader
+    here - a bad pyproject.toml must not abort the build that is trying to read it. The
+    return type is deliberately ``object``: the caller decides what to do with a
+    wrong-shaped value (fall back) versus an explicit ``< 1`` (a real instruction, and an
+    error).
+    """
+    manifest = project_dir / "pyproject.toml"
+    if not manifest.is_file():
+        return None
+    try:
+        config = load_pyproject_config(manifest)
+    except Exception:  # an unreadable manifest degrades, never aborts - see all_python_minors
+        return None
+    tool = config.raw_data.get("tool")
+    if not isinstance(tool, dict):
+        return None
+    scripts = cast("dict[str, Any]", tool).get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    test_all = cast("dict[str, Any]", scripts).get("test-all")
+    if not isinstance(test_all, dict):
+        return None
+    return cast("dict[str, Any]", test_all).get("workers")
+
+
+def _reject_below_one(value: int, *, source: str) -> None:
+    """A configured worker count below 1 is a deliberate but nonsensical instruction -
+    unlike an absent or wrong-shaped value, this does not degrade to the default.
+    """
+    if value < 1:
+        print(
+            f"[test-all] {source} must be >= 1 (1 means serial), got: {value}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
+def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, str] | None = None) -> int:
+    """The number of version cells to run at once.
+
+    Precedence: ``BMK_TEST_ALL_WORKERS`` env var, then
+    ``[tool.scripts.test-all].workers`` in the project's own pyproject.toml, then the
+    default (parallel: one worker per declared version, capped at the CPU count) -
+    unchanged current behaviour for every project that sets neither.
+
+    A configured value is capped at ``len(minors)`` (no point asking for more threads
+    than there are cells) but never raised - a project that explicitly asks for
+    ``workers = 1`` gets exactly the serial behaviour it declared. An explicit value
+    below 1 is refused with ``SystemExit(2)`` naming which setting was wrong; a
+    wrong-shaped or unparsable value falls back to the default instead, matching how
+    every other pyproject-authored setting in this project degrades (see
+    ``_toml_config.py``) - only a value the project MEANT to set to something invalid is
+    an error. Called only with a non-empty ``minors`` (``main`` takes the no-classifiers
+    fallback before this is reached), so capping against ``len(minors)`` never collapses
+    to zero.
+    """
+    resolved_env: Mapping[str, str] = env if env is not None else os.environ
+    default = min(len(minors), os.cpu_count() or 4)
+
+    raw_env = resolved_env.get(_WORKERS_ENV, "").strip()
+    if raw_env:
+        try:
+            configured = int(raw_env)
+        except ValueError:
+            print(
+                f"[test-all] {_WORKERS_ENV} must be an integer, got: {raw_env!r}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2) from None
+        _reject_below_one(configured, source=_WORKERS_ENV)
+        return min(configured, len(minors))
+
+    raw_pyproject = _workers_from_pyproject(project_dir)
+    if isinstance(raw_pyproject, bool) or not isinstance(raw_pyproject, int):
+        return default
+    _reject_below_one(raw_pyproject, source="[tool.scripts.test-all].workers")
+    return min(raw_pyproject, len(minors))
+
+
+def main(
+    *,
+    project_dir: Path,
+    quiet: bool = True,
+    run_cell: Callable[..., CellResult] = _run_cell,
+    env: Mapping[str, str] | None = None,
+) -> int:
     """Run the version matrix; exit non-zero if any cell is not PASS.
 
     Falls back to a single default cell (with a warning) when no versions are declared.
@@ -178,7 +276,8 @@ def main(*, project_dir: Path, quiet: bool = True, run_cell: Callable[..., CellR
     ``run_cell`` is the per-version unit of work, injected so the orchestration (fan-out,
     aggregation, exit code) can be tested with a real fake at this seam rather than by
     patching internals; production always uses the default. The real cell is proven by the
-    ``local_only`` end-to-end tests.
+    ``local_only`` end-to-end tests. ``env`` is injected the same way for
+    ``resolve_workers``; production always reads ``os.environ``.
     """
     minors = all_python_minors(project_dir)
     if not minors:
@@ -187,7 +286,7 @@ def main(*, project_dir: Path, quiet: bool = True, run_cell: Callable[..., CellR
     def run(minor: str) -> CellResult:
         return run_cell(project_dir, minor, quiet=quiet)
 
-    workers = min(len(minors), os.cpu_count() or 4)
+    workers = resolve_workers(project_dir, minors, env=env)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(run, minors))
 

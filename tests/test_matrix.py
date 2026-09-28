@@ -15,17 +15,21 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 
 from bmk.adapters.stagerunner.helpers._matrix import (
     _MAX_DETAIL_LINES,
+    _WORKERS_ENV,
     CellResult,
     CellStatus,
     _cell_env,
     _tail,
     main,
+    resolve_workers,
 )
 from bmk.adapters.stagerunner.venv import venv_python
 
@@ -47,6 +51,32 @@ def _write_pyproject(project: Path, minors: list[str]) -> None:
         f"{_classifiers(minors)}"
         "[project.optional-dependencies]\n"
         'dev = ["pytest"]\n'
+        "[tool.pyright]\n"
+        'typeCheckingMode = "basic"\n'
+        'include = ["tests"]\n'
+        "[build-system]\n"
+        'requires = ["hatchling"]\n'
+        'build-backend = "hatchling.build"\n',
+        encoding="utf-8",
+    )
+
+
+def _write_pyproject_with_workers(project: Path, minors: list[str], workers: object) -> None:
+    """Same as ``_write_pyproject`` plus ``[tool.scripts.test-all].workers``.
+
+    ``workers`` is written verbatim via ``repr`` (so a bare string can be planted too,
+    proving a non-integer value is rejected rather than silently coerced).
+    """
+    (project / "pyproject.toml").write_text(
+        "[project]\n"
+        'name = "demo"\n'
+        'version = "0.1.0"\n'
+        'requires-python = ">=3.10"\n'
+        f"{_classifiers(minors)}"
+        "[project.optional-dependencies]\n"
+        'dev = ["pytest"]\n'
+        "[tool.scripts.test-all]\n"
+        f"workers = {workers!r}\n"
         "[tool.pyright]\n"
         'typeCheckingMode = "basic"\n'
         'include = ["tests"]\n'
@@ -225,3 +255,136 @@ def test_failure_detail_hoists_verdicts_above_trailing_log_noise() -> None:
     detail = _tail(f"FAILED tests/test_thing.py::test_the_real_cause\n{noise}")
 
     assert "FAILED tests/test_thing.py::test_the_real_cause" in detail
+
+
+# ---------------------------------------------------------------------------
+# resolve_workers: the project-level cap on parallel version cells
+#
+# A project whose suite binds fixed ports or shares one test database cannot pass
+# test-all in parallel - the cells break each other. `[tool.scripts.test-all].workers`
+# (and the BMK_TEST_ALL_WORKERS env override) let such a project declare `workers = 1`
+# once, without changing the default (still parallel) for everyone else.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_workers_defaults_to_parallel_when_nothing_configured(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.12", "3.14"])
+
+    workers = resolve_workers(tmp_path, ["3.10", "3.12", "3.14"], env={})
+
+    assert workers == min(3, os.cpu_count() or 4)
+
+
+def test_resolve_workers_reads_the_pyproject_setting(tmp_path: Path) -> None:
+    _write_pyproject_with_workers(tmp_path, ["3.10", "3.12", "3.14"], 1)
+
+    assert resolve_workers(tmp_path, ["3.10", "3.12", "3.14"], env={}) == 1
+
+
+def test_resolve_workers_env_override_beats_pyproject(tmp_path: Path) -> None:
+    _write_pyproject_with_workers(tmp_path, ["3.10", "3.12", "3.14"], 1)
+
+    workers = resolve_workers(tmp_path, ["3.10", "3.12", "3.14"], env={_WORKERS_ENV: "2"})
+
+    assert workers == 2
+
+
+def test_resolve_workers_is_capped_at_the_number_of_cells(tmp_path: Path) -> None:
+    """A generous `workers = 10` on a two-version project asks for no more than 2 threads."""
+    _write_pyproject_with_workers(tmp_path, ["3.10", "3.12"], 10)
+
+    assert resolve_workers(tmp_path, ["3.10", "3.12"], env={}) == 2
+
+
+@pytest.mark.parametrize("bad_value", [0, -1])
+def test_resolve_workers_rejects_less_than_one_from_pyproject(tmp_path: Path, bad_value: int) -> None:
+    _write_pyproject_with_workers(tmp_path, ["3.10", "3.12"], bad_value)
+
+    with pytest.raises(SystemExit) as excinfo:
+        resolve_workers(tmp_path, ["3.10", "3.12"], env={})
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize("bad_value", ["0", "-1"])
+def test_resolve_workers_rejects_less_than_one_from_env(tmp_path: Path, bad_value: str) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.12"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        resolve_workers(tmp_path, ["3.10", "3.12"], env={_WORKERS_ENV: bad_value})
+    assert excinfo.value.code == 2
+
+
+def test_resolve_workers_rejects_a_non_integer_env_value(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.12"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        resolve_workers(tmp_path, ["3.10", "3.12"], env={_WORKERS_ENV: "not-a-number"})
+    assert excinfo.value.code == 2
+
+
+def test_resolve_workers_ignores_a_non_integer_pyproject_value(tmp_path: Path) -> None:
+    """A malformed pyproject value degrades to the default rather than aborting the build -
+    the same leniency every other `[tool.*]` reader in this project gives a wrong-shaped
+    value (see `_toml_config.py`); only an explicit `< 1` is a deliberate instruction and
+    raises.
+    """
+    _write_pyproject_with_workers(tmp_path, ["3.10", "3.12"], "not-a-number")
+
+    workers = resolve_workers(tmp_path, ["3.10", "3.12"], env={})
+
+    assert workers == min(2, os.cpu_count() or 4)
+
+
+# ---------------------------------------------------------------------------
+# Concurrency proof: workers=1 never overlaps two cells; the default still does.
+#
+# A fake cell records its own entry/exit around a fixed, BOUNDED sleep (never an
+# unbounded wait or spin) so the peak number of cells alive at once can be read back
+# after the run - proof of serialisation rather than a timing guess.
+# ---------------------------------------------------------------------------
+
+
+class _ConcurrencyProbeCells:
+    """Records how many cells were alive at once; each cell holds the slot for a fixed,
+    bounded interval so two overlapping cells are actually observed rather than merely
+    possible.
+    """
+
+    def __init__(self, hold_seconds: float = 0.15) -> None:
+        self._hold_seconds = hold_seconds
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_concurrent = 0
+
+    def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True) -> CellResult:
+        _ = quiet
+        with self._lock:
+            self._active += 1
+            self.max_concurrent = max(self.max_concurrent, self._active)
+        time.sleep(self._hold_seconds)  # bounded hold, never an unbounded wait
+        with self._lock:
+            self._active -= 1
+        return CellResult(minor, f"{minor}.0", CellStatus.PASSED)
+
+
+@pytest.mark.os_agnostic
+def test_workers_one_never_lets_two_cells_overlap(tmp_path: Path) -> None:
+    _write_pyproject_with_workers(tmp_path, ["3.10", "3.11", "3.12"], 1)
+    cells = _ConcurrencyProbeCells()
+
+    rc = main(project_dir=tmp_path, run_cell=cells, env={})
+
+    assert rc == 0
+    assert cells.max_concurrent == 1
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.skipif((os.cpu_count() or 1) < 2, reason="needs more than one CPU to show real overlap")
+def test_default_workers_still_run_cells_concurrently(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.11", "3.12"])
+    cells = _ConcurrencyProbeCells()
+
+    rc = main(project_dir=tmp_path, run_cell=cells, env={})
+
+    assert rc == 0
+    assert cells.max_concurrent > 1, "the default must stay parallel"

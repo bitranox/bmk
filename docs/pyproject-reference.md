@@ -144,11 +144,39 @@ narrows what bandit scans and what coverage measures, and still reports success.
 | `[tool.psscriptanalyzer].exclude-rules`    | list   | 3 built-ins       | Excluded PSScriptAnalyzer rules for `.ps1`                                                                                |
 | `[tool.clean].patterns`                    | list   | 19 built-in globs | What `bmk clean` removes                                                                                                  |
 | `[tool.git].default-remote`                | string | `"origin"`        | Remote that `release` pushes to                                                                                           |
+| `[tool.scripts.test-all].workers`          | int    | parallel          | Caps how many `test-all` version cells run at once. See "test-all: capping the matrix" below                              |
 
 `ignore-vulns` and `skips` are **different vocabularies and neither tool reads the other's
 table**. `[tool.pip-audit].ignore-vulns` takes PYSEC / GHSA / CVE ids. `[tool.bandit].skips`
 takes bandit check ids (`B101`, `B603`). A CVE id in `[tool.bandit].skips` is silently
 inert: it looks like protection and does nothing.
+
+### test-all: capping the matrix
+
+`bmk test-all` runs the test suite and type-check in EVERY declared `.venv-<minor>` at
+once (one worker per version, capped at the CPU count). That is fine for most projects, but
+a suite that binds fixed `127.0.0.1` ports or shares one test database cannot pass this way:
+the cells run each other's tests concurrently against the same port or database and break
+each other, even though every cell passes when run alone.
+
+Such a project sets `workers = 1` once, in its own `pyproject.toml`:
+
+```toml
+[tool.scripts.test-all]
+workers = 1
+```
+
+- **Default**: unset. Current behaviour - one worker per declared version, capped at the
+  CPU count.
+- **Env override**: `BMK_TEST_ALL_WORKERS` (e.g. `BMK_TEST_ALL_WORKERS=1 bmk test-all`),
+  for a one-off run without touching `pyproject.toml`. It beats the pyproject setting when
+  both are present.
+- A configured value is capped at the number of declared versions (asking for more workers
+  than there are cells buys nothing) but never raised on its own.
+- A value below 1 is refused with a clear error and a non-zero exit; a value that is not an
+  integer at all is silently ignored in `pyproject.toml` (same leniency every other
+  `[tool.*]` key here has for a malformed value) but is an error from the environment
+  variable, since that one has no "unset" reading to fall back to.
 
 ## The one key bmk writes back
 

@@ -6,6 +6,20 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.18.0] 2026-09-28 22:58:34
+
+### Added
+
+- **`test-all` can be capped to run its version cells one at a time.** Every declared Python
+  version's cell ran fully in parallel with no knob: fine for most projects, but one whose suite
+  binds fixed `127.0.0.1` ports or shares one test database sees its cells break each other -
+  measured in soundtouch-zonemaster as 45/50/1 failures plus around 150 errors per cell that were
+  all green run serially. `[tool.scripts.test-all].workers = 1` in the project's own
+  `pyproject.toml` (or `BMK_TEST_ALL_WORKERS=1` for a one-off run, which wins when both are set)
+  now declares that once. The default is unchanged - unset, `test-all` stays fully parallel. A
+  configured value above the number of declared versions is capped down to it; a value below 1 is
+  refused with a clear error and exit code 2, never a silent no-op.
+
 ## [3.17.1] 2026-09-02 12:12:33
 
 ## [3.17.1]
