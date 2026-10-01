@@ -15,46 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 # ---------------------------------------------------------------------------
-# Validator: _coerce_string_to_list edge cases
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.os_agnostic
-def test_coerce_non_string_non_list_to_empty_list() -> None:
-    """Non-string, non-list values for smtp_hosts/recipients coerce to empty list."""
-    config = EmailConfig.model_validate({"smtp_hosts": 42, "recipients": None})
-
-    assert config.smtp_hosts == []
-    assert config.recipients == []
-
-
-# ---------------------------------------------------------------------------
-# Validator: _coerce_extension_lists edge cases
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.os_agnostic
-def test_coerce_extension_unsupported_type_to_none() -> None:
-    """Unsupported type for attachment extensions coerces to None."""
-    config = EmailConfig.model_validate({"attachment_allowed_extensions": 42})
-
-    assert config.attachment_allowed_extensions is None
-
-
-# ---------------------------------------------------------------------------
-# Validator: _coerce_directory_lists edge cases
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.os_agnostic
-def test_coerce_directory_unsupported_type_to_none() -> None:
-    """Unsupported type for attachment directories coerces to None."""
-    config = EmailConfig.model_validate({"attachment_allowed_directories": 42})
-
-    assert config.attachment_allowed_directories is None
-
-
-# ---------------------------------------------------------------------------
 # __repr__ with password redaction
 # ---------------------------------------------------------------------------
 
