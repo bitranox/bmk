@@ -18,14 +18,14 @@ dependencies = [
     "lib_cli_exit_tools>=2.3.4",
     "lib_log_rich>=6.3.7",
     "lib_layered_config>=6.1.1",
-    "btx_lib_mail>=2.0.0",         # send-email / send-notification (SecretStr password + Transport seam)
+    "btx_lib_mail>=3.0.1",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.13.5",            # the pipeline-overlay and email schemas
     "orjson>=3.12.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.13.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
     "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
     "httpx2>=2.13.1",               # PyPI version lookups
     "python-dotenv>=1.2.4",        # reads CODECOV_TOKEN from .env
-    "filelock>=4.0.8",              # the cross-process lock serialising venv provisioning
+    "filelock>=4.0.9",              # the cross-process lock serialising venv provisioning
                                    # (adapters/stagerunner/venv.py). It already arrived here
                                    # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
                                    # far too fragile a provenance for something bmk imports: drop
@@ -47,7 +47,7 @@ dependencies = [
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.16.9",
+    "ruff>=0.16.10",
     "pyright[nodejs]>=1.1.414",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
