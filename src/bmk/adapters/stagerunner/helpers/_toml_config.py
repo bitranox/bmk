@@ -326,6 +326,9 @@ class ToolConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+_PY_CLASSIFIER = "Programming Language :: Python :: "
+
+
 class ProjectSection(BaseModel):
     """Configuration for the [project] section of pyproject.toml."""
 
@@ -344,6 +347,39 @@ class ProjectSection(BaseModel):
     # - it is a floor (`>=3.10`) with no upper bound, so it never names the newest supported
     # version. See `venv.desired_python_minor`.
     classifiers: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
+    # The floor, read where a dependency must still install on the OLDEST Python the project
+    # supports: the dependency updater must not raise a floor past it.
+    requires_python: Annotated[str, BeforeValidator(_coerce_str)] = Field(
+        default="", validation_alias="requires-python"
+    )
+
+    def python_minors(self) -> tuple[str, ...]:
+        """Every ``X.Y`` the Python classifiers declare, ascending numerically.
+
+        Only dotted entries count (a bare ``:: Python :: 3`` is skipped), and the order is
+        numeric, since as strings ``"3.9" > "3.14"``.
+
+        Example:
+            >>> ProjectSection(classifiers=(
+            ...     "Programming Language :: Python :: 3.14",
+            ...     "Programming Language :: Python :: 3",
+            ...     "Programming Language :: Python :: 3.9",
+            ... )).python_minors()
+            ('3.9', '3.14')
+        """
+        found: list[tuple[tuple[int, ...], str]] = []
+        for classifier in self.classifiers:
+            if not classifier.startswith(_PY_CLASSIFIER):
+                continue
+            version = classifier[len(_PY_CLASSIFIER) :].strip()
+            if "." not in version:
+                continue
+            try:
+                parts = tuple(int(p) for p in version.split("."))
+            except ValueError:
+                continue
+            found.append((parts, version))
+        return tuple(version for _, version in sorted(found))
 
 
 class BuildSystemSection(BaseModel):

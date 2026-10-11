@@ -25,19 +25,28 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from enum import Enum
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx2
 import orjson
+from packaging.markers import InvalidMarker, Marker
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import ToolOutputFormat
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 
@@ -76,11 +85,15 @@ _MAX_PYPI_BYTES = 32 * 1024 * 1024
 # Precompiled regex patterns for version parsing and dependency matching
 _RE_NAME_SEPARATOR = re.compile(r"[-_.]+")
 _RE_VERSION_SPEC = re.compile(r"^([a-zA-Z0-9_.-]+)\s*((?:[><=!~]+\s*[\d.a-zA-Z*]+\s*,?\s*)+)?$")
-_RE_MIN_VERSION = re.compile(r"[>=~]=?\s*([\d.]+(?:a\d+|b\d+|rc\d+)?)")
-_RE_UPPER_BOUND = re.compile(r"<(?!=)\s*([\d.]+(?:a\d+|b\d+|rc\d+)?)")
+# One PEP 440 version, its epoch and pre-, post- and dev-release parts included, so a
+# floor such as "7.0.post1" is read and rewritten whole rather than as "7.0." plus leftovers.
+_VERSION = r"(?:\d+!)?\d+(?:\.\d+)*(?:\.?(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?"
+# The lookbehind keeps the "=" of "<=" and "!=" from reading as a floor ("pkg<=7,>=6" has floor 6).
+_RE_MIN_VERSION = re.compile(rf"(?<![<!])[>=~]=?\s*({_VERSION})")
+_RE_UPPER_BOUND = re.compile(rf"<(?!=)\s*({_VERSION})")
 _RE_PRERELEASE = re.compile(r"(a|b|rc|dev|alpha|beta)", re.IGNORECASE)
 _RE_VERSION_NUMERIC = re.compile(r"^([\d.]+)")
-_RE_VERSION_CONSTRAINT = re.compile(r"([><=!~]+)\s*([\d.]+(?:a\d+|b\d+|rc\d+)?)")
+_RE_VERSION_CONSTRAINT = re.compile(rf"([><=!~]+)\s*({_VERSION})")
 _RE_HAS_CONSTRAINT = re.compile(r"[><=!~]")
 _RE_PACKAGE_NAME = re.compile(r"^([a-zA-Z0-9_.-]+)")
 
@@ -156,14 +169,45 @@ def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
     return name, constraint, min_version, upper_bound
 
 
+# One check reads each package's PyPI document once. The latest lookup, the upper-bound lookup and
+# the Python hold then answer from the same document, so a second request that times out cannot
+# leave a floor raised past the oldest Python the first one showed it must stay installable on.
+_PYPI_DOCUMENTS: ContextVar[dict[str, dict[str, Any] | None] | None] = ContextVar("_PYPI_DOCUMENTS", default=None)
+
+
+@contextmanager
+def _one_fetch_per_package() -> Generator[None]:
+    """Within the block, ``_fetch_pypi_data`` downloads each package at most once."""
+    token = _PYPI_DOCUMENTS.set({})
+    try:
+        yield
+    finally:
+        _PYPI_DOCUMENTS.reset(token)
+
+
 def _fetch_pypi_data(package_name: str) -> dict[str, Any] | None:
-    """Fetch package data from PyPI.
+    """Fetch package data from PyPI, once per package inside ``_one_fetch_per_package``.
+
+    A failed download is remembered as well, so the dependency reports one error rather than
+    a mix of answers from different requests.
+    """
+    normalized = _normalize_name(package_name)
+    documents = _PYPI_DOCUMENTS.get()
+    if documents is not None and normalized in documents:
+        return documents[normalized]
+    data = _download_pypi_data(normalized)
+    if documents is not None:
+        documents[normalized] = data
+    return data
+
+
+def _download_pypi_data(normalized: str) -> dict[str, Any] | None:
+    """Download one package's JSON document from PyPI.
 
     Streamed with a hard byte cap so a broken or hostile endpoint cannot make bmk buffer an
     unbounded body into memory; a response past the cap is treated as unavailable (``None``).
     The URL is fixed to pypi.org, so this is defence-in-depth, not the primary trust boundary.
     """
-    normalized = _normalize_name(package_name)
     url = f"https://pypi.org/pypi/{normalized}/json"
 
     try:
@@ -181,7 +225,10 @@ def _fetch_pypi_data(package_name: str) -> dict[str, Any] | None:
         if exc.response.status_code == _HTTP_NOT_FOUND:
             return None
         return None
-    except (httpx2.ConnectError, httpx2.TimeoutException, orjson.JSONDecodeError):
+    except (httpx2.RequestError, orjson.JSONDecodeError):
+        # RequestError, not just ConnectError and timeouts: a connection reset mid-body (ReadError,
+        # RemoteProtocolError) or a corrupt compressed body (DecodingError) is the same unavailable
+        # index and must not crash the check.
         return None
 
 
@@ -394,6 +441,263 @@ def _extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
     return all_deps
 
 
+# How far past the oldest supported minor to look for one a marker applies to. Python 3 minors
+# are released yearly, so this covers decades; it only bounds a loop, it is not a version claim.
+_MINOR_SCAN = 40
+# How many patch releases of one minor to look through for the first that ``requires-python``
+# admits. CPython minors reach end of life far below this; it only bounds a loop.
+_PATCH_SCAN = 100
+
+
+@dataclass(frozen=True)
+class PythonSupport:
+    """The Python 3 minors a project says it supports, for judging which releases it can install.
+
+    A raised floor must still install on the OLDEST of them: a release that drops it makes the
+    whole requirement unresolvable there (hypothesis 6.169.0 dropped 3.10, so a 3.10 project
+    whose floor was raised to it could no longer install its dev extras on 3.10).
+
+    Attributes:
+        lowest_minor: The oldest supported ``3.X`` minor, as ``python_support`` decides it.
+        requires_python: The project's ``requires-python``, or None when absent or unparseable.
+    """
+
+    lowest_minor: int
+    requires_python: SpecifierSet | None = None
+
+    def oldest_for(self, spec: str) -> str | None:
+        """The oldest supported Python, as a full ``3.X.Y``, on which ``spec`` is installed at all.
+
+        Every patch ``requires-python`` admits counts, so ``>=3.10.1`` or ``==3.10.12`` still makes
+        3.10 the oldest - probing a bare ``3.10`` would read it as 3.10.0 and skip the minor - and a
+        ``python_full_version >= '3.10.1'`` marker is judged on 3.10.1. A marker such as
+        ``python_version >= '3.11'`` moves the point up, which is what lets a python-version-split
+        pair of requirements each follow its own Pythons. A marker that no Python version satisfies
+        here (one about another platform) leaves the oldest supported Python, the conservative answer.
+
+        Example:
+            >>> PythonSupport(10).oldest_for("hypothesis>=6; python_version >= '3.11'")
+            '3.11.0'
+            >>> PythonSupport(10, SpecifierSet(">=3.10.1")).oldest_for("hypothesis>=6")
+            '3.10.1'
+        """
+        admitted = self._admitted
+        if not admitted:
+            return None
+        marker = _marker_of_spec(spec)
+        if marker is None:
+            return admitted[0]
+        for version in admitted:
+            if marker.evaluate({"python_version": version.rsplit(".", 1)[0], "python_full_version": version}):
+                return version
+        return admitted[0]
+
+    @cached_property
+    def _admitted(self) -> tuple[str, ...]:
+        """Every supported ``3.X.Y``, oldest first, leaving out what ``requires-python`` excludes."""
+        minors = range(self.lowest_minor, self.lowest_minor + _MINOR_SCAN)
+        versions = (f"3.{minor}.{patch}" for minor in minors for patch in range(_PATCH_SCAN))
+        return tuple(v for v in versions if self.requires_python is None or self.requires_python.contains(v))
+
+
+def _oldest_patch(requires: SpecifierSet | None, minor: int) -> str | None:
+    """The first ``3.<minor>.P`` that ``requires`` admits, or None when it admits none."""
+    if requires is None:
+        return f"3.{minor}.0"
+    return next((f"3.{minor}.{p}" for p in range(_PATCH_SCAN) if requires.contains(f"3.{minor}.{p}")), None)
+
+
+def _shown(python: str) -> str:
+    """A Python version for a report line: ``3.10`` for ``3.10.0``, the full version otherwise."""
+    return python.removesuffix(".0") if python.count(".") == 2 else python
+
+
+def _marker_of_spec(spec: str) -> Marker | None:
+    _, sep, marker_text = spec.partition(";")
+    if not sep or not marker_text.strip():
+        return None
+    try:
+        return Marker(marker_text.strip())
+    except InvalidMarker:
+        return None
+
+
+# A requires-python with none of these states no oldest Python ("<4" admits 3.0 by accident).
+_LOWER_BOUND_OPERATORS = frozenset({">=", ">", "==", "~=", "==="})
+
+
+def python_support(config: PyprojectConfig) -> PythonSupport | None:
+    """What Pythons the project supports: its classifiers, narrowed by ``requires-python``.
+
+    The classifiers decide, because they are what CI's matrix and bmk's own venv are built
+    from, so they name the Pythons the project is actually tested on; a ``requires-python``
+    left below them (``>=3.8`` beside classifiers from 3.10) must not drag floors down to
+    releases for a Python nobody runs. ``requires-python`` only narrows them, and stands in
+    for them when there are none - but only if it has a lower bound of its own.
+
+    Returns None when the project states no oldest Python, so the updater keeps following the
+    latest release.
+    """
+    requires = _specifier_or_none(config.project.requires_python)
+    classifiers = sorted(int(v.split(".")[1]) for v in config.project.python_minors() if v.startswith("3."))
+    lowest = next((m for m in classifiers if _oldest_patch(requires, m) is not None), None)
+    if lowest is None and requires is not None and any(s.operator in _LOWER_BOUND_OPERATORS for s in requires):
+        lowest = next((m for m in range(_MINOR_SCAN) if _oldest_patch(requires, m) is not None), None)
+    if lowest is None:
+        return None
+    return PythonSupport(lowest_minor=lowest, requires_python=requires)
+
+
+def _specifier_or_none(text: str) -> SpecifierSet | None:
+    if not text.strip():
+        return None
+    try:
+        return SpecifierSet(text)
+    except InvalidSpecifier:
+        return None
+
+
+def _installs_on(files: list[Any], python: str, *, yanked_ok: bool = False) -> bool:
+    """Whether a release has a file whose Requires-Python admits ``python``.
+
+    Yanked files count only with ``yanked_ok``. Missing or unparseable Requires-Python metadata
+    admits, as pip treats it.
+    """
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        file_info = cast("dict[str, Any]", entry)
+        if file_info.get("yanked") and not yanked_ok:
+            continue
+        requires = _specifier_or_none(str(file_info.get("requires_python") or ""))
+        if requires is None or requires.contains(python):
+            return True
+    return False
+
+
+def _releases_of(package_name: str) -> dict[str, Any] | None:
+    """The ``releases`` map of a package's PyPI document, or None when PyPI did not provide one."""
+    data = _fetch_pypi_data(package_name)
+    releases = data.get("releases") if data else None
+    return cast("dict[str, Any]", releases) if isinstance(releases, dict) else None
+
+
+# The operators that cap a requirement or exclude a release. A floor bmk writes must still satisfy
+# them; the lower bounds are the part the update moves, so they are not consulted.
+_CEILING_OPERATORS = frozenset({"<", "<=", "!="})
+
+
+def _specifier_of(spec: str) -> SpecifierSet | None:
+    """Everything a requirement admits, or None when it is not valid PEP 508."""
+    try:
+        return Requirement(spec).specifier
+    except InvalidRequirement:
+        return None
+
+
+def _ceiling_of(specifier: SpecifierSet) -> SpecifierSet:
+    """The specifier's upper bounds and exclusions (``<``, ``<=``, ``!=``).
+
+    Example:
+        >>> sorted(str(s) for s in _ceiling_of(SpecifierSet(">=1,!=1.5,<=2")))
+        ['!=1.5', '<=2']
+    """
+    return SpecifierSet(",".join(str(s) for s in specifier if s.operator in _CEILING_OPERATORS))
+
+
+def _admits_installable(releases: dict[str, Any], *, python: str, specifier: SpecifierSet) -> bool:
+    """Whether anything ``specifier`` admits installs on ``python``, judged as uv would choose.
+
+    A prerelease counts only when the specifier names one, as uv resolves it; ``prereleases`` is
+    passed explicitly because packaging 26's default admits any prerelease the bounds cover. A
+    yanked release counts only when the specifier pins it exactly: PEP 592 lets an installer take a yanked release
+    for ``==`` / ``===``, and uv (which provisions bmk's venvs) takes it in no other case.
+    """
+    exact = any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
+    return any(
+        isinstance(files, list)
+        and specifier.contains(version, prereleases=bool(specifier.prereleases))
+        and _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
+        for version, files in releases.items()
+    )
+
+
+def _newest_installable(releases: dict[str, Any], *, python: str, ceiling: SpecifierSet) -> str | None:
+    """The newest final release in ``releases`` that installs on ``python`` and ``ceiling`` admits."""
+    candidates: list[tuple[tuple[int, ...], str]] = []
+    for version, files in releases.items():
+        if _RE_PRERELEASE.search(version) or not _parse_version_tuple(version):
+            continue
+        if not ceiling.contains(version):
+            continue
+        if isinstance(files, list) and _installs_on(cast("list[Any]", files), python):
+            candidates.append((_parse_version_tuple(version), version))
+    return max(candidates)[1] if candidates else None
+
+
+# A floor is judged in these states; UNKNOWN has no floor to judge and ERROR has no release data.
+_JUDGED_FLOORS = frozenset({DependencyStatus.OUTDATED, DependencyStatus.UP_TO_DATE, DependencyStatus.PINNED})
+
+
+def _hold_to_supported_python(dep: DependencyInfo, support: PythonSupport | None) -> DependencyInfo:
+    """Keep a dependency's floor installable on the oldest Python the project supports.
+
+    Two cases, both judged against the newest release that oldest Python can install:
+
+    * The CURRENT floor is above it, so nothing the requirement admits installs there. The floor
+      is lowered to that release and reported OUTDATED: an unresolvable floor is repaired, the one
+      case in which bmk lowers one. Newer Pythons keep installing the newest release, since a
+      floor is only a minimum.
+    * An OUTDATED suggestion is above it. The suggestion is held to that release, or the
+      dependency is PINNED when the floor already is that release.
+
+    When the release list cannot be read, an OUTDATED floor is kept and reported as an ERROR:
+    raising it blind is exactly the move this check exists to prevent.
+    """
+    if support is None or dep.status not in _JUDGED_FLOORS or not dep.current_min:
+        return dep
+    python = support.oldest_for(dep.original_spec)
+    return dep if python is None else _judge_floor(dep, python=python)
+
+
+def _judge_floor(dep: DependencyInfo, *, python: str) -> DependencyInfo:
+    """Lower, hold or keep ``dep``'s floor against ``python``, the oldest Python it installs on."""
+    specifier = _specifier_of(dep.original_spec)
+    if specifier is None:
+        return _keep_outdated_floor(dep, why="requirement is not valid PEP 508")
+    releases = _releases_of(dep.name)
+    if releases is None:
+        return _keep_outdated_floor(dep, why="Requires-Python unreadable")
+    installable = _newest_installable(releases, python=python, ceiling=_ceiling_of(specifier))
+    if installable is None:
+        return _keep_outdated_floor(dep, why=f"no release installs on Python {_shown(python)}")
+    # Judged on the whole specifier, so ">", "==" and "~=" floors count exactly as written.
+    if not _admits_installable(releases, python=python, specifier=specifier):
+        latest = f"{installable} (floor {dep.constraint} does not install on Python {_shown(python)})"
+        return replace(dep, status=DependencyStatus.OUTDATED, latest=latest)
+    return _hold_suggestion(dep, installable=installable, python=python)
+
+
+def _keep_outdated_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
+    """An OUTDATED floor that cannot be judged is kept and reported; any other is left as it is."""
+    if dep.status is not DependencyStatus.OUTDATED:
+        return dep
+    proposed = dep.latest.split(" ", 1)[0]
+    return replace(dep, status=DependencyStatus.ERROR, latest=f"{proposed} ({why}, floor kept)")
+
+
+def _hold_suggestion(dep: DependencyInfo, *, installable: str, python: str) -> DependencyInfo:
+    """Hold an OUTDATED suggestion to ``installable``, the newest release ``python`` installs."""
+    proposed = dep.latest.split(" ", 1)[0]
+    if dep.status is not DependencyStatus.OUTDATED or installable == proposed:
+        return dep
+    if _version_gte(dep.current_min, installable):
+        return replace(
+            dep, status=DependencyStatus.PINNED, latest=f"{proposed} (needs a newer Python than {_shown(python)})"
+        )
+    return replace(dep, latest=f"{installable} (newest for Python {_shown(python)}, absolute: {proposed})")
+
+
 def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[DependencyInfo]:
     """Check all dependencies in pyproject.toml against PyPI.
 
@@ -404,7 +708,9 @@ def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[Depende
         List of DependencyInfo objects for all found dependencies.
     """
     config = load_pyproject_config(pyproject)
-    return _extract_all_dependencies(config)
+    support = python_support(config)
+    with _one_fetch_per_package():
+        return [_hold_to_supported_python(dep, support) for dep in _extract_all_dependencies(config)]
 
 
 def _group_by_source(deps: list[DependencyInfo]) -> dict[str, list[DependencyInfo]]:
@@ -489,6 +795,14 @@ def _get_status_icon(status: DependencyStatus) -> str:
     return icons.get(status, "[??]")
 
 
+def _release_segment(version: str) -> str:
+    """``version`` without its pre-, post-, dev- or local part (``8.0.post1`` -> ``8.0``)."""
+    try:
+        return Version(version).base_version
+    except InvalidVersion:
+        return version
+
+
 def _build_updated_spec(dep: DependencyInfo) -> str:
     """Build an updated dependency specification with the latest version.
 
@@ -524,6 +838,11 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
         # Preserve upper-bound and exclusion constraints as-is
         if operator in ("<", "<=", "!="):
             return match.group(0)
+        # ">X" moved to a release must still admit it, so a strict floor is written inclusive.
+        operator = ">=" if operator == ">" else operator
+        if match.string.startswith(".*", match.end()):
+            # A wildcard may only follow a release segment: "==8.0.post1.*" is not PEP 440.
+            return f"{operator}{_release_segment(latest_version)}"
         return f"{operator}{latest_version}"
 
     # Replace all version constraints with latest
@@ -808,6 +1127,15 @@ def update_dependencies(
 
         new_spec = _build_updated_spec(dep)
         if new_spec == dep.original_spec:
+            continue
+        if _specifier_of(new_spec) is None:
+            # The rewriter reads normalized PEP 440 spellings; on any other ("1.0c1", "1.0RC1") it
+            # can splice the new version into the old suffix. Never write that, whatever the cause:
+            # the dependency stays outdated, so the gate stays red and names the spec to fix.
+            print(
+                f"  {dep.name}: {dep.original_spec} -> {new_spec} is not a valid requirement, not written",
+                file=sys.stderr,
+            )
             continue
 
         if _replace_spec(document, dep.original_spec, new_spec):

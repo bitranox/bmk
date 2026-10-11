@@ -70,9 +70,6 @@ def venv_python(venv: Path) -> Path:
     return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
-_PY_CLASSIFIER = "Programming Language :: Python :: "
-
-
 def all_python_minors(cwd: Path) -> list[str]:
     """Every ``X.Y`` the project's Python classifiers declare, ascending numerically.
 
@@ -95,19 +92,7 @@ def all_python_minors(cwd: Path) -> list[str]:
     except Exception:  # an unreadable manifest degrades, never aborts
         return []
 
-    found: list[tuple[tuple[int, ...], str]] = []
-    for classifier in config.project.classifiers:
-        if not classifier.startswith(_PY_CLASSIFIER):
-            continue
-        version = classifier[len(_PY_CLASSIFIER) :].strip()
-        if "." not in version:
-            continue
-        try:
-            parts = tuple(int(p) for p in version.split("."))
-        except ValueError:
-            continue
-        found.append((parts, version))
-    return [version for _, version in sorted(found)]
+    return list(config.project.python_minors())
 
 
 def desired_python_minor(cwd: Path) -> str | None:

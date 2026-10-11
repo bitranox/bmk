@@ -8,6 +8,42 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Fixed
 
+- **The dependency update no longer raises a floor past the project's oldest supported Python.**
+  It took each package's newest release from PyPI regardless of that release's `Requires-Python`,
+  so when hypothesis 6.169.0 dropped Python 3.10, every 3.10 project's `make test` rewrote
+  `hypothesis>=6.168.x` to `>=6.169.0` and its dev extras stopped resolving on 3.10 (`test-all`
+  then reported only "No module named pytest" for that cell). The floor now rises only to the
+  newest non-yanked release whose `Requires-Python` admits the oldest Python the project supports
+  (its lowest classifier that `requires-python` admits, or `requires-python`'s own lower bound
+  when it has no classifiers; a `requires-python` below every classifier no longer counts, and
+  one with no lower bound, such as `<4`, states no oldest Python); a requirement marked for newer Pythons
+  only (`; python_version >= '3.11'`) follows those.
+  A floor already above that release, so that nothing the requirement admits installs on that
+  Python, is lowered to it: an unresolvable floor is the one case in which the update lowers a
+  floor, so a project whose floor was already raised past its oldest Python repairs itself on
+  its next `make test`. Newer Pythons keep installing the newest release, since a floor is only
+  a minimum. Each package's PyPI document is read once per check, and when its release list
+  cannot be read the floor is kept and the dependency reported as an error rather than raised
+  blind; a connection reset or a corrupt response from PyPI no longer crashes the check.
+- **A requirement whose cap or exclusion is written before its floor is no longer read as having
+  that cap as its floor.** `pkg<=7,>=6` and `pkg!=2.0` were read as floors 7 and 2.0; `pkg!=2.0`
+  was reported outdated on every run, which the update could never settle, so `make push` failed
+  at its dependency check. The floor is now taken only from `>=`, `>`, `==`, `===` and `~=`.
+- **Versions in a requirement are read whole, epoch and pre-, post- and dev-release parts
+  included.** `pkg>=7.0.post1` was read as floor `7.0.` and rewritten as `pkg>=7.0post1`,
+  `pkg>=1!2.0` as `pkg>=8.0!8.0`, and `pkg==1.*` as `pkg==8.0*`; all three were invalid
+  requirements. A wildcard is now kept on the release segment only (`pkg==8.0.*` when the
+  newest release is `8.0.post1`). Versions are read in their normalized PEP 440 spelling; a
+  rewrite that would not be a valid requirement (as with `pkg>=1.0c1` or `pkg>=1.0RC1`) is
+  never written, but reported on stderr, and the dependency stays outdated until the spec is
+  normalized.
+- **Whether a floor installs is judged the way the installer judges it.** A prerelease floor
+  (`pkg>=8.0rc1`) counts as installable while a prerelease the floor does not name does not, and
+  a yanked release counts when the requirement pins
+  it exactly (`pkg==6.5`), which is when uv still installs it (PEP 592). A requirement that is
+  not valid PEP 508 keeps its floor and is reported, rather than crashing the check.
+- **A strict floor (`pkg>X`) moved to a release is written as `pkg>=release`**, so it admits the
+  release it was moved to; `>` kept as-is excluded exactly that release.
 - **`email.smtp_hosts` and `email.recipients` set to nothing mean not configured.** A bare YAML
   key or an environment `null` was refused as "Input should be a valid list" for both settings.
   Both now read `None` as an empty list.
