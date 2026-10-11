@@ -22,7 +22,7 @@ Configuration is loaded and merged in the following order (lowest to highest pre
 | 2        | **app**      | System-wide settings for all machines           |
 | 3        | **host**     | Machine-specific overrides                      |
 | 4        | **user**     | User's personal settings                        |
-| 5        | **.env**     | Project directory dotenv file                   |
+| 5        | **.env**     | First `.env` found upward, else per-user `.env` |
 | 6        | **env vars** | Environment variables                           |
 | 7        | **CLI**      | Command-line `--set` flags (highest priority)   |
 
@@ -40,15 +40,22 @@ Configuration is loaded and merged in the following order (lowest to highest pre
 | app      | `/etc/xdg/{slug}/config.toml`           | `/Library/Application Support/{vendor}/{app}/config.toml`           | `C:\ProgramData\{vendor}\{app}\config.toml`           |
 | host     | `/etc/xdg/{slug}/hosts/{hostname}.toml` | `/Library/Application Support/{vendor}/{app}/hosts/{hostname}.toml` | `C:\ProgramData\{vendor}\{app}\hosts\{hostname}.toml` |
 | user     | `~/.config/{slug}/config.toml`          | `~/Library/Application Support/{vendor}/{app}/config.toml`          | `%APPDATA%\{vendor}\{app}\config.toml`                |
+| .env     | `~/.config/{slug}/.env` (fallback)      | `~/Library/Application Support/{vendor}/{app}/.env` (fallback)      | `%APPDATA%\{vendor}\{app}\.env` (fallback)            |
+
+Every layer reads `config.toml` first and then the files in the `config.d/` directory next to it
+(for the host layer: `hosts/{hostname}.d/`), in lexical order; a `config.d/` file may be TOML, YAML
+or JSON. On Linux the app and host layers are read from `/etc/xdg/{slug}/` and then from
+`/etc/{slug}/`, and `$XDG_CONFIG_HOME` replaces `~/.config` when it is set. The `.env` row is a
+fallback: it is read only when no `.env` is found in the working directory or one of its parents.
 
 ### Path Placeholders
 
-| Placeholder  | Linux           | macOS / Windows            |
-|--------------|-----------------|----------------------------|
-| `{slug}`     | `bmk`           | —                          |
-| `{vendor}`   | —               | `bitranox`                 |
-| `{app}`      | —               | `Bitranox Template Py Cli` |
-| `{hostname}` | System hostname | System hostname            |
+| Placeholder  | Linux           | macOS / Windows |
+|--------------|-----------------|-----------------|
+| `{slug}`     | `bmk`           | -               |
+| `{vendor}`   | -               | `bitranox`      |
+| `{app}`      | -               | `Bmk`           |
+| `{hostname}` | System hostname | System hostname |
 
 ### Concrete Examples
 
@@ -58,10 +65,10 @@ Configuration is loaded and merged in the following order (lowest to highest pre
 - Host config: `/etc/xdg/bmk/hosts/myserver.toml`
 
 **macOS:**
-- User config: `~/Library/Application Support/bitranox/Bitranox Template Py Cli/config.toml`
+- User config: `~/Library/Application Support/bitranox/Bmk/config.toml`
 
 **Windows:**
-- User config: `%APPDATA%\bitranox\Bitranox Template Py Cli\config.toml`
+- User config: `%APPDATA%\bitranox\Bmk\config.toml`
 
 ---
 
@@ -76,6 +83,7 @@ These options apply to all commands and must be specified **before** the command
 | `--version`               | Show version and exit.                                                    |
 | `--profile NAME`          | Load configuration from a named profile (e.g., `production`, `test`).     |
 | `--set SECTION.KEY=VALUE` | Override a configuration setting. Can be repeated for multiple overrides. |
+| `--env-file PATH`         | Explicit `.env` file path. Skips the default upward directory search.     |
 | `--traceback`             | Show full Python traceback on errors (useful for debugging).              |
 | `--no-traceback`          | Hide traceback, show only error message (default).                        |
 
@@ -89,6 +97,10 @@ bmk --profile production config
 bmk --set lib_log_rich.console_level=DEBUG config
 bmk --set email.from_address=test@example.com --set email.smtp_hosts='["smtp.example.com:587"]' send-email ...
 
+# Load configuration from an explicit .env file
+bmk --env-file /etc/myapp/.env config
+bmk --env-file ./environments/production.env send-notification ...
+
 # Show full traceback for debugging
 bmk --traceback config-deploy --target user
 ```
@@ -97,7 +109,7 @@ bmk --traceback config-deploy --target user
 
 ### View Configuration
 
-Display the merged configuration from all sources (defaults → app → host → user → .env → env vars).
+Display the merged configuration from all sources (defaults -> app -> host -> user -> .env -> env vars).
 
 #### Options Reference
 
@@ -132,15 +144,15 @@ Deploy bundled default configuration to platform-specific directories.
 
 #### Options Reference
 
-| Option             | Required | Description                                                                       |
-|--------------------|:--------:|-----------------------------------------------------------------------------------|
-| `--target`         | Yes      | Target layer: `app`, `host`, or `user`. Can be specified multiple times.          |
-| `--force`          | No       | Overwrite existing configuration files. Without this, existing files are skipped. |
-| `--profile NAME`   | No       | Deploy to a profile-specific subdirectory (e.g., `profile/production/`).          |
-| `--permissions`    | No       | Enable Unix permission setting (default).                                         |
-| `--no-permissions` | No       | Disable permission setting; use system umask instead.                             |
-| `--dir-mode MODE`  | No       | Override directory permissions (octal: `750` or `0o750`).                         |
-| `--file-mode MODE` | No       | Override file permissions (octal: `640` or `0o640`).                              |
+| Option             | Required | Description                                                                                                                   |
+|--------------------|:--------:|-------------------------------------------------------------------------------------------------------------------------------|
+| `--target`         | Yes      | Target layer: `app`, `host`, or `user`. Can be specified multiple times.                                                      |
+| `--force`          | No       | Replace existing files whose content differs; the old file is kept as `<name>.bak`. Without this, existing files are skipped. |
+| `--profile NAME`   | No       | Deploy to a profile-specific subdirectory (e.g., `profile/production/`).                                                      |
+| `--permissions`    | No       | Set Unix permissions even when the configured `enabled` is false.                                                             |
+| `--no-permissions` | No       | Disable permission setting; use system umask instead. Not combinable with a mode option.                                      |
+| `--dir-mode MODE`  | No       | Override directory permissions (octal: `750` or `0o750`).                                                                     |
+| `--file-mode MODE` | No       | Override file permissions (octal: `640` or `0o640`).                                                                          |
 
 #### Basic Examples
 
@@ -166,6 +178,13 @@ bmk config-deploy --target user --profile production
 # Deploy production profile and overwrite if exists
 bmk config-deploy --target user --profile production --force
 ```
+
+Every target receives `config.toml` plus `config.d/10-bmk.toml`, `config.d/40-layered-config.toml`,
+`config.d/50-mail.toml` and `config.d/90-logging.toml` (the host target writes `hosts/{hostname}.toml` and
+`hosts/{hostname}.d/`). With `--force`, a file whose content differs from the bundled one is
+replaced and the old file is kept as `<name>.bak` (numbered, `<name>.bak.1` and so on, when a
+backup already exists); a file whose content is already identical is left as it is, mode
+included. When nothing differs, `config-deploy --force` writes nothing and says so.
 
 #### Deploying for Other Users
 
@@ -234,13 +253,21 @@ bmk config-deploy --target user --dir-mode 750 --file-mode 640
 bmk config-deploy --target user --dir-mode 0o750
 ```
 
+A mode must be a plain octal literal (`750` or `0o750`; no sign, whitespace, `_` or other base)
+within `0`..`0o7777`. Because the deployed files can hold credentials, a mode is also refused when
+it sets the setuid, setgid or sticky bit, grants group or world write, puts an execute bit on a
+file, or takes the owner's access away (a directory needs owner `rwx`, a file owner `rw`). Group
+write is refused like world write because a group can hold every local account (on macOS all of
+them share `staff`), and a configuration file never needs `x`. A refused mode is a usage error
+(exit 2) that names the offending bits, and nothing is written.
+
 **Configurable defaults:**
 
 Permission defaults can be customized in `[lib_layered_config.default_permissions]`:
 
 ```toml
 [lib_layered_config.default_permissions]
-# Values: octal strings ("0o755", "755") or decimal integers (493)
+# Values: octal strings ("0o755", "755"); a bare integer is refused (see below)
 app_directory = "0o755"
 app_file = "0o644"
 host_directory = "0o755"
@@ -251,6 +278,39 @@ user_file = "0o600"
 # Set to false to disable permission setting by default
 enabled = true
 ```
+
+`config-deploy` decides none of this itself: it passes its options and any `--set` of this
+section to lib_layered_config, which applies each target's own layer modes. The library reads the
+section from the bundled defaults, the configuration files this deploy does not overwrite and the
+environment, with the `--set` values laid over them. It never reads `.env` for it (neither one
+found from the working directory nor an explicit `--env-file`), so a `.env` can neither change a
+deployed mode nor block a deploy. `--dir-mode`/`--file-mode` override the configured modes for
+every target, and a key left out falls back to the layer default in the table above. Without
+`--permissions`/`--no-permissions`, `enabled` decides; `enabled = false` behaves like
+`--no-permissions`, and `--permissions` sets the modes anyway.
+
+A configured mode follows the same rules as `--dir-mode`/`--file-mode`: a plain octal STRING
+(`"0o750"`, `"750"`), never setuid/setgid/sticky, group or world write, an execute bit on a file,
+or a directory without owner `rwx` / a file without owner `rw`. A bare integer is refused rather
+than reinterpreted: TOML `user_file = 400`, `--set ...user_file=400` and an environment value `400`
+all arrive as the DECIMAL integer 400, which is `0o620`, not the owner-read-only mode the digits
+suggest. Quote it in TOML (`user_file = "640"`); in an environment variable or `--set`, use the
+`0o` prefix (`0o640`), which is never read as a number. `enabled` must be a real boolean
+(`true`/`false` in TOML, an environment variable or `--set`); `"no"`, `"off"`, `0` or `1` are
+refused rather than read as one. An unknown key in the section is refused rather than ignored.
+Any violation stops `config-deploy` before it writes anything, with exit 78, one line per problem
+naming the key and where it was set, and a hint, for example:
+
+```text
+Error: lib_layered_config.default_permissions.user_file: a bare integer is read as decimal (400 = 0o620); write the mode as an octal string: "0o640" (quoted) in a file, 0o640 in the environment or a runtime override (such as an application's --set) (source: env)
+Hint: to deploy anyway, pass both --dir-mode and --file-mode (the built-in modes are 700 and 600 for user, 755 and 644 for app and host); --no-permissions also deploys, but leaves every mode to the umask, which can make a user file that holds secrets readable by other accounts.
+```
+
+The same refusal applies when a file the library reads cannot be loaded: `config-deploy` never
+falls back to the layer defaults, which may be wider than what was configured. A refused `--set`
+of the section names `(source: override)` and has no hint, since no option gets past it: fix or
+drop the `--set`. The files a deploy writes are never read for it, so `config-deploy --force`
+replaces a destination that carries a bad value, or does not parse at all, without further options.
 
 ### Generate Example Configuration Files
 
@@ -288,7 +348,7 @@ Each file contains commented documentation explaining available options and thei
 ### Runtime Overrides
 
 Use `--set` to override configuration values without modifying files. This option:
-- Has the **highest precedence** (overrides all other sources including environment variables)
+- Has the **highest precedence** among the configuration layers; for logging, lib_log_rich's own `LOG_*` variables still override it
 - Can be **repeated** to set multiple values
 - Must appear **before** the command name
 
@@ -354,15 +414,15 @@ Profile names are validated for security and cross-platform compatibility:
 
 ### Which Layers Are Affected?
 
-| Layer    | Affected by Profile? | Notes                               |
-|----------|:--------------------:|-------------------------------------|
-| defaults | No                   | Always loaded from package          |
-| app      | Yes                  | Uses `profile/<name>/` subdirectory |
-| host     | Yes                  | Uses `profile/<name>/` subdirectory |
-| user     | Yes                  | Uses `profile/<name>/` subdirectory |
-| .env     | No                   | Project directory                   |
-| env vars | No                   | Environment                         |
-| CLI      | No                   | Command line                        |
+| Layer    | Affected by Profile? | Notes                                                                        |
+|----------|:--------------------:|------------------------------------------------------------------------------|
+| defaults | No                   | Always loaded from package                                                   |
+| app      | Yes                  | Uses `profile/<name>/` subdirectory                                          |
+| host     | Yes                  | Uses `profile/<name>/` subdirectory                                          |
+| user     | Yes                  | Uses `profile/<name>/` subdirectory                                          |
+| .env     | Fallback only        | The per-user fallback `.env` uses `profile/<name>/`; one found upward is not |
+| env vars | No                   | Environment                                                                  |
+| CLI      | No                   | Command line                                                                 |
 
 ### Profile Path Examples
 
@@ -399,8 +459,8 @@ Configuration can be overridden via environment variables using two methods:
 For logging configuration, use the native `LOG_*` variables (highest precedence):
 
 ```bash
-LOG_CONSOLE_LEVEL=DEBUG bmk hello
-LOG_ENABLE_GRAYLOG=true LOG_GRAYLOG_ENDPOINT="logs.example.com:12201" bmk hello
+LOG_CONSOLE_LEVEL=DEBUG bmk config
+LOG_ENABLE_GRAYLOG=true LOG_GRAYLOG_ENDPOINT="logs.example.com:12201" bmk config
 ```
 
 ### Method 2: Application-Prefixed Variables
@@ -408,13 +468,13 @@ LOG_ENABLE_GRAYLOG=true LOG_GRAYLOG_ENDPOINT="logs.example.com:12201" bmk hello
 For any configuration section, use the format: `<PREFIX>___<SECTION>__<KEY>=value`
 
 ```bash
-BMK___LIB_LOG_RICH__CONSOLE_LEVEL=DEBUG bmk hello
-BMK___EMAIL__SMTP_HOSTS='["smtp.example.com:587"]' bmk hello
+BMK___LIB_LOG_RICH__CONSOLE_LEVEL=DEBUG bmk config
+BMK___EMAIL__SMTP_HOSTS='["smtp.example.com:587"]' bmk config
 ```
 
 **Separator reference:**
-- `___` (triple underscore) — separates prefix from section
-- `__` (double underscore) — separates section from key
+- `___` (triple underscore) - separates prefix from section
+- `__` (double underscore) - separates section from key
 
 ---
 
@@ -429,7 +489,22 @@ LOG_CONSOLE_FORMAT_PRESET=short
 LOG_ENABLE_GRAYLOG=false
 ```
 
-The application automatically discovers and loads `.env` files from the current directory or parent directories.
+By default, the application searches upward from the current directory to discover `.env` files.
+
+Logging reads the `LOG_*` lines of the same `.env` (the `--env-file` when one is given, otherwise the
+nearest `.env` up to the project root) and copies only those into the environment, never over a
+variable that is already set. No other `.env` line reaches the environment, so a `.env` cannot act
+as the environment layer for a later configuration load.
+
+To load a specific `.env` file instead, use `--env-file`:
+
+```bash
+# Load from an explicit path (skips upward directory search)
+bmk --env-file /opt/myapp/config/.env config
+bmk --env-file ./environments/staging.env send-notification ...
+```
+
+The file must exist and be readable; Click validates this before the command runs.
 
 ---
 
@@ -441,33 +516,42 @@ The `defaultconfig.toml` and files in `defaultconfig.d/` (bundled with the packa
 
 ## Customization Best Practices
 
-**Do NOT modify deployed configuration files directly.** These files may be overwritten during package updates.
+**Do NOT modify deployed configuration files directly.** `config-deploy --force` replaces them
+(keeping the old file as `<name>.bak`).
 
-Instead, create your own override files in the appropriate layer directory using a high-numbered prefix:
+Instead, create your own override file in the layer's `config.d/` directory using a high-numbered
+prefix:
 
 ```bash
 # User-level customization (Linux)
-~/.config/bmk/999-myconfig.toml
+~/.config/bmk/config.d/999-myconfig.toml
 
 # User-level customization (macOS)
-~/Library/Application Support/bitranox/Bitranox Template Py Cli/999-myconfig.toml
+~/Library/Application Support/bitranox/Bmk/config.d/999-myconfig.toml
 
 # User-level customization (Windows)
-%APPDATA%\bitranox\Bitranox Template Py Cli\999-myconfig.toml
+%APPDATA%\bitranox\Bmk\config.d\999-myconfig.toml
 
 # System-wide customization (Linux)
-/etc/xdg/bmk/999-myconfig.toml
+/etc/xdg/bmk/config.d/999-myconfig.toml
+
+# Host-specific customization (Linux)
+/etc/xdg/bmk/hosts/{hostname}.d/999-myconfig.toml
 ```
 
+A file placed directly next to `config.toml` (outside `config.d/`) is never read: each layer reads
+only `config.toml` plus its `config.d/` files.
+
 **Why this works:**
-- Files in each layer directory are loaded in alphabetical order
-- Higher-numbered files (e.g., `999-`) load last and override earlier values
-- Your custom file won't be touched by updates that regenerate `config.toml`
+- Files in each layer's `config.d/` directory are loaded in lexical order after `config.toml`
+- Higher-numbered files (e.g., `999-`) load last and override earlier values, including the
+  deployed `10-`, `40-`, `50-` and `90-` files
+- `config-deploy` never writes a `999-myconfig.toml`, so a redeploy leaves your file alone
 
 **Example `999-myconfig.toml`:**
 
 ```toml
-# My custom overrides - survives package updates
+# My custom overrides - survives a redeploy
 
 [lib_log_rich]
 console_level = "DEBUG"

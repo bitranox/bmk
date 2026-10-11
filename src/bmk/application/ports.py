@@ -27,7 +27,9 @@ if TYPE_CHECKING:
 class GetConfig(Protocol):
     """Load layered configuration with application defaults."""
 
-    def __call__(self, *, profile: str | None = ..., start_dir: str | None = ...) -> Config: ...
+    def __call__(
+        self, *, profile: str | None = ..., start_dir: str | None = ..., dotenv_path: str | None = ...
+    ) -> Config: ...
 
 
 class GetDefaultConfigPath(Protocol):
@@ -45,9 +47,10 @@ class DeployConfiguration(Protocol):
         targets: Sequence[DeployTarget],
         force: bool = ...,
         profile: str | None = ...,
-        set_permissions: bool = ...,
+        set_permissions: bool | None = ...,
         dir_mode: int | None = ...,
         file_mode: int | None = ...,
+        permission_overrides: Mapping[str, object] | None = ...,
     ) -> list[Path]: ...
 
 
@@ -96,12 +99,28 @@ class LoadEmailConfigFromDict(Protocol):
 
 
 class InitLogging(Protocol):
-    """Initialize lib_log_rich runtime with the provided configuration."""
+    """Initialize lib_log_rich runtime with the provided configuration.
+
+    ``dotenv_path`` is the ``.env`` the configuration was loaded with, or None for the nearest one.
+    A refused logging setting raises ``InvalidLoggingConfigError`` only after logging has been
+    started with its defaults, so the caller never has to start it a second time.
+    """
+
+    def __call__(self, config: Config, *, dotenv_path: str | None = None) -> None: ...
+
+
+class CheckLoggingConfig(Protocol):
+    """Refuse ``config``'s logging settings as ``InitLogging`` would, leaving the running runtime alone.
+
+    For a configuration loaded after logging is running; a refused setting raises
+    ``InvalidLoggingConfigError`` and logging keeps running with the settings it started with.
+    """
 
     def __call__(self, config: Config) -> None: ...
 
 
 __all__ = [
+    "CheckLoggingConfig",
     "DeployConfiguration",
     "DisplayConfig",
     "GetConfig",

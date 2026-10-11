@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import lib_log_rich.runtime
 import rich_click as click
 
+from ..config_load import require_config
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
 from ..typed_click import argument
@@ -54,10 +55,10 @@ def validate_command_name(name: str) -> None:
 
 
 def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> None:
-    """Validate the name and run the named custom pipeline.
+    """Run the named custom pipeline.
 
     Args:
-        command_name: User-supplied pipeline name.
+        command_name: Pipeline name, already checked by :func:`validate_command_name`.
         args: Arguments to forward to the pipeline's stages.
         config: Loaded layered configuration (with profile and overrides applied).
 
@@ -65,7 +66,6 @@ def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> Non
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the
             name, or the pipeline's exit code on failure.
     """
-    validate_command_name(command_name)
     cwd = Path.cwd()
 
     exit_code = run_command(
@@ -95,10 +95,14 @@ def cli_custom(ctx: click.Context, command_name: str, args: tuple[str, ...]) -> 
         bmk custom deploy              # Run the 'deploy' pipeline
         bmk custom deploy --verbose    # Forward --verbose to the stages
     """
+    # A malformed name is a usage error (exit 2) whether or not the configuration loaded,
+    # so it is judged first; the pipeline then never starts on a configuration that failed.
+    validate_command_name(command_name)
     cli_ctx = get_cli_context(ctx)
+    config = require_config(ctx, cli_ctx)
     with lib_log_rich.runtime.bind(job_id="cli-custom", extra={"command": "custom", "prefix": command_name}):
         logger.info("Executing custom command '%s'", command_name)
-        _run_custom(command_name, args, cli_ctx.config)
+        _run_custom(command_name, args, config)
 
 
 __all__ = ["cli_custom"]

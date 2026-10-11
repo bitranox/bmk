@@ -11,11 +11,10 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-import rich_click as click
-
 from bmk.domain.enums import ToolOutputFormat
 from bmk.domain.stages import normalize_returncode
 
+from .. import safe_console
 from ..exit_codes import ExitCode
 
 if TYPE_CHECKING:
@@ -66,8 +65,8 @@ def run_command(
 
     stages = resolve_python_pipeline(cwd, command_prefix)
     if stages is None:
-        click.echo(f"Error: no pipeline defined for '{command_prefix}'", err=True)
-        click.echo(
+        safe_console.echo(f"Error: no pipeline defined for '{command_prefix}'", err=True)
+        safe_console.echo(
             "Define one under [tool.bmk.pipelines] in pyproject.toml or in bmk_makescripts/stages.toml.",
             err=True,
         )

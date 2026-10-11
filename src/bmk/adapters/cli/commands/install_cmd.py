@@ -21,6 +21,7 @@ import rich_click as click
 
 from bmk.domain.enums import ToolOutputFormat
 
+from .. import safe_console
 from ..constants import CLICK_CONTEXT_SETTINGS
 from ..exit_codes import ExitCode
 
@@ -76,7 +77,7 @@ def check_makefile_update() -> bool:
 
     shutil.copy2(_BUNDLED_MAKEFILE, target)
     if not auto_accept:
-        click.echo(f"Makefile updated to {bundled_ver}")
+        safe_console.echo(f"Makefile updated to {bundled_ver}")
     return True
 
 
@@ -96,7 +97,7 @@ def cli_install() -> None:
         makefile_error: SystemExit | None = None
 
         if not _BUNDLED_MAKEFILE.is_file():
-            click.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
+            safe_console.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
             makefile_error = SystemExit(ExitCode.FILE_NOT_FOUND)
         else:
             target = Path.cwd() / "Makefile"
@@ -104,15 +105,15 @@ def cli_install() -> None:
             if target.exists():
                 first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
                 if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
-                    click.echo("Makefile exists but is not managed by bmk - skipping", err=True)
+                    safe_console.echo("Makefile exists but is not managed by bmk - skipping", err=True)
                     makefile_error = SystemExit(ExitCode.GENERAL_ERROR)
                 else:
                     logger.info("Updating existing bmk Makefile")
-                    click.echo("Updating existing bmk Makefile")
+                    safe_console.echo("Updating existing bmk Makefile")
                     shutil.copy2(_BUNDLED_MAKEFILE, target)
             else:
                 logger.info("Installing bmk Makefile")
-                click.echo("Installing bmk Makefile")
+                safe_console.echo("Installing bmk Makefile")
                 shutil.copy2(_BUNDLED_MAKEFILE, target)
 
         # Deferred: keep `bmk install` (and thus command registration) from paying
@@ -121,8 +122,8 @@ def cli_install() -> None:
 
         results = check_prerequisites()
         report = format_prerequisites_report(results)
-        click.echo("")
-        click.echo(report)
+        safe_console.echo("")
+        safe_console.echo(report)
 
         if makefile_error is not None:
             raise makefile_error

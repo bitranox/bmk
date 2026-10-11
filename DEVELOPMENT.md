@@ -87,6 +87,69 @@ def test_needs_a_local_resource(...):
     ...
 ```
 
+### Email Integration Tests
+
+The tests in `tests/test_mail.py` that actually send messages carry both `@pytest.mark.integration`
+(so `make test` skips them and `make testintegration` runs them) and `@pytest.mark.local_only` (so CI
+skips them). To run them:
+
+1. **Create a `.env` file** in the project root with your SMTP settings:
+
+```bash
+# .env (copy from .env.example)
+EMAIL__SMTP_HOSTS=["smtp.example.com:587"]
+EMAIL__FROM_ADDRESS=sender@example.com
+EMAIL__RECIPIENTS=["recipient@example.com"]
+EMAIL__SMTP_USERNAME=your_username
+EMAIL__SMTP_PASSWORD=your_password
+```
+
+   The integration tests read the `.env` found upward from the project. To send one mail by hand
+   with another file, point `--env-file` at it:
+
+```bash
+bmk --env-file /path/to/my/.env send-notification --subject "Test" --message "Hello"
+```
+
+2. **Run the integration tests**:
+
+```bash
+make testintegration
+```
+
+3. **Or run the email tests directly**:
+
+```bash
+pytest tests/test_mail.py -m integration -v
+```
+
+A new test that needs an external service is marked the same way:
+
+```python
+@pytest.mark.local_only
+@pytest.mark.integration
+@pytest.mark.os_agnostic
+def test_real_external_service(...):
+    """Integration test requiring external service."""
+    ...
+```
+
+### SMTP Test Seam
+
+`send_email()` and `send_notification()` accept an optional `transport` argument, forwarded
+to `btx_lib_mail`'s `Transport` port. Unit tests inject a double (`RecordingTransport` in
+`tests/test_mail.py`) rather than patching `smtplib.SMTP`, and assert on delivery intent:
+envelope sender, recipients, host failover order, credentials, and the composed payload.
+
+Do not go back to monkeypatching `smtplib`. btx_lib_mail streams the message over the wire
+protocol itself (MAIL/RCPT plus DATA or BDAT), so a `MagicMock` does not honour the contract
+and breaks whenever the library changes delivery strategy.
+
+The `SendEmail` / `SendNotification` ports in `application/ports.py` deliberately omit
+`transport`: a delivery mechanism is an adapter concern, not something the application layer
+should see. The adapter still satisfies the Protocol because an extra keyword parameter with
+a default is structurally compatible. Do not add `transport` to the port.
+
 ## Development Workflow
 
 ```bash
@@ -138,6 +201,8 @@ dependency checking runs silently and Makefile version updates are auto-accepted
 - Do not hand-edit the version in code; bump `pyproject.toml` and update `CHANGELOG.md`.
 - The bundled Makefile template carries its own version on line 1 (`# BMK MAKEFILE X.Y.Z`), also
   synced by `_sync_initconf.py`.
+- The console script name is the static `shell_command` constant in `__init__conf__.py`
+  (`bmk`); `[project.scripts]` in `pyproject.toml` registers it together with `mk`.
 
 ### The project venv
 
@@ -187,7 +252,8 @@ This keeps credentials out of project files and `.env` - git handles auth transp
 `make test` runs `pip-audit` against the project's venv. Fix a reported vulnerability at its root,
 in this order:
 
-1. Find what actually forces the vulnerable version (`uv pip compile --extra dev pyproject.toml`).
+1. Find what actually forces the vulnerable version (`uv pip compile pyproject.toml`, adding
+   `--extra <name>` for each extra the project declares; bmk itself declares none).
    A CVE on a transitive package usually means another dependency CAPS it below the fix.
 2. Remove or disable the capper if there is one - that fixes it with no exclusion. Comment the line
    out with the reason and the re-enable condition rather than deleting it.
@@ -199,35 +265,34 @@ in this order:
 bmk itself declares its whole toolchain as runtime dependencies and ships no `[dev]` extra, so a
 floor for bmk goes in `[project.dependencies]`. See the grouped rationale in `pyproject.toml`.
 
-### CI & Publishing
+## CI & Publishing
 
-GitHub Actions workflows:
+The GitHub Actions workflows under `.github/workflows/` are distributed from the
+`default_cicd_public` template; change them there, not in this repository.
 
-- `.github/workflows/default_cicd_public.yml` - lint, type-check, test across the OS/Python matrix,
-  and build artifacts.
-- `.github/workflows/default_release_public.yml` - on tags `v*.*.*`, builds artifacts and publishes
-  to PyPI.
-- `.github/workflows/codeql.yml` - CodeQL analysis.
+- `default_cicd_public.yml` -- lint, type-check and test on Linux, macOS and Windows for every
+  Python version listed in the `pyproject.toml` classifiers, verify the pipx and uv installs, run
+  the notebooks, and build the wheel and sdist and check a clean wheel install.
+- `default_release_public.yml` -- on a `v*` tag, builds the artifacts and publishes them to
+  PyPI, with the `PYPI_API_TOKEN` secret when it is set and otherwise through a PyPI Trusted
+  Publisher (OIDC; the publish job has `id-token: write` and runs in the `pypi` environment).
+- `codeql.yml` -- CodeQL analysis.
 
-These files are managed by an external template. Do not edit them here; change them in the
-`default_cicd_public` template and redistribute.
-
-Publishing uses hybrid auth: the release workflow uses the `PYPI_API_TOKEN` secret when it is set,
-and otherwise publishes via an OIDC Trusted Publisher (the publish job has `id-token: write` and
-runs in the `pypi` environment). A project works on a token and migrates to OIDC with no workflow
-change; if PyPI reports a Trusted Publisher is configured but the upload still used a token, the
-secret is still present and must be deleted.
+A project works on a token and migrates to OIDC with no workflow change; if PyPI reports a Trusted
+Publisher is configured but the upload still used a token, the secret is still present and must be
+deleted.
 
 To publish a release:
 
-1. `make bump-patch` (or `-minor` / `-major`) to update `pyproject.toml` and `CHANGELOG.md`.
-   A non-final version is finalized rather than stepped past (`1.2.3rc1` patch-bumps to
-   `1.2.3`); see `docs/pyproject-reference.md` for the full table.
-2. `make release` to tag `v` + the project version, push, and create the GitHub release.
+1. `make bump-patch` (or `bump-minor` / `bump-major`) to update `pyproject.toml` and `CHANGELOG.md`,
+   then commit and push. A non-final version is finalized rather than stepped past (`1.2.3rc1`
+   patch-bumps to `1.2.3`); see `docs/pyproject-reference.md` for the full table.
+2. `make release` to tag `v` + the project version, push, and create the GitHub release; the tag
+   starts `default_release_public.yml`.
 3. Or `make ship` to push, wait for CI, release, and wait for the release workflow - CI-gated end to
    end.
 
-### Local Codecov uploads
+## Codecov
 
 - `make test` generates `coverage.xml` (the name comes from `[tool.scripts.test]
   .coverage-report-file`).

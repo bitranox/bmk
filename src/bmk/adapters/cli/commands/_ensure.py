@@ -33,8 +33,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-import rich_click as click
-
+from .. import safe_console
 from ..exit_codes import ExitCode
 from ._prerequisites import ToolCheck, ToolName, check_prerequisites, is_macos, is_windows
 
@@ -281,7 +280,7 @@ def run_ensure(*, dry_run: bool = False, strict: bool = False, quiet: bool = Fal
     """Ensure external tools are installed; print a report and return an exit code."""
     results = ensure_tools(dry_run=dry_run)
     if not quiet:
-        click.echo(format_ensure_report(results))
+        safe_console.echo(format_ensure_report(results))
     return _exit_code(results, dry_run=dry_run, strict=strict)
 
 

@@ -18,6 +18,7 @@ These options go **before** the subcommand name:
 | `--traceback` / `--no-traceback` | flag                | `False` | Show full Python traceback on errors                                |
 | `--profile NAME`                 | string              | `None`  | Load configuration from a named profile (e.g. `production`, `test`) |
 | `--set SECTION.KEY=VALUE`        | string (repeatable) | -       | Override a configuration setting; can be given multiple times       |
+| `--env-file PATH`                | path                | `None`  | Read this `.env` file instead of searching upward for one           |
 | `-h`, `--help`                   | flag                | -       | Show help and exit                                                  |
 
 ```bash
@@ -25,6 +26,7 @@ bmk --version
 bmk --traceback fail
 bmk --profile production config
 bmk --set lib_log_rich.console_level=DEBUG --set email.timeout=30 config
+bmk --env-file ./ci.env config
 ```
 
 Profile names: alphanumeric, hyphens, underscores; max 64 characters; must start with a letter or digit. Windows reserved names (CON, PRN, ...) are rejected.
@@ -35,13 +37,13 @@ Profile names: alphanumeric, hyphens, underscores; max 64 characters; must start
 
 Run the project test suite via the stage runner. All extra arguments are forwarded to the pipeline's stages.
 
-|                  |                                                                                                       |
-|------------------|-------------------------------------------------------------------------------------------------------|
-| **Aliases**      | `t`                                                                                                   |
-| **Options**      | `--human`  -  use human-readable text output instead of JSON                                          |
-| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages (unlimited, unprocessed)                           |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_PACKAGE_NAME` (if configured) |
-| **Exit codes**   | `0` success, or the first failing stage's exit code                                                   |
+|                  |                                                                                                         |
+|------------------|---------------------------------------------------------------------------------------------------------|
+| **Aliases**      | `t`                                                                                                     |
+| **Options**      | `--human`  -  use human-readable text output instead of JSON                                            |
+| **Arguments**    | `[ARGS]...`  -  forwarded to the pipeline's stages (unlimited, unprocessed)                             |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=test`, `BMK_OUTPUT_FORMAT`, `BMK_PACKAGE_NAME` (if configured)   |
+| **Exit codes**   | `0` success, `78` the configuration did not load (nothing runs), or the first failing stage's exit code |
 
 Tool output defaults to **JSON** (machine-readable). JSON mode is designed for LLM-driven
 workflows where minimizing output tokens and context window consumption matters. The
@@ -303,11 +305,11 @@ bmk cov
 
 Run a user-defined pipeline by name. Custom pipelines are defined declaratively under `[tool.bmk.pipelines.<name>]` in `pyproject.toml` or in `bmk_makescripts/stages.toml`. If no pipeline is defined for the name, a clear error is printed.
 
-|                  |                                                                                                               |
-|------------------|---------------------------------------------------------------------------------------------------------------|
-| **Arguments**    | `COMMAND_NAME` (required)  -  the command prefix to match, `[ARGS]...`  -  forwarded to the pipeline's stages |
-| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=<COMMAND_NAME>`, `BMK_PACKAGE_NAME` (if configured)                    |
-| **Exit codes**   | `0` success, `2` no pipeline defined for the name, or the first failing stage's exit code                     |
+|                  |                                                                                                                                               |
+|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| **Arguments**    | `COMMAND_NAME` (required)  -  the command prefix to match, `[ARGS]...`  -  forwarded to the pipeline's stages                                 |
+| **Env vars set** | `BMK_PROJECT_DIR`, `BMK_COMMAND_PREFIX=<COMMAND_NAME>`, `BMK_PACKAGE_NAME` (if configured)                                                    |
+| **Exit codes**   | `0` success, `2` no pipeline defined for the name, `78` the configuration did not load (nothing runs), or the first failing stage's exit code |
 
 Define the pipeline under `[tool.bmk.pipelines.<name>]` in `pyproject.toml` or `bmk_makescripts/stages.toml`. Each stage has a `name`, an `order`, and an `argv` list; stages run in order (equal orders run in parallel).
 
@@ -429,13 +431,14 @@ Send an email using configured SMTP settings. Supports plain text, HTML, multipl
 | `--raise-on-missing-attachments` / `--no-raise-on-missing-attachments` | flag                | from config | Error on missing attachment files                   |
 | `--raise-on-invalid-recipient` / `--no-raise-on-invalid-recipient`     | flag                | from config | Error on invalid recipient addresses                |
 
-| Exit code | Meaning                              |
-|-----------|--------------------------------------|
-| `0`       | Success                              |
-| `2`       | Attachment file not found            |
-| `22`      | Invalid argument (bad address, etc.) |
-| `69`      | SMTP delivery failure                |
-| `78`      | Configuration error (no SMTP hosts)  |
+| Exit code | Meaning                                                                                                                    |
+|-----------|----------------------------------------------------------------------------------------------------------------------------|
+| `0`       | Success                                                                                                                    |
+| `2`       | Attachment file not found                                                                                                  |
+| `22`      | Invalid argument (bad address, etc.)                                                                                       |
+| `69`      | SMTP delivery failure                                                                                                      |
+| `77`      | Attachment refused by btx_lib_mail's security checks                                                                       |
+| `78`      | Configuration error (no SMTP hosts, sender or recipients, an invalid `[email]` section, or the configuration did not load) |
 
 ```bash
 bmk send-email --to user@example.com --subject "Test" --body "Hello"
@@ -452,19 +455,18 @@ bmk send-email --smtp-host smtp.custom.com:465 --no-use-starttls \
 
 Send a simple plain-text notification email.
 
-| Option                                                                 | Type                | Default     | Description                          |
-|------------------------------------------------------------------------|---------------------|-------------|--------------------------------------|
-| `--to`                                                                 | string (repeatable) | from config | Recipient email address              |
-| `--subject`                                                            | string (required)   | -           | Notification subject line            |
-| `--message`                                                            | string (required)   | -           | Notification message (plain text)    |
-| `--from`                                                               | string              | from config | Override sender address              |
-| `--smtp-host`                                                          | string (repeatable) | from config | Override SMTP host(s)                |
-| `--smtp-username`                                                      | string              | from config | Override SMTP username               |
-| `--smtp-password`                                                      | string              | from config | Override SMTP password               |
-| `--use-starttls` / `--no-use-starttls`                                 | flag                | from config | Override STARTTLS setting            |
-| `--timeout`                                                            | float               | from config | Override socket timeout in seconds   |
-| `--raise-on-missing-attachments` / `--no-raise-on-missing-attachments` | flag                | from config | Error on missing attachment files    |
-| `--raise-on-invalid-recipient` / `--no-raise-on-invalid-recipient`     | flag                | from config | Error on invalid recipient addresses |
+| Option                                                             | Type                | Default     | Description                          |
+|--------------------------------------------------------------------|---------------------|-------------|--------------------------------------|
+| `--to`                                                             | string (repeatable) | from config | Recipient email address              |
+| `--subject`                                                        | string (required)   | -           | Notification subject line            |
+| `--message`                                                        | string (required)   | -           | Notification message (plain text)    |
+| `--from`                                                           | string              | from config | Override sender address              |
+| `--smtp-host`                                                      | string (repeatable) | from config | Override SMTP host(s)                |
+| `--smtp-username`                                                  | string              | from config | Override SMTP username               |
+| `--smtp-password`                                                  | string              | from config | Override SMTP password               |
+| `--use-starttls` / `--no-use-starttls`                             | flag                | from config | Override STARTTLS setting            |
+| `--timeout`                                                        | float               | from config | Override socket timeout in seconds   |
+| `--raise-on-invalid-recipient` / `--no-raise-on-invalid-recipient` | flag                | from config | Error on invalid recipient addresses |
 
 ```bash
 bmk send-notification --to ops@example.com --subject "Deploy OK" --message "All good"
@@ -520,19 +522,20 @@ bmk --traceback fail
 
 All commands use POSIX-conventional exit codes:
 
-| Code  | Name              | Meaning                                         |
-|-------|-------------------|-------------------------------------------------|
-| `0`   | SUCCESS           | Command completed successfully                  |
-| `1`   | GENERAL_ERROR     | Unspecified failure                             |
-| `2`   | FILE_NOT_FOUND    | Script or file not found (errno ENOENT)         |
-| `13`  | PERMISSION_DENIED | Insufficient permissions (errno EACCES)         |
-| `22`  | INVALID_ARGUMENT  | Bad input value (errno EINVAL)                  |
-| `69`  | SMTP_FAILURE      | Email delivery failed (sysexits EX_UNAVAILABLE) |
-| `78`  | CONFIG_ERROR      | Configuration error (sysexits EX_CONFIG)        |
-| `110` | TIMEOUT           | Operation timed out (ETIMEDOUT)                 |
-| `130` | SIGNAL_INT        | Interrupted by SIGINT (Ctrl+C)                  |
-| `141` | BROKEN_PIPE       | Broken pipe (SIGPIPE)                           |
-| `143` | SIGNAL_TERM       | Terminated by SIGTERM                           |
+| Code  | Name               | Meaning                                                     |
+|-------|--------------------|-------------------------------------------------------------|
+| `0`   | SUCCESS            | Command completed successfully                              |
+| `1`   | GENERAL_ERROR      | Unspecified failure                                         |
+| `2`   | FILE_NOT_FOUND     | Script or file not found (errno ENOENT)                     |
+| `13`  | PERMISSION_DENIED  | Insufficient permissions (errno EACCES)                     |
+| `22`  | INVALID_ARGUMENT   | Bad input value (errno EINVAL)                              |
+| `69`  | SMTP_FAILURE       | Email delivery failed (sysexits EX_UNAVAILABLE)             |
+| `77`  | ATTACHMENT_REFUSED | An attachment refused by the mail library's security checks |
+| `78`  | CONFIG_ERROR       | Configuration error (sysexits EX_CONFIG)                    |
+| `110` | TIMEOUT            | Operation timed out (ETIMEDOUT)                             |
+| `130` | SIGNAL_INT         | Interrupted by SIGINT (Ctrl+C)                              |
+| `141` | BROKEN_PIPE        | Broken pipe (SIGPIPE)                                       |
+| `143` | SIGNAL_TERM        | Terminated by SIGTERM                                       |
 
 #### Exit Code Behaviour
 

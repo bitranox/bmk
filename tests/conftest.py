@@ -9,23 +9,25 @@ Centralizes test infrastructure following clean architecture principles:
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import re
 import sys
 import tempfile
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any
 
 import lib_cli_exit_tools
+import lib_log_rich.runtime
 import pytest
+import rich_click.rich_click
 from click.testing import CliRunner, Result
 from lib_layered_config import Config
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
-    from btx_lib_mail.lib_mail import DeliveryOptions
     from lib_layered_config.domain.config import SourceInfo
 
     from bmk.adapters.memory.email import EmailSpy
@@ -152,6 +154,73 @@ def cli_runner() -> CliRunner:
     return CliRunner()
 
 
+def _restore_logging_state(handlers: list[logging.Handler], level: int, propagate: bool) -> None:
+    """Shut down a live lib_log_rich runtime and put the root logger back as it was.
+
+    ``runtime.shutdown()`` alone is not enough: production ``init_logging`` also attaches a
+    stdlib handler to the root logger and raises its level, and shutting the runtime down
+    undoes neither, so a later test's stdlib warnings would be swallowed.
+    """
+    if lib_log_rich.runtime.is_initialised():
+        lib_log_rich.runtime.shutdown()
+    root = logging.getLogger()
+    root.handlers[:] = handlers
+    root.setLevel(level)
+    root.propagate = propagate
+
+
+@pytest.fixture(autouse=True)
+def isolated_logging_state() -> Iterator[Callable[[], None]]:
+    """Reset the process-global logging state after every test.
+
+    The lib_log_rich runtime and the stdlib root logger are process-global. Once a command
+    (under the production or the testing composition) starts a runtime, it would otherwise
+    stay live for every later test, so a test would pass or fail by what ran before it rather
+    than by its own setup. The root logger is snapshotted before the test and restored after,
+    together with shutting the runtime down.
+
+    Yields:
+        The same restore step, so a test can apply it mid-test and assert its effect.
+    """
+    root = logging.getLogger()
+    handlers, level, propagate = list(root.handlers), root.level, root.propagate
+
+    def _restore() -> None:
+        _restore_logging_state(handlers, level, propagate)
+
+    yield _restore
+    _restore()
+
+
+#: The width every test's CLI output is rendered at. Wider than the 80 columns the assertions were
+#: written against, so a message that fits one line there cannot wrap on a narrower runner.
+_CLI_OUTPUT_WIDTH = 120
+
+
+@pytest.fixture(autouse=True)
+def deterministic_cli_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every test the same uncoloured, fixed-width CLI output, on any machine and in CI.
+
+    rich-click decides colour and width once, when it is imported, into module globals that each
+    command reads again when it formats an error; an environment variable changed per test arrives
+    after that import and changes nothing, so the globals are reset here:
+
+    - ``FORCE_TERMINAL`` comes from FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS, and GitHub sets
+      GITHUB_ACTIONS on every runner, so CI output was coloured and local output was not.
+    - ``WIDTH`` and ``MAX_WIDTH`` come from the terminal, which is 79 columns on the Windows
+      runners and 80 elsewhere, so an error box wrapped its message on Windows only.
+
+    rich itself reads FORCE_COLOR whenever a ``Console`` is built, which happens per command, so
+    removing the variable for the test reaches it. A console built at import time is out of reach
+    of all of this: lib_layered_config's default display console is one, so the
+    ``display_config`` tests still see colour when FORCE_COLOR is exported for the whole run.
+    """
+    monkeypatch.setattr(rich_click.rich_click, "FORCE_TERMINAL", None)
+    monkeypatch.setattr(rich_click.rich_click, "WIDTH", _CLI_OUTPUT_WIDTH)
+    monkeypatch.setattr(rich_click.rich_click, "MAX_WIDTH", _CLI_OUTPUT_WIDTH)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+
 @pytest.fixture
 def production_factory() -> Callable[[], AppServices]:
     """Provide the production services factory for tests.
@@ -170,6 +239,18 @@ def production_factory() -> Callable[[], AppServices]:
     from bmk.composition import build_production
 
     return build_production
+
+
+@pytest.fixture
+def user_layer_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point every OS's user-layer location at ``tmp_path`` and return it.
+
+    A deploy then writes under ``tmp_path`` rather than into the real user configuration
+    directory, and the developer's own user-layer files cannot decide a result.
+    """
+    for name in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path))
+    return tmp_path
 
 
 @pytest.fixture
@@ -344,6 +425,7 @@ def inject_config(
             result = cli_runner.invoke(cli, ["config"], obj=factory)
             assert "key" in result.output
     """
+    from bmk.adapters.memory import check_logging_config_in_memory, init_logging_in_memory
     from bmk.composition import AppServices, build_production
 
     def _inject(config: Config) -> Callable[[], AppServices]:
@@ -359,7 +441,10 @@ def inject_config(
             send_email=prod.send_email,
             send_notification=prod.send_notification,
             load_email_config_from_dict=prod.load_email_config_from_dict,
-            init_logging=prod.init_logging,
+            # The quiet runtime: production init_logging queues INFO lines that race into
+            # CliRunner's stderr, so a stderr assertion would depend on timing.
+            init_logging=init_logging_in_memory,
+            check_logging_config=check_logging_config_in_memory,
         )
         return lambda: test_services
 
@@ -395,6 +480,7 @@ def inject_config_with_profile_capture(
             cli_runner.invoke(cli, ["--profile", "staging", "config"], obj=factory)
             assert captured == ["staging"]
     """
+    from bmk.adapters.memory import check_logging_config_in_memory, init_logging_in_memory
     from bmk.composition import AppServices, build_production
 
     def _inject(config: Config, captured_profiles: list[str | None]) -> Callable[[], AppServices]:
@@ -411,7 +497,10 @@ def inject_config_with_profile_capture(
             send_email=prod.send_email,
             send_notification=prod.send_notification,
             load_email_config_from_dict=prod.load_email_config_from_dict,
-            init_logging=prod.init_logging,
+            # The quiet runtime: production init_logging queues INFO lines that race into
+            # CliRunner's stderr, so a stderr assertion would depend on timing.
+            init_logging=init_logging_in_memory,
+            check_logging_config=check_logging_config_in_memory,
         )
         return lambda: test_services
 
@@ -447,6 +536,7 @@ def inject_deploy_with_profile_capture(
             cli_runner.invoke(cli, ["--profile", "prod", "config-deploy", ...], obj=factory)
             assert captured == ["prod"]
     """
+    from bmk.adapters.memory import check_logging_config_in_memory, init_logging_in_memory
     from bmk.composition import AppServices, build_production
 
     def _inject(deployed_path: Path, captured_profiles: list[str | None]) -> Callable[[], AppServices]:
@@ -455,9 +545,10 @@ def inject_deploy_with_profile_capture(
             targets: Any,
             force: bool = False,
             profile: str | None = None,
-            set_permissions: bool = True,
+            set_permissions: bool | None = None,
             dir_mode: int | None = None,
             file_mode: int | None = None,
+            permission_overrides: Mapping[str, object] | None = None,
         ) -> list[Path]:
             captured_profiles.append(profile)
             return [deployed_path]
@@ -471,7 +562,10 @@ def inject_deploy_with_profile_capture(
             send_email=prod.send_email,
             send_notification=prod.send_notification,
             load_email_config_from_dict=prod.load_email_config_from_dict,
-            init_logging=prod.init_logging,
+            # The quiet runtime: production init_logging queues INFO lines that race into
+            # CliRunner's stderr, so a stderr assertion would depend on timing.
+            init_logging=init_logging_in_memory,
+            check_logging_config=check_logging_config_in_memory,
         )
         return lambda: test_services
 
@@ -503,6 +597,7 @@ def inject_deploy_configuration() -> Callable[[Callable[..., list[Path]]], Calla
             cli_runner.invoke(cli, ["config-deploy", "--target", "user"], obj=factory)
             assert len(calls) == 1
     """
+    from bmk.adapters.memory import check_logging_config_in_memory, init_logging_in_memory
     from bmk.composition import AppServices, build_production
 
     def _inject(deploy_fn: Callable[..., list[Path]]) -> Callable[[], AppServices]:
@@ -515,7 +610,10 @@ def inject_deploy_configuration() -> Callable[[Callable[..., list[Path]]], Calla
             send_email=prod.send_email,
             send_notification=prod.send_notification,
             load_email_config_from_dict=prod.load_email_config_from_dict,
-            init_logging=prod.init_logging,
+            # The quiet runtime: production init_logging queues INFO lines that race into
+            # CliRunner's stderr, so a stderr assertion would depend on timing.
+            init_logging=init_logging_in_memory,
+            check_logging_config=check_logging_config_in_memory,
         )
         return lambda: test_services
 
@@ -548,82 +646,6 @@ def inject_test_services() -> Callable[[], Callable[[], AppServices]]:
         return build_testing
 
     return _inject
-
-
-@dataclass(frozen=True)
-class RecordedDelivery:
-    """One message handed to the transport for one recipient via one host.
-
-    Attributes:
-        host: SMTP host the message was routed to, as ``host:port``.
-        sender: Envelope sender address.
-        recipient: Single envelope recipient address.
-        message: Raw composed message bytes.
-    """
-
-    host: str
-    sender: str
-    recipient: str
-    message: bytes
-
-
-@dataclass
-class RecordingTransport:
-    """btx_lib_mail ``Transport`` double that records deliveries in memory.
-
-    btx_lib_mail composes the message and orchestrates per-host failover, then
-    hands each (host, recipient) pair to a ``Transport``. Injecting this double
-    via ``send_email(transport=...)`` exercises that real code path without a
-    live SMTP server, which is why delivery tests must not reach for
-    ``patch("smtplib.SMTP")`` - that pins btx_lib_mail's private wire protocol,
-    and broke wholesale when 1.5.0 moved to RFC 3030 BDAT framing.
-
-    Attributes:
-        fail_hosts: Hosts that raise instead of accepting, to drive failover.
-        failure: Exception a failing host raises. Defaults to ``ConnectionError``;
-            set it to distinguish a refusal reason (auth rejected, recipient
-            refused) that the caller is expected to surface differently.
-        deliveries: Every accepted delivery, in the order it was handed over.
-        attempted_hosts: Every host handed over, accepted or not, in order.
-    """
-
-    fail_hosts: Collection[str] = ()
-    failure: Exception | None = None
-    deliveries: list[RecordedDelivery] = field(default_factory=list[RecordedDelivery])
-    attempted_hosts: list[str] = field(default_factory=list[str])
-
-    @property
-    def recipients(self) -> list[str]:
-        """Recipient addresses of all accepted deliveries, in order."""
-        return [delivery.recipient for delivery in self.deliveries]
-
-    @property
-    def hosts(self) -> list[str]:
-        """Hosts of all accepted deliveries, in order."""
-        return [delivery.host for delivery in self.deliveries]
-
-    def deliver(
-        self,
-        *,
-        host: str,
-        sender: str,
-        recipient: str,
-        message: IO[bytes],
-        delivery: DeliveryOptions,
-    ) -> None:
-        """Accept a message, or raise when ``host`` is configured to fail."""
-        del delivery  # Credentials/TLS options are btx_lib_mail's concern, not the double's.
-        self.attempted_hosts.append(host)
-        if host in self.fail_hosts:
-            raise self.failure or ConnectionError(f"simulated delivery failure for {host}")
-        message.seek(0)
-        self.deliveries.append(RecordedDelivery(host=host, sender=sender, recipient=recipient, message=message.read()))
-
-
-@pytest.fixture
-def recording_transport() -> RecordingTransport:
-    """Transport double capturing what would have gone out over SMTP."""
-    return RecordingTransport()
 
 
 @dataclass
@@ -676,7 +698,8 @@ def email_cli_context(
             assert result.exit_code == 0
             assert ctx.spy.sent_notifications[0].subject == "Hi"
     """
-    from bmk.adapters.memory import load_email_config_from_dict_in_memory
+    from bmk.adapters.email.config import load_email_config_from_dict
+    from bmk.adapters.memory import check_logging_config_in_memory, init_logging_in_memory
     from bmk.adapters.memory.email import EmailSpy as EmailSpyImpl
     from bmk.composition import AppServices, build_production
 
@@ -695,8 +718,11 @@ def email_cli_context(
             display_config=prod.display_config,
             send_email=spy.send_email,
             send_notification=spy.send_notification,
-            load_email_config_from_dict=load_email_config_from_dict_in_memory,
-            init_logging=prod.init_logging,
+            load_email_config_from_dict=load_email_config_from_dict,
+            # The quiet runtime: production init_logging queues INFO lines that race into
+            # CliRunner's stderr, so a stderr assertion would depend on timing.
+            init_logging=init_logging_in_memory,
+            check_logging_config=check_logging_config_in_memory,
         )
         return EmailCliContext(factory=lambda: test_services, spy=spy)
 
@@ -728,6 +754,7 @@ def config_cli_context(
             result = cli_runner.invoke(cli, ["config"], obj=factory)
             assert "key" in result.output
     """
+    from bmk.adapters.memory import check_logging_config_in_memory, init_logging_in_memory
     from bmk.composition import AppServices, build_production
 
     def _create(config_data: dict[str, Any]) -> Callable[[], AppServices]:
@@ -745,7 +772,10 @@ def config_cli_context(
             send_email=prod.send_email,
             send_notification=prod.send_notification,
             load_email_config_from_dict=prod.load_email_config_from_dict,
-            init_logging=prod.init_logging,
+            # The quiet runtime: production init_logging queues INFO lines that race into
+            # CliRunner's stderr, so a stderr assertion would depend on timing.
+            init_logging=init_logging_in_memory,
+            check_logging_config=check_logging_config_in_memory,
         )
         return lambda: test_services
 

@@ -16,13 +16,14 @@ from lib_layered_config import Config
 from ...domain.enums import DeployTarget, OutputFormat
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 
 def get_config_in_memory(
     *,
     profile: str | None = None,
     start_dir: str | None = None,
+    dotenv_path: str | None = None,
 ) -> Config:
     """Return an empty in-memory Config."""
     return Config({}, {})
@@ -38,9 +39,10 @@ def deploy_configuration_in_memory(
     targets: Sequence[DeployTarget],
     force: bool = False,
     profile: str | None = None,
-    set_permissions: bool = True,
+    set_permissions: bool | None = None,
     dir_mode: int | None = None,
     file_mode: int | None = None,
+    permission_overrides: Mapping[str, object] | None = None,
 ) -> list[Path]:
     """Simulate deployment -- no filesystem changes, returns empty list."""
     return []

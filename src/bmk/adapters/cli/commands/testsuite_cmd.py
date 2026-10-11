@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import lib_log_rich.runtime
 import rich_click as click
 
+from ..config_load import require_config
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
 from ..typed_click import argument, option
@@ -73,10 +74,10 @@ def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
         >>> result.exit_code in (0, 2)  # 0 on success
         True
     """
-    cli_ctx = get_cli_context(ctx)
+    config = require_config(ctx, get_cli_context(ctx))
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "test"}):
         logger.info("Executing test command - this will take some minutes")
-        _run_test(args, cli_ctx.config, human=human)
+        _run_test(args, config, human=human)
 
 
 @click.command("t", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
@@ -95,10 +96,10 @@ def cli_t(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
         >>> result.exit_code in (0, 2)  # 0 on success
         True
     """
-    cli_ctx = get_cli_context(ctx)
+    config = require_config(ctx, get_cli_context(ctx))
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "t"}):
         logger.info("Executing test command - this will take some minutes")
-        _run_test(args, cli_ctx.config, human=human)
+        _run_test(args, config, human=human)
 
 
 __all__ = [

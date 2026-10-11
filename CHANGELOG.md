@@ -6,6 +6,36 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Added
+
+- **`--env-file PATH`** root option: read this `.env` file instead of searching upward for one.
+  Without it, the upward search behaves as before.
+
+### Changed
+
+- **Synced with bitranox_template_py_cli 2.4.0** (a three-way merge from the template of
+  2026-07-24, the nearest version bmk matched). The template's fixes replace bmk's hand-made
+  versions of them; bmk's own commands and aliases, the stage runner, the bundled Makefile,
+  `config.d/10-bmk.toml` and the grouped runtime dependencies stay.
+- A configuration that cannot be loaded no longer stops every command: the root records the
+  failure, a command that reads the configuration (`config`, `send-email`, `send-notification`,
+  `test`/`t`, `custom`) refuses with exit 78 and one `Error:` line, and the others run.
+- `EmailConfig` is a subclass of btx_lib_mail's `ConfMail` (`btx_lib_mail>=4.0.0`). The Python
+  field names follow ConfMail (`smtphosts`, `smtp_use_starttls`, `smtp_timeout`); the keys in the
+  configuration files stay the same.
+- An unknown key in `[email]` or `[email.attachments]` is refused (exit 78), with one `Error:` line
+  per problem that names the file key (`email.timeout`, not `email`).
+- New `[email]` keys: `starttls_verify`, `local_hostname`, `delivery_deadline`,
+  `recipient_max_count`, and `attachments.max_count`.
+- A delivery error keeps the library's message; it is no longer replaced when it contains a word
+  such as "password".
+- `config --profile` checks the logging configuration with `lib_log_rich.validate_config` and
+  refuses what `config` without a profile refuses.
+- A `--set` value appears in the `config` output with the source `cli`.
+- `send-notification` no longer offers `--raise-on-missing-attachments`; it takes no attachments.
+- Command output goes through `safe_console.echo`, so a console with a legacy code page (cp1252)
+  does not abort it.
+
 ## [3.19.0] 2026-10-12 09:38:11
 
 ### Fixed

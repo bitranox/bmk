@@ -8,13 +8,18 @@ email operations.
 from __future__ import annotations
 
 import smtplib
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from pathlib import Path
+from typing import IO, TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
-from conftest import RecordingTransport
+import rtoml
+from btx_lib_mail import ConfMail
+from pydantic import SecretStr
 from pydantic import ValidationError as PydanticValidationError
 
+from bmk.adapters.cli.commands.email._common import EmailConfigOverrides, apply_validated_overrides
 from bmk.adapters.email.sender import (
     EmailConfig,
     load_email_config_from_dict,
@@ -24,7 +29,75 @@ from bmk.adapters.email.sender import (
 from bmk.domain.errors import ConfigurationError, DeliveryError
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable, Iterable
+
+    from btx_lib_mail.lib_mail import DeliveryOptions
+
+# ======================== Transport test double ========================
+
+
+@dataclass(frozen=True)
+class _Delivery:
+    """One message the transport was asked to deliver."""
+
+    host: str
+    sender: str
+    recipient: str
+    payload: bytes
+    credentials: tuple[str, str] | None
+    local_hostname: str | None
+    starttls_verify: bool
+    deadline: float | None
+
+
+class RecordingTransport:
+    """btx_lib_mail ``Transport`` double that records deliveries instead of sending.
+
+    Injected via the ``transport`` parameter rather than monkeypatching
+    :mod:`smtplib`, so these tests assert on delivery intent (who, where, what)
+    and stay independent of the library's wire protocol (DATA vs BDAT).
+
+    Hosts named in ``failing_hosts`` raise on delivery, which drives the
+    library's host-failover path without opening a socket.
+    """
+
+    def __init__(self, failing_hosts: Iterable[str] = (), failure: Exception | None = None) -> None:
+        self.deliveries: list[_Delivery] = []
+        self.attempted_hosts: list[str] = []
+        self._failing_hosts = frozenset(failing_hosts)
+        self._failure = failure
+
+    def deliver(
+        self,
+        *,
+        host: str,
+        sender: str,
+        recipient: str,
+        message: IO[bytes],
+        delivery: DeliveryOptions,
+    ) -> None:
+        """Record the attempt, or raise when ``host`` is configured to fail."""
+        self.attempted_hosts.append(host)
+        if host in self._failing_hosts:
+            raise self._failure or smtplib.SMTPConnectError(421, f"simulated failure for {host}")
+        self.deliveries.append(
+            _Delivery(
+                host=host,
+                sender=sender,
+                recipient=recipient,
+                payload=message.read(),
+                credentials=delivery.credentials,
+                local_hostname=delivery.local_hostname,
+                starttls_verify=delivery.starttls_verify,
+                deadline=delivery.deadline,
+            )
+        )
+
+    @property
+    def recipients(self) -> list[str]:
+        """Recipients that were successfully delivered to, in order."""
+        return [delivery.recipient for delivery in self.deliveries]
+
 
 # ======================== EmailConfig Default Values ========================
 
@@ -32,7 +105,7 @@ if TYPE_CHECKING:
 @pytest.mark.os_agnostic
 def test_email_config_default_smtp_hosts_is_empty_list() -> None:
     """Default EmailConfig has an empty smtp_hosts list."""
-    assert EmailConfig().smtp_hosts == []
+    assert EmailConfig().smtphosts == []
 
 
 @pytest.mark.os_agnostic
@@ -52,13 +125,13 @@ def test_email_config_default_credentials_are_none() -> None:
 @pytest.mark.os_agnostic
 def test_email_config_default_use_starttls_is_true() -> None:
     """Default EmailConfig enables STARTTLS."""
-    assert EmailConfig().use_starttls is True
+    assert EmailConfig().smtp_use_starttls is True
 
 
 @pytest.mark.os_agnostic
 def test_email_config_default_timeout_is_thirty_seconds() -> None:
     """Default EmailConfig uses a 30-second timeout."""
-    assert EmailConfig().timeout == 30.0
+    assert EmailConfig().smtp_timeout == 30.0
 
 
 @pytest.mark.os_agnostic
@@ -77,22 +150,23 @@ def test_email_config_default_raises_on_invalid_recipient() -> None:
 def test_email_config_accepts_custom_values() -> None:
     """When custom values provided, EmailConfig stores them correctly."""
     config = EmailConfig(
-        smtp_hosts=["smtp.example.com:587"],
+        smtphosts=["smtp.example.com:587"],
         from_address="test@example.com",
         recipients=["admin@example.com", "ops@example.com"],
         smtp_username="user",
-        smtp_password="pass",
-        use_starttls=False,
-        timeout=60.0,
+        smtp_password=SecretStr("pass"),
+        smtp_use_starttls=False,
+        smtp_timeout=60.0,
     )
 
-    assert config.smtp_hosts == ["smtp.example.com:587"]
+    assert config.smtphosts == ["smtp.example.com:587"]
     assert config.from_address == "test@example.com"
     assert config.recipients == ["admin@example.com", "ops@example.com"]
     assert config.smtp_username == "user"
-    assert config.smtp_password == "pass"
-    assert config.use_starttls is False
-    assert config.timeout == 60.0
+    assert config.smtp_password is not None
+    assert config.smtp_password.get_secret_value() == "pass"
+    assert config.smtp_use_starttls is False
+    assert config.smtp_timeout == 60.0
 
 
 @pytest.mark.os_agnostic
@@ -101,7 +175,7 @@ def test_email_config_is_immutable() -> None:
     config = EmailConfig()
 
     with pytest.raises(PydanticValidationError):
-        config.smtp_hosts = ["new.smtp.com"]  # type: ignore[misc]
+        config.smtphosts = ["new.smtp.com"]  # type: ignore[misc]
 
 
 # ======================== EmailConfig Validation ========================
@@ -111,14 +185,14 @@ def test_email_config_is_immutable() -> None:
 def test_email_config_rejects_negative_timeout() -> None:
     """Negative timeout values are caught early with clear error."""
     with pytest.raises(PydanticValidationError, match="timeout must be positive"):
-        EmailConfig(timeout=-5.0)
+        EmailConfig(smtp_timeout=-5.0)
 
 
 @pytest.mark.os_agnostic
 def test_email_config_rejects_zero_timeout() -> None:
     """Zero timeout is rejected as it would cause immediate failures."""
     with pytest.raises(PydanticValidationError, match="timeout must be positive"):
-        EmailConfig(timeout=0.0)
+        EmailConfig(smtp_timeout=0.0)
 
 
 @pytest.mark.os_agnostic
@@ -132,77 +206,77 @@ def test_email_config_rejects_invalid_from_address() -> None:
 def test_email_config_rejects_malformed_smtp_host_port() -> None:
     """SMTP host with invalid host:port format is rejected."""
     with pytest.raises(PydanticValidationError, match="invalid smtp port"):
-        EmailConfig(smtp_hosts=["smtp.test.com:587:extra"])
+        EmailConfig(smtphosts=["smtp.test.com:587:extra"])
 
 
 @pytest.mark.os_agnostic
 def test_email_config_rejects_non_numeric_port() -> None:
     """Port must be a number, not text."""
     with pytest.raises(PydanticValidationError, match="invalid smtp port"):
-        EmailConfig(smtp_hosts=["smtp.test.com:abc"])
+        EmailConfig(smtphosts=["smtp.test.com:abc"])
 
 
 @pytest.mark.os_agnostic
 def test_email_config_rejects_port_above_65535() -> None:
     """Port must be within valid TCP range."""
     with pytest.raises(PydanticValidationError, match="port must be 1-65535"):
-        EmailConfig(smtp_hosts=["smtp.test.com:99999"])
+        EmailConfig(smtphosts=["smtp.test.com:99999"])
 
 
 @pytest.mark.os_agnostic
 def test_email_config_rejects_port_below_1() -> None:
     """Port 0 is reserved and invalid."""
     with pytest.raises(PydanticValidationError, match="port must be 1-65535"):
-        EmailConfig(smtp_hosts=["smtp.test.com:0"])
+        EmailConfig(smtphosts=["smtp.test.com:0"])
 
 
 @pytest.mark.os_agnostic
 def test_email_config_accepts_host_without_port() -> None:
     """SMTP host without explicit port uses default."""
-    config = EmailConfig(smtp_hosts=["smtp.test.com"])
-    assert config.smtp_hosts == ["smtp.test.com"]
+    config = EmailConfig(smtphosts=["smtp.test.com"])
+    assert config.smtphosts == ["smtp.test.com"]
 
 
 @pytest.mark.os_agnostic
 def test_email_config_accepts_host_with_valid_port() -> None:
     """SMTP host with standard port is accepted."""
-    config = EmailConfig(smtp_hosts=["smtp.test.com:587"])
-    assert config.smtp_hosts == ["smtp.test.com:587"]
+    config = EmailConfig(smtphosts=["smtp.test.com:587"])
+    assert config.smtphosts == ["smtp.test.com:587"]
 
 
 @pytest.mark.os_agnostic
 def test_email_config_accepts_ipv6_bracketed_host_with_port() -> None:
     """Bracketed IPv6 address with port is accepted."""
-    config = EmailConfig(smtp_hosts=["[::1]:25"])
-    assert config.smtp_hosts == ["[::1]:25"]
+    config = EmailConfig(smtphosts=["[::1]:25"])
+    assert config.smtphosts == ["[::1]:25"]
 
 
 @pytest.mark.os_agnostic
 def test_email_config_accepts_ipv6_bracketed_host_without_port() -> None:
     """Bracketed IPv6 address without port is accepted."""
-    config = EmailConfig(smtp_hosts=["[::1]"])
-    assert config.smtp_hosts == ["[::1]"]
+    config = EmailConfig(smtphosts=["[::1]"])
+    assert config.smtphosts == ["[::1]"]
 
 
 @pytest.mark.os_agnostic
 def test_email_config_accepts_full_ipv6_bracketed_host() -> None:
     """Full bracketed IPv6 address with port is accepted."""
-    config = EmailConfig(smtp_hosts=["[2001:db8::1]:587"])
-    assert config.smtp_hosts == ["[2001:db8::1]:587"]
+    config = EmailConfig(smtphosts=["[2001:db8::1]:587"])
+    assert config.smtphosts == ["[2001:db8::1]:587"]
 
 
 @pytest.mark.os_agnostic
 def test_email_config_rejects_ipv6_missing_closing_bracket() -> None:
     """Bracketed IPv6 without closing bracket is rejected."""
     with pytest.raises(PydanticValidationError, match="missing closing bracket"):
-        EmailConfig(smtp_hosts=["[::1"])
+        EmailConfig(smtphosts=["[::1"])
 
 
 @pytest.mark.os_agnostic
 def test_email_config_rejects_ipv6_invalid_port() -> None:
     """Bracketed IPv6 with non-numeric port is rejected."""
     with pytest.raises(PydanticValidationError, match="invalid smtp port"):
-        EmailConfig(smtp_hosts=["[::1]:abc"])
+        EmailConfig(smtphosts=["[::1]:abc"])
 
 
 @pytest.mark.os_agnostic
@@ -240,49 +314,14 @@ def test_email_config_rejects_double_at_sign() -> None:
         EmailConfig(from_address="a@@b.com")
 
 
-# ======================== EmailConfig String-to-List Coercion ========================
-
-
-@pytest.mark.os_agnostic
-def test_email_config_coerces_string_smtp_hosts_to_list() -> None:
-    """Single string smtp_hosts is coerced to single-element list."""
-    config = EmailConfig(smtp_hosts="smtp.example.com:587")  # type: ignore[arg-type]
-    assert config.smtp_hosts == ["smtp.example.com:587"]
-
-
-@pytest.mark.os_agnostic
-def test_email_config_coerces_string_recipients_to_list() -> None:
-    """Single string recipients is coerced to single-element list."""
-    config = EmailConfig(recipients="user@example.com")  # type: ignore[arg-type]
-    assert config.recipients == ["user@example.com"]
-
-
-@pytest.mark.os_agnostic
-def test_email_config_coerces_empty_string_smtp_hosts_to_empty_list() -> None:
-    """Empty string smtp_hosts becomes empty list."""
-    config = EmailConfig(smtp_hosts="")  # type: ignore[arg-type]
-    assert config.smtp_hosts == []
-
-
-@pytest.mark.os_agnostic
-def test_email_config_coerces_whitespace_string_smtp_hosts_to_empty_list() -> None:
-    """Whitespace-only string smtp_hosts becomes empty list."""
-    config = EmailConfig(smtp_hosts="   ")  # type: ignore[arg-type]
-    assert config.smtp_hosts == []
-
-
-@pytest.mark.os_agnostic
-def test_email_config_coerces_empty_string_recipients_to_empty_list() -> None:
-    """Empty string recipients becomes empty list."""
-    config = EmailConfig(recipients="")  # type: ignore[arg-type]
-    assert config.recipients == []
+# ======================== EmailConfig lists ========================
 
 
 @pytest.mark.os_agnostic
 def test_email_config_preserves_list_smtp_hosts() -> None:
     """List smtp_hosts is preserved unchanged."""
-    config = EmailConfig(smtp_hosts=["smtp1.example.com:587", "smtp2.example.com:25"])
-    assert config.smtp_hosts == ["smtp1.example.com:587", "smtp2.example.com:25"]
+    config = EmailConfig(smtphosts=["smtp1.example.com:587", "smtp2.example.com:25"])
+    assert config.smtphosts == ["smtp1.example.com:587", "smtp2.example.com:25"]
 
 
 @pytest.mark.os_agnostic
@@ -292,42 +331,126 @@ def test_email_config_preserves_list_recipients() -> None:
     assert config.recipients == ["a@example.com", "b@example.com"]
 
 
-# ======================== EmailConfig Conversion ========================
+_PASSWORD = "s3cr3t-value"
+
+
+def _dumped_json(config: EmailConfig) -> str:
+    return config.model_dump_json()
+
+
+def _dumped_python(config: EmailConfig) -> str:
+    return str(config.model_dump())
+
+
+def _instance_vars(config: EmailConfig) -> str:
+    return str(vars(config))
 
 
 @pytest.mark.os_agnostic
-def test_to_conf_mail_maps_smtp_hosts() -> None:
-    """to_conf_mail maps smtp_hosts to ConfMail.smtphosts."""
-    config = EmailConfig(smtp_hosts=["smtp.example.com:587"])
+@pytest.mark.parametrize(
+    "render",
+    [str, repr, format, _dumped_json, _dumped_python, _instance_vars],
+    ids=["str", "repr", "format", "model_dump_json", "model_dump", "vars"],
+)
+def test_no_rendering_of_the_email_config_shows_the_password(render: Callable[[EmailConfig], str]) -> None:
+    """A config reaching a log line, an error message or a JSON dump must not carry the password.
 
-    assert config.to_conf_mail().smtphosts == ["smtp.example.com:587"]
+    Loaded the way a config file supplies it: a plain string.
+    """
+    config = load_email_config_from_dict(
+        {"email": {"smtp_hosts": ["smtp.example.com:587"], "smtp_username": "user", "smtp_password": _PASSWORD}}
+    )
 
-
-@pytest.mark.os_agnostic
-def test_to_conf_mail_maps_credentials() -> None:
-    """to_conf_mail maps username and password to ConfMail fields."""
-    config = EmailConfig(smtp_username="user", smtp_password="pass")
-    conf = config.to_conf_mail()
-
-    assert conf.smtp_username == "user"
-    # ConfMail.smtp_password is a SecretStr (btx_lib_mail 1.4.0+), masked in repr.
-    assert conf.smtp_password is not None
-    assert conf.smtp_password.get_secret_value() == "pass"
+    assert _PASSWORD not in render(config)
 
 
 @pytest.mark.os_agnostic
-def test_to_conf_mail_maps_timeout() -> None:
-    """to_conf_mail maps timeout to ConfMail.smtp_timeout."""
-    config = EmailConfig(timeout=45.0)
+def test_an_override_keeps_the_configured_password() -> None:
+    config = EmailConfig(smtphosts=["smtp.example.com:587"], smtp_username="user", smtp_password=SecretStr(_PASSWORD))
 
-    assert config.to_conf_mail().smtp_timeout == 45.0
+    overridden = apply_validated_overrides(config, EmailConfigOverrides.from_cli_options(timeout=5.0))
+
+    assert overridden.smtp_password is not None
+    assert overridden.smtp_password.get_secret_value() == _PASSWORD
+    assert overridden.smtp_timeout == 5.0
 
 
 @pytest.mark.os_agnostic
-def test_to_conf_mail_maps_starttls() -> None:
-    """to_conf_mail maps use_starttls to ConfMail.smtp_use_starttls."""
-    assert EmailConfig(use_starttls=True).to_conf_mail().smtp_use_starttls is True
-    assert EmailConfig(use_starttls=False).to_conf_mail().smtp_use_starttls is False
+def test_no_override_given_returns_the_configuration_itself() -> None:
+    config = EmailConfig(smtphosts=["smtp.example.com:587"])
+
+    assert apply_validated_overrides(config, EmailConfigOverrides.from_cli_options()) is config
+
+
+@pytest.mark.os_agnostic
+def test_an_unset_host_option_keeps_the_hosts_and_a_set_one_replaces_them() -> None:
+    config = EmailConfig(smtphosts=["smtp.example.com:587"])
+
+    unset = apply_validated_overrides(config, EmailConfigOverrides.from_cli_options(smtp_hosts=()))
+    replaced = apply_validated_overrides(
+        config, EmailConfigOverrides.from_cli_options(smtp_hosts=("other.example.com:25", "third.example.com:25"))
+    )
+
+    assert unset.smtphosts == ["smtp.example.com:587"]
+    assert replaced.smtphosts == ["other.example.com:25", "third.example.com:25"]
+
+
+@pytest.mark.os_agnostic
+def test_a_password_given_on_the_command_line_never_renders_from_the_overrides() -> None:
+    overrides = EmailConfigOverrides.from_cli_options(smtp_password=_PASSWORD)
+
+    assert _PASSWORD not in repr(overrides)
+    assert _PASSWORD not in str(overrides.model_dump())
+    assert overrides.smtp_password is not None
+    assert overrides.smtp_password.get_secret_value() == _PASSWORD
+
+
+@pytest.mark.os_agnostic
+def test_an_override_refuses_a_name_that_is_not_an_email_config_field() -> None:
+    """The overrides carry EmailConfig's own field names, so a renamed field cannot pass unnoticed."""
+    with pytest.raises(PydanticValidationError, match="smtp_hosts"):
+        EmailConfigOverrides.model_validate({"smtp_hosts": ["smtp.example.com:587"]})
+
+
+@pytest.mark.os_agnostic
+def test_each_command_line_option_lands_in_its_own_field() -> None:
+    """Every option is distinct from its neighbours, so a swapped parameter shows as a mismatch."""
+    overrides = EmailConfigOverrides.from_cli_options(
+        smtp_hosts=("smtp.example.com:587",),
+        smtp_username="user",
+        smtp_password=_PASSWORD,
+        use_starttls=False,
+        timeout=7.5,
+        raise_on_missing_attachments=True,
+        raise_on_invalid_recipient=False,
+    )
+
+    dumped = overrides.model_dump()
+    secret = dumped.pop("smtp_password")
+
+    assert secret.get_secret_value() == _PASSWORD
+    assert dumped == {
+        "smtphosts": ("smtp.example.com:587",),
+        "smtp_username": "user",
+        "smtp_use_starttls": False,
+        "smtp_timeout": 7.5,
+        "raise_on_missing_attachments": True,
+        "raise_on_invalid_recipient": False,
+    }
+
+
+@pytest.mark.os_agnostic
+def test_a_refused_password_value_stays_out_of_the_error_details() -> None:
+    with pytest.raises(PydanticValidationError) as caught:
+        EmailConfigOverrides.model_validate({"smtp_password": [_PASSWORD]})
+
+    assert _PASSWORD not in str(caught.value.errors())
+    assert _PASSWORD not in caught.value.json()
+
+
+@pytest.mark.os_agnostic
+def test_every_override_names_an_email_config_field() -> None:
+    assert set(EmailConfigOverrides.model_fields) <= set(EmailConfig.model_fields)
 
 
 # ======================== load_email_config_from_dict ========================
@@ -338,7 +461,7 @@ def test_load_config_returns_defaults_when_email_section_missing() -> None:
     """Missing email section falls back to safe defaults."""
     config = load_email_config_from_dict({})
 
-    assert config.smtp_hosts == []
+    assert config.smtphosts == []
     assert config.from_address is None
 
 
@@ -358,12 +481,13 @@ def test_load_config_extracts_values_from_email_section() -> None:
 
     config = load_email_config_from_dict(config_dict)
 
-    assert config.smtp_hosts == ["smtp.test.com:587"]
+    assert config.smtphosts == ["smtp.test.com:587"]
     assert config.from_address == "alerts@test.com"
     assert config.smtp_username == "testuser"
-    assert config.smtp_password == "testpass"
-    assert config.use_starttls is False
-    assert config.timeout == 120.0
+    assert config.smtp_password is not None
+    assert config.smtp_password.get_secret_value() == "testpass"
+    assert config.smtp_use_starttls is False
+    assert config.smtp_timeout == 120.0
 
 
 @pytest.mark.os_agnostic
@@ -378,10 +502,10 @@ def test_load_config_merges_partial_config_with_defaults() -> None:
 
     config = load_email_config_from_dict(config_dict)
 
-    assert config.smtp_hosts == ["smtp.partial.com"]
+    assert config.smtphosts == ["smtp.partial.com"]
     assert config.from_address == "partial@test.com"
     assert config.smtp_username is None
-    assert config.use_starttls is True
+    assert config.smtp_use_starttls is True
 
 
 @pytest.mark.os_agnostic
@@ -409,7 +533,7 @@ def test_load_config_coerces_string_smtp_hosts_to_list() -> None:
 
     email_config = load_email_config_from_dict(config_dict)
 
-    assert email_config.smtp_hosts == ["smtp.example.com:587"]
+    assert email_config.smtphosts == ["smtp.example.com:587"]
 
 
 @pytest.mark.os_agnostic
@@ -419,7 +543,7 @@ def test_load_config_uses_default_for_string_boolean() -> None:
 
     email_config = load_email_config_from_dict(config_dict)
 
-    assert email_config.use_starttls is True
+    assert email_config.smtp_use_starttls is True
 
 
 @pytest.mark.os_agnostic
@@ -482,202 +606,218 @@ def test_load_config_rejects_mixed_invalid_values() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_send_email_delivers_simple_message(recording_transport: RecordingTransport) -> None:
+def test_send_email_delivers_simple_message() -> None:
     """Basic email with required fields is sent successfully."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients="recipient@test.com",
         subject="Test Subject",
         body="Test body",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["recipient@test.com"]
-    assert recording_transport.hosts == ["smtp.test.com:587"]
-    assert recording_transport.deliveries[0].sender == "sender@test.com"
+    assert transport.recipients == ["recipient@test.com"]
+    assert transport.deliveries[0].sender == "sender@test.com"
+    assert transport.deliveries[0].host == "smtp.test.com:587"
+    assert b"Test body" in transport.deliveries[0].payload
 
 
 @pytest.mark.os_agnostic
-def test_send_email_includes_html_body(recording_transport: RecordingTransport) -> None:
+def test_send_email_includes_html_body() -> None:
     """Email with both plain text and HTML is sent as multipart."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients="recipient@test.com",
         subject="Test Subject",
         body="Plain text",
         body_html="<h1>HTML</h1>",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert b"<h1>HTML</h1>" in recording_transport.deliveries[0].message
+    payload = transport.deliveries[0].payload
+    assert b"multipart/alternative" in payload
+    assert b"text/html" in payload
+    assert b"<h1>HTML</h1>" in payload
 
 
 @pytest.mark.os_agnostic
-def test_send_email_accepts_multiple_recipients(recording_transport: RecordingTransport) -> None:
+def test_send_email_accepts_multiple_recipients() -> None:
     """Email can be sent to multiple recipients at once."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients=["user1@test.com", "user2@test.com"],
         subject="Test Subject",
         body="Test body",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["user1@test.com", "user2@test.com"]
+    assert transport.recipients == ["user1@test.com", "user2@test.com"]
 
 
 @pytest.mark.os_agnostic
-def test_send_email_allows_sender_override(recording_transport: RecordingTransport) -> None:
+def test_send_email_allows_sender_override() -> None:
     """from_address parameter overrides config default."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="default@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients="recipient@test.com",
         subject="Test Subject",
         body="Test body",
         from_address="override@test.com",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.deliveries[0].sender == "override@test.com"
+    assert transport.deliveries[0].sender == "override@test.com"
 
 
 @pytest.mark.os_agnostic
-def test_send_email_includes_attachments(tmp_path: Path, recording_transport: RecordingTransport) -> None:
+def test_send_email_includes_attachments(tmp_path: Path) -> None:
     """Email with file attachments is sent successfully."""
     attachment = tmp_path / "test.txt"
     attachment.write_text("Test attachment content")
 
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         # Disable directory blocking for tests using tmp_path
         # (macOS tmp_path is under /var which is blocked by default)
         attachment_blocked_directories=frozenset(),
+        attachment_allow_empty_blocklists=True,
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients="recipient@test.com",
         subject="Test Subject",
         body="Test body",
         attachments=[attachment],
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert b"test.txt" in recording_transport.deliveries[0].message
+    assert b"test.txt" in transport.deliveries[0].payload
 
 
 @pytest.mark.os_agnostic
-def test_send_email_uses_credentials_when_provided(recording_transport: RecordingTransport) -> None:
+def test_send_email_uses_credentials_when_provided() -> None:
     """SMTP credentials are used when configured."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         smtp_username="testuser",
-        smtp_password="testpass",
+        smtp_password=SecretStr("testpass"),
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients="recipient@test.com",
         subject="Test Subject",
         body="Test body",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["recipient@test.com"]
+    assert transport.deliveries[0].credentials == ("testuser", "testpass")
 
 
 # ======================== send_notification ========================
 
 
 @pytest.mark.os_agnostic
-def test_send_notification_delivers_plain_text_message(recording_transport: RecordingTransport) -> None:
+def test_send_notification_delivers_plain_text_message() -> None:
     """Notification sends plain-text email without HTML."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="alerts@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_notification(
         config=config,
         recipients="admin@test.com",
         subject="Alert",
         message="System notification",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["admin@test.com"]
-    assert b"System notification" in recording_transport.deliveries[0].message
+    payload = transport.deliveries[0].payload
+    assert b"System notification" in payload
+    assert b"text/html" not in payload
 
 
 @pytest.mark.os_agnostic
-def test_send_notification_accepts_multiple_recipients(recording_transport: RecordingTransport) -> None:
+def test_send_notification_accepts_multiple_recipients() -> None:
     """Notification can be sent to multiple recipients."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="alerts@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_notification(
         config=config,
         recipients=["admin1@test.com", "admin2@test.com"],
         subject="Alert",
         message="System notification",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["admin1@test.com", "admin2@test.com"]
+    assert transport.recipients == ["admin1@test.com", "admin2@test.com"]
 
 
 @pytest.mark.os_agnostic
-def test_send_notification_forwards_from_address_override(recording_transport: RecordingTransport) -> None:
+def test_send_notification_forwards_from_address_override() -> None:
     """When from_address is provided, notification uses it instead of config default."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="default@test.com",
     )
 
+    transport = RecordingTransport()
     result = send_notification(
         config=config,
         recipients="admin@test.com",
         subject="Alert",
         message="System notification",
         from_address="override@test.com",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    # The override must reach the ENVELOPE sender, not just the From: header.
-    assert recording_transport.deliveries[0].sender == "override@test.com"
+    # The override must reach the envelope sender, not just the rendered headers
+    assert len(transport.deliveries) == 1
+    assert transport.deliveries[0].sender == "override@test.com"
 
 
 # ======================== send_email - from_address validation ========================
@@ -700,7 +840,7 @@ def test_send_email_raises_when_no_smtp_hosts() -> None:
 def test_send_email_raises_when_no_recipients() -> None:
     """Empty recipients sequence raises ConfigurationError before attempting delivery."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
     with pytest.raises(ConfigurationError, match="No recipients configured and no override provided"):
@@ -715,7 +855,7 @@ def test_send_email_raises_when_no_recipients() -> None:
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_no_from_address() -> None:
     """Missing from_address in both config and override raises ConfigurationError."""
-    config = EmailConfig(smtp_hosts=["smtp.test.com:587"])
+    config = EmailConfig(smtphosts=["smtp.test.com:587"])
 
     with pytest.raises(ConfigurationError, match="No from_address configured"):
         send_email(
@@ -733,11 +873,11 @@ def test_send_email_raises_when_no_from_address() -> None:
 def test_send_email_raises_when_smtp_connection_fails() -> None:
     """SMTP connection failure raises DeliveryError."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
-    transport = RecordingTransport(fail_hosts=["smtp.test.com:587"])
+    transport = RecordingTransport(failing_hosts=["smtp.test.com:587"])
 
     with pytest.raises(DeliveryError, match=r"failed.*on all of following hosts"):
         send_email(
@@ -750,16 +890,31 @@ def test_send_email_raises_when_smtp_connection_fails() -> None:
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "failure",
+    [ConnectionError("simulated"), ConnectionRefusedError(111, "refused")],
+    ids=["connection-error", "connection-refused"],
+)
+def test_send_email_raises_when_a_socket_level_error_hits_every_host(failure: OSError) -> None:
+    """A plain OSError (not an SMTPException) from the transport still becomes DeliveryError."""
+    config = EmailConfig(smtphosts=["smtp.test.com:587"], from_address="sender@test.com")
+    transport = RecordingTransport(failing_hosts=["smtp.test.com:587"], failure=failure)
+
+    with pytest.raises(DeliveryError, match=r"failed.*on all of following hosts"):
+        send_email(config=config, recipients="recipient@test.com", subject="Test", body="Hello", transport=transport)
+
+
+@pytest.mark.os_agnostic
 def test_send_email_raises_when_authentication_fails() -> None:
     """SMTP authentication failure raises DeliveryError."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         smtp_username="user@test.com",
-        smtp_password="wrong_password",
+        smtp_password=SecretStr("wrong_password"),
     )
     transport = RecordingTransport(
-        fail_hosts=["smtp.test.com:587"],
+        failing_hosts=["smtp.test.com:587"],
         failure=smtplib.SMTPAuthenticationError(535, b"Authentication credentials invalid"),
     )
 
@@ -777,12 +932,12 @@ def test_send_email_raises_when_authentication_fails() -> None:
 def test_send_email_raises_when_recipient_validation_fails() -> None:
     """Invalid recipient raises DeliveryError."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
     transport = RecordingTransport(
-        fail_hosts=["smtp.test.com:587"],
+        failing_hosts=["smtp.test.com:587"],
         failure=smtplib.SMTPRecipientsRefused({"recipient@test.com": (550, b"No such user")}),
     )
 
@@ -797,17 +952,36 @@ def test_send_email_raises_when_recipient_validation_fails() -> None:
 
 
 @pytest.mark.os_agnostic
+def test_a_delivery_error_keeps_the_library_message_even_when_it_contains_a_keyword() -> None:
+    """No keyword filter rewrites the message: a host named like ``key`` used to hide it."""
+    host = "smtp.keystone.example:587"
+    config = EmailConfig(smtphosts=[host], from_address="sender@test.com")
+
+    with pytest.raises(DeliveryError) as failed:
+        send_email(
+            config=config,
+            recipients="login@test.com",
+            subject="Test",
+            transport=RecordingTransport(failing_hosts=[host]),
+        )
+
+    assert "following recipients failed" in str(failed.value)
+    assert host in str(failed.value)
+
+
+@pytest.mark.os_agnostic
 def test_send_email_raises_when_attachment_missing(tmp_path: Path) -> None:
     """Missing attachment raises FileNotFoundError when configured."""
     nonexistent = tmp_path / "nonexistent.txt"
 
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         raise_on_missing_attachments=True,
         # Disable directory blocking for tests using tmp_path
         # (macOS tmp_path is under /var which is blocked by default)
         attachment_blocked_directories=frozenset(),
+        attachment_allow_empty_blocklists=True,
     )
 
     with pytest.raises(FileNotFoundError):
@@ -825,11 +999,11 @@ def test_send_email_raises_when_attachment_missing(tmp_path: Path) -> None:
 def test_send_email_raises_when_all_smtp_hosts_fail() -> None:
     """All SMTP hosts failing raises DeliveryError."""
     config = EmailConfig(
-        smtp_hosts=["smtp1.test.com:587", "smtp2.test.com:587"],
+        smtphosts=["smtp1.test.com:587", "smtp2.test.com:587"],
         from_address="sender@test.com",
     )
 
-    transport = RecordingTransport(fail_hosts=["smtp1.test.com:587", "smtp2.test.com:587"])
+    transport = RecordingTransport(failing_hosts=["smtp1.test.com:587", "smtp2.test.com:587"])
 
     with pytest.raises(DeliveryError, match="following recipients failed"):
         send_email(
@@ -848,10 +1022,11 @@ def test_send_email_raises_when_all_smtp_hosts_fail() -> None:
 def test_send_email_falls_back_to_second_host_when_first_fails() -> None:
     """When the first SMTP host fails, email is sent via the second host."""
     config = EmailConfig(
-        smtp_hosts=["smtp1.test.com:587", "smtp2.test.com:587"],
+        smtphosts=["smtp1.test.com:587", "smtp2.test.com:587"],
         from_address="sender@test.com",
     )
-    transport = RecordingTransport(fail_hosts=["smtp1.test.com:587"])
+
+    transport = RecordingTransport(failing_hosts=["smtp1.test.com:587"])
 
     result = send_email(
         config=config,
@@ -862,7 +1037,8 @@ def test_send_email_falls_back_to_second_host_when_first_fails() -> None:
     )
 
     assert result is True
-    assert transport.hosts == ["smtp2.test.com:587"], "delivery should have fallen over to the second host"
+    assert transport.attempted_hosts == ["smtp1.test.com:587", "smtp2.test.com:587"]
+    assert [delivery.host for delivery in transport.deliveries] == ["smtp2.test.com:587"]
 
 
 # ======================== EmailConfig Recipients Defaults ========================
@@ -926,55 +1102,53 @@ def test_load_config_defaults_recipients_to_empty_list() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_send_email_uses_config_recipients_when_parameter_is_none(
-    recording_transport: RecordingTransport,
-) -> None:
+def test_send_email_uses_config_recipients_when_parameter_is_none() -> None:
     """When recipients parameter is None, config.recipients is used."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         recipients=["default@test.com"],
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         subject="Test Subject",
         body="Test body",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["default@test.com"]
+    assert transport.recipients == ["default@test.com"]
 
 
 @pytest.mark.os_agnostic
-def test_send_email_parameter_overrides_config_recipients(
-    recording_transport: RecordingTransport,
-) -> None:
+def test_send_email_parameter_overrides_config_recipients() -> None:
     """When recipients parameter is provided, it replaces config recipients."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         recipients=["config@test.com"],
     )
 
+    transport = RecordingTransport()
     result = send_email(
         config=config,
         recipients="override@test.com",
         subject="Test Subject",
         body="Test body",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["override@test.com"], "config recipients must be replaced"
+    assert transport.recipients == ["override@test.com"]
 
 
 @pytest.mark.os_agnostic
 def test_send_email_raises_when_no_recipients_configured_and_none_provided() -> None:
     """Both config and parameter missing recipients raises ConfigurationError."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
@@ -990,7 +1164,7 @@ def test_send_email_raises_when_no_recipients_configured_and_none_provided() -> 
 def test_send_email_raises_when_config_recipients_empty_and_none_provided() -> None:
     """Explicit empty config recipients with None parameter raises ConfigurationError."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         recipients=[],
     )
@@ -1008,7 +1182,7 @@ def test_send_email_raises_when_config_recipients_empty_and_none_provided() -> N
 def test_send_email_raises_when_parameter_is_empty_list() -> None:
     """Explicit empty list parameter raises ConfigurationError even with config recipients."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
         recipients=["config@test.com"],
     )
@@ -1026,32 +1200,31 @@ def test_send_email_raises_when_parameter_is_empty_list() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_send_notification_uses_config_recipients_when_parameter_is_none(
-    recording_transport: RecordingTransport,
-) -> None:
+def test_send_notification_uses_config_recipients_when_parameter_is_none() -> None:
     """Notification falls back to config.recipients when parameter is None."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="alerts@test.com",
         recipients=["admin@test.com"],
     )
 
+    transport = RecordingTransport()
     result = send_notification(
         config=config,
         subject="Alert",
         message="System notification",
-        transport=recording_transport,
+        transport=transport,
     )
 
     assert result is True
-    assert recording_transport.recipients == ["admin@test.com"]
+    assert transport.recipients == ["admin@test.com"]
 
 
 @pytest.mark.os_agnostic
 def test_send_notification_raises_when_no_recipients_anywhere() -> None:
     """Notification with no recipients in config or parameter raises ConfigurationError."""
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="alerts@test.com",
     )
 
@@ -1072,7 +1245,7 @@ def test_send_email_logs_success_on_true_result(caplog: pytest.LogCaptureFixture
     import logging
 
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
@@ -1098,7 +1271,7 @@ def test_send_email_logs_warning_on_false_result(caplog: pytest.LogCaptureFixtur
     import logging
 
     config = EmailConfig(
-        smtp_hosts=["smtp.test.com:587"],
+        smtphosts=["smtp.test.com:587"],
         from_address="sender@test.com",
     )
 
@@ -1131,7 +1304,7 @@ def smtp_config_from_env() -> EmailConfig:
     config = get_config()
     email_config = load_email_config_from_dict(config.as_dict())
 
-    if not email_config.smtp_hosts or not email_config.from_address:
+    if not email_config.smtphosts or not email_config.from_address:
         pytest.skip("Email not configured (no smtp_hosts or from_address in layered config)")
 
     return email_config
@@ -1249,3 +1422,99 @@ def test_validate_recipients_error_includes_invalid_address() -> None:
 
     with pytest.raises(InvalidRecipientError, match="bad-address"):
         validate_recipients("bad-address")
+
+
+@pytest.mark.os_agnostic
+def test_starttls_verify_and_local_hostname_from_the_file_reach_the_transport() -> None:
+    config = load_email_config_from_dict(
+        {
+            "email": {
+                "smtp_hosts": ["smtp.test.com:587"],
+                "from_address": "app@example.com",
+                "starttls_verify": False,
+                "local_hostname": "mail.example.com",
+            }
+        }
+    )
+    transport = RecordingTransport()
+
+    send_email(config=config, recipients="ops@example.com", subject="s", transport=transport)
+
+    assert transport.deliveries[0].local_hostname == "mail.example.com"
+    assert transport.deliveries[0].starttls_verify is False
+
+
+@pytest.mark.os_agnostic
+def test_delivery_deadline_from_the_file_reaches_the_transport() -> None:
+    config = load_email_config_from_dict(
+        {"email": {"smtp_hosts": ["smtp.test.com:587"], "from_address": "app@example.com", "delivery_deadline": 90}}
+    )
+    transport = RecordingTransport()
+
+    send_email(config=config, recipients="ops@example.com", subject="s", transport=transport)
+
+    assert transport.deliveries[0].deadline == 90.0
+
+
+@pytest.mark.os_agnostic
+def test_recipient_max_count_from_the_file_refuses_a_larger_send_before_any_delivery() -> None:
+    config = load_email_config_from_dict(
+        {"email": {"smtp_hosts": ["smtp.test.com:587"], "from_address": "app@example.com", "recipient_max_count": 1}}
+    )
+    transport = RecordingTransport()
+
+    with pytest.raises(ValueError, match=r"2 recipients, more than recipient_max_count \(1\)"):
+        send_email(config=config, recipients=["a@example.com", "b@example.com"], subject="s", transport=transport)
+
+    assert transport.attempted_hosts == []
+
+
+@pytest.mark.os_agnostic
+def test_attachments_max_count_from_the_file_refuses_a_larger_send_before_any_delivery(tmp_path: Path) -> None:
+    first, second = tmp_path / "a.txt", tmp_path / "b.txt"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    config = load_email_config_from_dict(
+        {
+            "email": {
+                "smtp_hosts": ["smtp.test.com:587"],
+                "from_address": "app@example.com",
+                "attachments": {"max_count": 1},
+            }
+        }
+    )
+    transport = RecordingTransport()
+
+    with pytest.raises(ValueError, match=r"2 attachments, more than attachment_max_count \(1\)"):
+        send_email(
+            config=config, recipients="ops@example.com", subject="s", attachments=[first, second], transport=transport
+        )
+
+    assert transport.attempted_hosts == []
+
+
+_SHIPPED_MAIL = (
+    Path(__file__).parent.parent / "src" / "bmk" / "adapters" / "config" / "defaultconfig.d"
+) / "50-mail.toml"
+
+
+@pytest.mark.os_agnostic
+def test_the_shipped_defaults_verify_the_certificate_and_name_no_ehlo_host() -> None:
+    shipped = rtoml.load(_SHIPPED_MAIL)["email"]
+    assert shipped["starttls_verify"] is True
+    assert shipped["local_hostname"] == ""
+
+
+@pytest.mark.os_agnostic
+def test_the_shipped_count_limits_and_deadline_load_as_the_library_defaults() -> None:
+    shipped = rtoml.load(_SHIPPED_MAIL)
+    # The keys are written out, so a reader of the shipped file sees them: the premise.
+    assert "recipient_max_count" in shipped["email"]
+    assert "delivery_deadline" in shipped["email"]
+    assert "max_count" in shipped["email"]["attachments"]
+    loaded = load_email_config_from_dict(shipped)
+    library = ConfMail()
+
+    assert loaded.recipient_max_count == library.recipient_max_count
+    assert loaded.attachment_max_count == library.attachment_max_count
+    assert loaded.smtp_delivery_deadline is library.smtp_delivery_deadline is None

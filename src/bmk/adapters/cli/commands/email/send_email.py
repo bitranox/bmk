@@ -13,13 +13,14 @@ import lib_log_rich.runtime
 import rich_click as click
 from pydantic import ValidationError
 
+from ...config_load import require_config
 from ...constants import CLICK_CONTEXT_SETTINGS
 from ...context import get_cli_context
 from ...typed_click import option
 from ._common import (
+    EmailConfigOverrides,
     apply_validated_overrides,
     execute_with_email_error_handling,
-    filter_sentinels,
     handle_validation_error,
     load_and_validate_email_config,
     smtp_config_options,
@@ -72,6 +73,11 @@ def _log_send_email_start(
     type=click.Path(path_type=str),
     help="File to attach (can specify multiple)",
 )
+@option(
+    "--raise-on-missing-attachments/--no-raise-on-missing-attachments",
+    default=None,
+    help="Override missing attachment handling",
+)
 @smtp_config_options
 @click.pass_context
 def cli_send_email(
@@ -93,18 +99,20 @@ def cli_send_email(
 ) -> None:
     """Send an email using configured SMTP settings.
 
+    \f
     Example:
         >>> from click.testing import CliRunner
         >>> runner = CliRunner()
         >>> # Real invocation tested in test_cli_email.py
     """
     cli_ctx = get_cli_context(ctx)
+    config = require_config(ctx, cli_ctx)
     resolved_recipients = list(recipients) if recipients else None
     extra = {"command": "send-email", "recipients": resolved_recipients, "subject": subject}
 
     with lib_log_rich.runtime.bind(job_id="cli-send-email", extra=extra):
-        email_config = load_and_validate_email_config(cli_ctx.config, cli_ctx.services.load_email_config_from_dict)
-        overrides = filter_sentinels(
+        email_config = load_and_validate_email_config(config, cli_ctx.services.load_email_config_from_dict)
+        overrides = EmailConfigOverrides.from_cli_options(
             smtp_hosts=smtp_hosts,
             smtp_username=smtp_username,
             smtp_password=smtp_password,

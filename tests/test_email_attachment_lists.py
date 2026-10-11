@@ -18,19 +18,26 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from btx_lib_mail import ConfMail
+from lib_layered_config import Config
 from pydantic import ValidationError
 
 from bmk import __init__conf__
 from bmk.adapters import cli as cli_mod
-from bmk.adapters.email.config import EmailConfig, load_email_config_from_dict
-from bmk.composition import build_production
+from bmk.adapters.cli.main import main
+from bmk.adapters.email.config import (
+    FILE_KEY_TO_FIELD,
+    EmailConfig,
+    describe_validation_error,
+    load_email_config_from_dict,
+)
+from bmk.composition import AppServices, build_production, build_testing
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from click.testing import CliRunner
     from conftest import EmailCliContext
-    from lib_layered_config import Config
 
 VALID = {"smtp_hosts": ["smtp.example.com:587"], "from_address": "sender@example.com"}
 SEND_EMAIL = ["send-email", "--to", "recipient@example.com", "--subject", "s", "--body", "b"]
@@ -49,31 +56,10 @@ def _field(setting: str) -> str:
     return f"attachment_{setting}"
 
 
-def _loaded_from(setting: str) -> str:
-    """Name the location an error reports for a setting read from [email.attachments].
-
-    The attachment fields read the nested section through an AliasPath, so pydantic reports the
-    path the value came from, not the flat field name.
-    """
-    return f"attachments.{setting}"
-
-
-def _problems(error: ValidationError) -> list[tuple[str, str]]:
-    """Return ``(field, reason)`` per problem; the reason is the validator's own message."""
-    problems: list[tuple[str, str]] = []
-    for item in error.errors(include_url=False, include_input=False):
-        # pydantic prefixes a validator's ValueError message with "Value error, "; the exception
-        # it carries holds the message as written.
-        raised = item.get("ctx", {}).get("error")
-        reason = str(raised) if isinstance(raised, ValueError) else item["msg"]
-        problems.append((".".join(str(part) for part in item["loc"]), reason))
-    return problems
-
-
-def _refusal(setting: str, value: object) -> list[tuple[str, str]]:
+def _refusal(setting: str, value: object) -> list[str]:
     with pytest.raises(ValidationError) as caught:
         load_email_config_from_dict({"email": {**VALID, "attachments": {setting: value}}})
-    return _problems(caught.value)
+    return describe_validation_error(caught.value)
 
 
 # ----------------------------------------------------------------------- the model
@@ -82,27 +68,27 @@ def _refusal(setting: str, value: object) -> list[tuple[str, str]]:
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("setting", LIST_SETTINGS)
 def test_a_comma_separated_string_is_refused_not_dropped(setting: str) -> None:
-    problems = _refusal(setting, COMMA_VALUE[setting])
+    lines = _refusal(setting, COMMA_VALUE[setting])
 
-    assert len(problems) == 1, problems
-    assert problems[0][0] == _loaded_from(setting), problems
-    assert "JSON array" in problems[0][1], problems
+    assert len(lines) == 1, lines
+    assert lines[0].startswith(f"email.attachments.{setting}: "), lines
+    assert "JSON array" in lines[0], lines
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("setting", LIST_SETTINGS)
 def test_a_single_string_is_refused_too(setting: str) -> None:
     """One extension or directory is still a list of one; a bare string is not read as one."""
-    problems = _refusal(setting, ".pdf" if "extensions" in setting else "/var/outbox")
+    lines = _refusal(setting, ".pdf" if "extensions" in setting else "/var/outbox")
 
-    assert [field for field, _ in problems] == [_loaded_from(setting)]
+    assert [line.split(": ")[0] for line in lines] == [f"email.attachments.{setting}"]
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("setting", LIST_SETTINGS)
 @pytest.mark.parametrize("value", [7, True, {"a": 1}], ids=["int", "bool", "dict"])
 def test_a_value_of_another_type_is_refused(setting: str, value: object) -> None:
-    assert [field for field, _ in _refusal(setting, value)] == [_loaded_from(setting)]
+    assert [line.split(": ")[0] for line in _refusal(setting, value)] == [f"email.attachments.{setting}"]
 
 
 @pytest.mark.os_agnostic
@@ -112,7 +98,7 @@ def test_an_empty_value_means_not_configured(setting: str, value: object) -> Non
     """Like an empty TOML array, an empty environment value leaves the library defaults."""
     config = load_email_config_from_dict({"email": {**VALID, "attachments": {setting: value}}})
 
-    assert getattr(config, _field(setting)) is None
+    assert getattr(config, _field(setting)) == getattr(ConfMail(), _field(setting))
 
 
 @pytest.mark.os_agnostic
@@ -133,20 +119,22 @@ def test_a_list_tuple_or_set_is_read_as_a_frozenset() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_an_empty_set_still_disables_the_list() -> None:
-    """A set is an explicit choice from Python code, so an empty one is kept, not defaulted."""
-    config = EmailConfig.model_validate(
-        {"attachment_blocked_extensions": set(), "attachment_blocked_directories": set()}
-    )
+def test_an_empty_blocked_set_needs_the_opt_in() -> None:
+    """From Python an empty set is kept, not defaulted, so ConfMail asks for the opt-in that blocks nothing."""
+    empty: dict[str, set[str]] = {"attachment_blocked_extensions": set(), "attachment_blocked_directories": set()}
+
+    with pytest.raises(ValidationError):
+        EmailConfig.model_validate(empty)
+    config = EmailConfig.model_validate({**empty, "attachment_allow_empty_blocklists": True})
 
     assert config.attachment_blocked_extensions == frozenset()
     assert config.attachment_blocked_directories == frozenset()
 
 
 @pytest.mark.os_agnostic
-@pytest.mark.parametrize("field", ["smtp_hosts", "recipients"])
+@pytest.mark.parametrize("field", ["smtphosts", "recipients"])
 def test_a_tuple_of_hosts_or_recipients_is_kept(field: str) -> None:
-    value = ("smtp.example.com:587",) if field == "smtp_hosts" else ("a@example.com",)
+    value = ("smtp.example.com:587",) if field == "smtphosts" else ("a@example.com",)
 
     assert getattr(EmailConfig.model_validate({field: value}), field) == list(value)
 
@@ -159,18 +147,20 @@ def test_a_host_or_recipient_list_set_to_none_means_not_configured(field: str, s
     if source == "loader":
         config = load_email_config_from_dict({"email": {field: None}})
     else:
-        config = EmailConfig.model_validate({field: None})
+        config = EmailConfig.model_validate({FILE_KEY_TO_FIELD.get(field, field): None})
 
-    assert getattr(config, field) == []
+    assert getattr(config, FILE_KEY_TO_FIELD.get(field, field)) == []
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("field", ["smtp_hosts", "recipients"])
 def test_a_host_or_recipient_list_of_another_type_is_refused(field: str) -> None:
     with pytest.raises(ValidationError) as caught:
-        EmailConfig.model_validate({field: 587})
+        load_email_config_from_dict({"email": {field: 587}})
 
-    assert [name for name, _ in _problems(caught.value)] == [field]
+    lines = describe_validation_error(caught.value)
+    assert [line.split(": ")[0] for line in lines] == [f"email.{field}"]
+    assert not lines[0].endswith(": unknown key"), lines
 
 
 # ----------------------------------------------------------------------- the real loader
@@ -213,18 +203,37 @@ def test_a_json_array_environment_value_loads(
 # ----------------------------------------------------------------------- the command
 
 
+def _services(email: dict[str, Any]) -> Callable[[], AppServices]:
+    config = Config({"email": email}, {})
+
+    def get_config(**_kwargs: Any) -> Config:
+        return config
+
+    return lambda: dataclasses.replace(
+        build_testing(), get_config=get_config, load_email_config_from_dict=load_email_config_from_dict
+    )
+
+
+@pytest.mark.os_agnostic
+def test_send_email_exits_78_naming_the_setting(capsys: pytest.CaptureFixture[str]) -> None:
+    email = {**VALID, "attachments": {"blocked_extensions": ".exe,.bat"}}
+
+    exit_code = main(SEND_EMAIL, services_factory=_services(email))
+
+    err = capsys.readouterr().err
+    assert exit_code == 78, err
+    errors = [line for line in err.splitlines() if line.startswith("Error:")]
+    assert len(errors) == 1, err
+    assert errors[0].startswith("Error: Invalid configuration: email.attachments.blocked_extensions: "), err
+
+
 @pytest.mark.os_agnostic
 def test_send_email_refuses_a_comma_separated_list_and_sends_nothing(
     cli_runner: CliRunner, email_cli_context: Callable[[dict[str, Any]], EmailCliContext]
 ) -> None:
     ctx = email_cli_context({**VALID, "attachments": {"blocked_extensions": ".exe,.bat"}})
-    # The fixture's in-memory loader skips the [email.attachments] flattening; the real one is
-    # what reads the setting this test is about.
-    services = dataclasses.replace(ctx.factory(), load_email_config_from_dict=load_email_config_from_dict)
 
-    result = cli_runner.invoke(cli_mod.cli, SEND_EMAIL, obj=lambda: services)
+    result = cli_runner.invoke(cli_mod.cli, SEND_EMAIL, obj=ctx.factory)
 
-    assert result.exit_code != 0, result.output
-    assert isinstance(result.exception, ValidationError), result.exception
-    assert "attachments.blocked_extensions" in str(result.exception)
+    assert result.exit_code == 78, result.output
     assert ctx.spy.sent_emails == []

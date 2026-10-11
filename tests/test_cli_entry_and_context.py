@@ -133,40 +133,6 @@ def test_store_and_get_cli_context_round_trip() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _nest_override - TypeError on non-dict intermediate
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.os_agnostic
-def test_nest_override_raises_on_non_dict_intermediate() -> None:
-    """TypeError raised when intermediate key is not a dict."""
-    from bmk.adapters.config.overrides import ConfigOverride, _nest_override
-
-    target: dict[str, dict[str, object]] = {"s": {"x": "scalar"}}
-    override = ConfigOverride(section="s", key_path=("x", "nested"), value=42)
-
-    with pytest.raises(TypeError, match="Expected dict"):
-        _nest_override(target, override)
-
-
-# ---------------------------------------------------------------------------
-# permissions._get_mode - bool value fallback
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.os_agnostic
-def test_get_mode_returns_default_for_bool_value() -> None:
-    """Bool value in config section returns the default mode."""
-    from bmk.adapters.config.permissions import _get_mode
-
-    section: dict[str, int | str | bool] = {"app_directory": True}
-
-    result = _get_mode(section, "app_directory", 0o755)
-
-    assert result == 0o755
-
-
-# ---------------------------------------------------------------------------
 # memory adapters - uncovered paths
 # ---------------------------------------------------------------------------
 
@@ -189,7 +155,7 @@ def test_email_spy_clear_resets_state() -> None:
     from bmk.adapters.memory.email import EmailSpy
 
     spy = EmailSpy()
-    config = EmailConfig(smtp_hosts=["smtp.test.com:587"])
+    config = EmailConfig(smtphosts=["smtp.test.com:587"])
     spy.send_email(config=config, recipients="a@b.com", subject="Hi")
     spy.send_notification(config=config, recipients="a@b.com", subject="Hi", message="msg")
 
@@ -208,7 +174,7 @@ def test_email_spy_notification_raises_when_configured() -> None:
 
     spy = EmailSpy()
     spy.raise_exception = RuntimeError("test failure")
-    config = EmailConfig(smtp_hosts=["smtp.test.com:587"])
+    config = EmailConfig(smtphosts=["smtp.test.com:587"])
 
     with pytest.raises(RuntimeError, match="test failure"):
         spy.send_notification(config=config, recipients="a@b.com", subject="Hi", message="msg")
