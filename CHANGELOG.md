@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.19.0] 2026-10-12 09:38:11
+
 ### Fixed
 
 - **The dependency update no longer raises a floor past the project's oldest supported Python.**
