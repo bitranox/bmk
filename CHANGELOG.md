@@ -6,6 +6,24 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`make test-all` no longer loses a cell to "could not provision a venv for this Python".**
+  `uv python install` and `uv python upgrade` rewrite every minor alias symlink in uv's Python
+  store even when they change nothing, and every venv resolves its interpreter through such an
+  alias. Each test-all cell ran both before syncing, in parallel, so a cell already syncing (most
+  often 3.10, the first to finish) found "No interpreter found at path .venv-3.10/bin/python".
+  bmk now asks `uv python list` first and runs neither command when uv has nothing newer for that
+  minor, and test-all prepares every minor serially before its cells start. The no-op rewrite
+  also broke venvs of any other bmk running on the same machine; that is gone too.
+- **`make bump-*` re-locks a project that commits `uv.lock`.** The lock records the project's own
+  version, so a bump left it stale and CI's `uv export --locked` (and `uv sync --locked`) refused
+  the release commit. A failed re-lock now fails the bump.
+- **An own package released minutes ago is no longer invisible to the floor update.** PyPI serves
+  its index with `max-age=600` and uv honours it, so `uv lock --upgrade` kept resolving the previous
+  version and the own floor did not rise. The upgrade lock now passes `--refresh-package` for every
+  package `[tool.uv] exclude-newer-package` exempts (`= false`).
+
 ## [3.21.0] 2026-10-12 20:51:09
 
 ### Fixed

@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
+    ensure_minors_installed,
     ensure_project_venv,
     ensure_project_venv_at,
     venv_python,
@@ -267,6 +268,7 @@ def main(
     project_dir: Path,
     quiet: bool = True,
     run_cell: Callable[..., CellResult] = _run_cell,
+    prepare_minors: Callable[..., None] = ensure_minors_installed,
     env: Mapping[str, str] | None = None,
 ) -> int:
     """Run the version matrix; exit non-zero if any cell is not PASS.
@@ -278,10 +280,16 @@ def main(
     patching internals; production always uses the default. The real cell is proven by the
     ``local_only`` end-to-end tests. ``env`` is injected the same way for
     ``resolve_workers``; production always reads ``os.environ``.
+
+    ``prepare_minors`` installs or upgrades every declared Python, serially, before the first
+    cell: doing it inside the cells let one cell's install rewrite uv's minor aliases while
+    another cell synced its venv, which then had no interpreter (bmk OPEN-WORK [102]).
     """
     minors = all_python_minors(project_dir)
     if not minors:
         return _run_default_cell(project_dir, quiet=quiet)
+
+    prepare_minors(project_dir, minors, quiet=quiet)
 
     def run(minor: str) -> CellResult:
         return run_cell(project_dir, minor, quiet=quiet)

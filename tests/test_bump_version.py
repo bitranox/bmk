@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -325,3 +327,41 @@ def test_main_finalizes_a_non_final_version_instead_of_crashing(
     assert bump_module.main() == 0
     assert f'version = "{expected}"' in pyproject.read_text(encoding="utf-8")
     assert f"## [{expected}]" in (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+# A bump changes [project].version, and uv.lock records the project's own version. Left stale,
+# the lock fails `uv export --locked` in default_cicd CI and `uv sync --locked` locally on the
+# release commit (bmk OPEN-WORK [101]: lib_cli_exit_tools 2.4.1 in the fleet sweep).
+
+
+def _uv_project(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1.2.3"\nrequires-python = ">=3.10"\ndependencies = []\n', encoding="utf-8"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_main_relocks_a_committed_uv_lock(bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    _uv_project(tmp_path)
+    subprocess.run(["uv", "lock", "-q"], cwd=tmp_path, check=True)
+    assert 'version = "1.2.3"' in (tmp_path / "uv.lock").read_text(encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
+
+    assert bump_module.main() == 0
+
+    assert 'version = "1.2.4"' in (tmp_path / "uv.lock").read_text(encoding="utf-8")
+    assert subprocess.run(["uv", "lock", "--check", "-q"], cwd=tmp_path, check=False).returncode == 0
+
+
+@pytest.mark.os_agnostic
+def test_main_writes_no_lock_where_the_project_has_none(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _uv_project(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
+
+    assert bump_module.main() == 0
+
+    assert not (tmp_path / "uv.lock").exists()

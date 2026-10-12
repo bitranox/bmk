@@ -17,6 +17,7 @@ from bmk.adapters.stagerunner.venv import (
     ensure_project_venv_at,
     ensure_venv_ignored,
     is_venv,
+    lock_project,
     resolve_project_venv,
     venv_python,
 )
@@ -141,7 +142,16 @@ def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> 
     target = tmp_path / ".venv-3.12"
     mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+    # uv offers a newer 3.12 patch, so install/upgrade have work to do; when it offers none
+    # they are skipped (see test_stagerunner_venv_python.py, bmk OPEN-WORK [102]).
+    newer_on_offer = (
+        '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
+        '"implementation": "cpython", "path": null}]'
+    )
+    with (
+        patch("bmk.adapters.stagerunner.venv._run", mock_run),
+        patch("bmk.adapters.stagerunner.venv._run_capture", return_value=newer_on_offer),
+    ):
         result = ensure_project_venv_at(tmp_path, target, "3.12")
 
     assert result == target
@@ -645,3 +655,54 @@ def test_ensure_project_venv_creates_a_real_venv(tmp_path: Path) -> None:
         pytest.skip("uv could not provision a venv here")
     assert is_venv(result)
     assert venv_python(result).exists()
+
+
+# --- own packages are refreshed when the lock is upgraded (bmk OPEN-WORK [103]) ----------------------
+# PyPI serves the simple index with Cache-Control max-age=600 and uv honours it, so for ten minutes
+# after one of OUR packages is released, `uv lock --upgrade` still resolves the previous version and
+# the own floor (which rises only to what the lock resolves) silently stays. Measured 2026-10-12:
+# `uv lock --upgrade-package lib-cli-exit-tools` kept 2.4.0; adding --refresh-package got 2.4.1.
+
+
+def _record_lock_argv() -> tuple[MagicMock, list[list[str]]]:
+    seen: list[list[str]] = []
+
+    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
+        _ = quiet, env
+        seen.append(argv)
+        return 0
+
+    return MagicMock(side_effect=side_effect), seen
+
+
+def _project_with_exemptions(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\n\n[tool.uv]\nexclude-newer = "1 day"\n'
+        'exclude-newer-package = {lib-cli-exit-tools = false, rtoml = "2026-10-12T00:17:16Z", lib-log-rich = false}\n',
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.os_agnostic
+def test_an_upgrade_lock_refreshes_every_exempt_own_package(tmp_path: Path) -> None:
+    _project_with_exemptions(tmp_path)
+    mock_run, seen = _record_lock_argv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        assert lock_project(tmp_path, upgrade=True)
+
+    argv = seen[-1]
+    refreshed = [argv[i + 1] for i, a in enumerate(argv) if a == "--refresh-package"]
+    assert sorted(refreshed) == ["lib-cli-exit-tools", "lib-log-rich"]
+    assert "--upgrade" in argv
+
+
+@pytest.mark.os_agnostic
+def test_a_plain_lock_refreshes_nothing(tmp_path: Path) -> None:
+    _project_with_exemptions(tmp_path)
+    mock_run, seen = _record_lock_argv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        assert lock_project(tmp_path)
+
+    assert seen[-1] == ["uv", "lock"]

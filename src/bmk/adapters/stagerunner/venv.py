@@ -135,6 +135,7 @@ class _UvPythonEntry(BaseModel):
     version: str
     version_parts: _UvVersionParts
     implementation: str
+    path: str | None = None
 
 
 def latest_installed_patch(minor: str, cwd: Path) -> str | None:
@@ -459,6 +460,45 @@ def ensure_venv_typecheck_excluded(cwd: Path, venv: Path) -> None:
     print(f"[bmk] excluded from pyright: {', '.join(missing)} (its 'exclude' replaces the **/.* default)")
 
 
+def _minor_needs_install(minor: str, cwd: Path) -> bool:
+    """False only when uv reports that it has nothing newer to install for ``minor``.
+
+    ``uv python list`` (without ``--only-installed``) lists what is installed plus, for each
+    minor, the newest download when that one is NOT installed; such an entry has no ``path``.
+    So a download entry for ``minor`` means "install/upgrade has work to do", and no entry at
+    all means the minor is absent. Read-only and offline (~0.05s). If uv cannot answer, the
+    answer is True: the old always-run behaviour, never a skipped install on a guess.
+    """
+    raw = _run_capture(["uv", "python", "list", "--output-format", "json"], cwd)
+    if not raw:
+        return True
+    try:
+        entries = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return True
+    if not isinstance(entries, list):
+        return True
+    relevant: list[_UvPythonEntry] = []
+    for raw_entry in cast("list[Any]", entries):
+        try:
+            entry = _UvPythonEntry.model_validate(raw_entry)
+        except ValidationError:
+            continue
+        if entry.implementation == "cpython" and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor:
+            relevant.append(entry)
+    return not relevant or any(entry.path is None for entry in relevant)
+
+
+def ensure_minors_installed(cwd: Path, minors: list[str], *, quiet: bool = True) -> None:
+    """Prepare every minor, one after another, BEFORE any venv of them is synced.
+
+    ``test-all`` calls this ahead of its parallel cells: an install that does change uv's
+    store rewrites every minor alias, and a cell syncing at that moment loses its interpreter.
+    """
+    for minor in minors:
+        _ensure_minor_installed(minor, cwd, quiet=quiet)
+
+
 def _ensure_minor_installed(minor: str, cwd: Path, *, quiet: bool) -> None:
     """Make ``minor`` available to uv at its latest patch.
 
@@ -472,9 +512,15 @@ def _ensure_minor_installed(minor: str, cwd: Path, *, quiet: bool) -> None:
       while 3.14.5 is a download away.
 
     Both are best-effort: a failure leaves uv's own interpreter choice in place rather than
-    breaking a command that may not have needed a new Python at all. When already current
-    this costs ~0.1s and works offline ("already on the latest supported patch release").
+    breaking a command that may not have needed a new Python at all.
+
+    Neither runs when uv has nothing newer (:func:`_minor_needs_install`): both rewrite EVERY
+    minor alias symlink in uv's Python store even when they change nothing (measured, uv
+    0.13.0), and every venv on the machine resolves its interpreter through such an alias, so
+    a no-op call briefly breaks every venv - another bmk's included.
     """
+    if not _minor_needs_install(minor, cwd):
+        return
     _run(["uv", "python", "install", minor], cwd, quiet=quiet)
     _run(["uv", "python", "upgrade", minor], cwd, quiet=quiet)
 
@@ -727,13 +773,26 @@ def _sync_extras(cwd: Path) -> list[str]:
     return ["--extra", "dev"] if "dev" in extras else []
 
 
+def _exempt_packages(cwd: Path) -> list[str]:
+    """Packages ``[tool.uv] exclude-newer-package`` sets to ``false``: no cooldown, our own."""
+    try:
+        table = load_pyproject_config(cwd / "pyproject.toml").tool.uv.exclude_newer_package
+    except Exception:  # an unreadable manifest is uv's to report; refreshing nothing is the old behaviour
+        return []
+    return sorted(name for name, value in table.items() if value is False)
+
+
 def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> bool:
     """Run ``uv lock`` once at a time per project: matrix cells sync in parallel from one lock.
 
     ``upgrade`` re-resolves every package at its newest release the project's cooldown admits;
-    without it an existing lock is only brought in line with the manifest.
+    without it an existing lock is only brought in line with the manifest. An upgrade also
+    refreshes every package the project exempts from the cooldown (our own): PyPI serves the
+    index with ``max-age=600`` and uv honours it, so without a refresh a release from minutes
+    ago stays invisible and the own floor, which rises only to what the lock resolves, stays put.
     """
-    argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
+    refresh = [arg for name in _exempt_packages(cwd) for arg in ("--refresh-package", name)]
+    argv = ["uv", "lock", *(["--upgrade", *refresh] if upgrade else [])]
     path = _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

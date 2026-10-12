@@ -320,3 +320,90 @@ def test_venv_version_none_when_the_interpreter_will_not_run(monkeypatch: pytest
 
 def test_venv_version_none_when_absent(tmp_path: Path) -> None:
     assert venv_mod.venv_version(tmp_path / "nope") is None
+
+
+# ---------------------------------------------------------------------------
+# _ensure_minor_installed: never touch uv's Python store when nothing is newer
+# ---------------------------------------------------------------------------
+# `uv python install` and `uv python upgrade` rewrite EVERY minor alias symlink in uv's
+# Python store even when they change nothing (measured, uv 0.13.0: "already on the latest
+# supported patch release", yet all six aliases got a new mtime). Every venv resolves its
+# interpreter through such an alias, so each no-op call briefly removes the interpreter of
+# every venv on the machine: test-all's 3.10 cell, syncing while a later cell ran its
+# install, failed "No interpreter found at path .venv-3.10/bin/python" (bmk OPEN-WORK [102]).
+
+
+def _entry(version: str, *, installed: bool, implementation: str = "cpython") -> dict[str, object]:
+    major, minor, patch = (int(p) for p in version.split(".")[:3])
+    return {
+        "version": version,
+        "version_parts": {"major": major, "minor": minor, "patch": patch},
+        "implementation": implementation,
+        "path": f"/uv/python/{implementation}-{version}/bin/python3" if installed else None,
+    }
+
+
+def _record_runs(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    seen: list[list[str]] = []
+
+    def _fake_run(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
+        _ = quiet, env
+        seen.append(argv)
+        return 0
+
+    monkeypatch.setattr(venv_mod, "_run", _fake_run)
+    return seen
+
+
+def test_a_current_minor_runs_neither_install_nor_upgrade(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.12", installed=True)])
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert runs == []
+
+
+def test_a_newer_patch_on_offer_runs_install_and_upgrade(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    listing = json.dumps([_entry("3.12.16", installed=False), _entry("3.12.15", installed=True)])
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert ["uv", "python", "install", "3.12"] in runs
+    assert ["uv", "python", "upgrade", "3.12"] in runs
+
+
+def test_an_absent_minor_is_installed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    listing = json.dumps([_entry("3.15.0", installed=False), _entry("3.14.8", installed=True)])
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.15"])
+
+    assert ["uv", "python", "install", "3.15"] in runs
+
+
+def test_when_uv_cannot_list_both_commands_still_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No answer is not 'current': fall back to the old always-run behaviour."""
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(None))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert ["uv", "python", "install", "3.12"] in runs
+    assert ["uv", "python", "upgrade", "3.12"] in runs
+
+
+def test_a_newer_pypy_download_does_not_trigger_a_cpython_upgrade(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.99", installed=False, implementation="pypy")])
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert runs == []

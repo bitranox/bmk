@@ -105,6 +105,11 @@ class _FakeCells:
         return CellResult(minor, f"{minor}.0", self.statuses.get(minor, CellStatus.PASSED))
 
 
+def _no_prepare(_project_dir: Path, _minors: list[str], *, quiet: bool = True) -> None:
+    """Injected at ``main``'s ``prepare_minors`` seam so the fast tests never touch uv's Python store."""
+    _ = quiet
+
+
 # ---------------------------------------------------------------------------
 # Orchestration (fast, offline, injected fake at the run_cell seam)
 # ---------------------------------------------------------------------------
@@ -114,7 +119,7 @@ def test_all_pass_exits_zero_and_runs_every_declared_version(tmp_path: Path) -> 
     _write_pyproject(tmp_path, ["3.10", "3.12", "3.14"])
     cells = _FakeCells({})
 
-    rc = main(project_dir=tmp_path, run_cell=cells)
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells)
 
     assert rc == 0
     assert sorted(cells.seen) == ["3.10", "3.12", "3.14"]
@@ -125,7 +130,7 @@ def test_any_failure_exits_nonzero_but_every_cell_still_runs(tmp_path: Path) -> 
     _write_pyproject(tmp_path, ["3.10", "3.11", "3.12"])
     cells = _FakeCells({"3.11": CellStatus.FAIL})
 
-    rc = main(project_dir=tmp_path, run_cell=cells)
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells)
 
     assert rc == 1
     assert sorted(cells.seen) == ["3.10", "3.11", "3.12"], "the other versions must still be tested"
@@ -136,13 +141,13 @@ def test_an_error_cell_also_fails_the_run(tmp_path: Path) -> None:
     _write_pyproject(tmp_path, ["3.10", "3.11"])
     cells = _FakeCells({"3.10": CellStatus.ERROR})
 
-    assert main(project_dir=tmp_path, run_cell=cells) == 1
+    assert main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells) == 1
 
 
 def test_report_names_each_version_and_its_status(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write_pyproject(tmp_path, ["3.10", "3.14"])
 
-    main(project_dir=tmp_path, run_cell=_FakeCells({"3.10": CellStatus.FAIL}))
+    main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=_FakeCells({"3.10": CellStatus.FAIL}))
 
     out = capsys.readouterr()
     assert "3.10" in out.out and "3.14" in out.out
@@ -372,7 +377,7 @@ def test_workers_one_never_lets_two_cells_overlap(tmp_path: Path) -> None:
     _write_pyproject_with_workers(tmp_path, ["3.10", "3.11", "3.12"], 1)
     cells = _ConcurrencyProbeCells()
 
-    rc = main(project_dir=tmp_path, run_cell=cells, env={})
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells, env={})
 
     assert rc == 0
     assert cells.max_concurrent == 1
@@ -384,7 +389,30 @@ def test_default_workers_still_run_cells_concurrently(tmp_path: Path) -> None:
     _write_pyproject(tmp_path, ["3.10", "3.11", "3.12"])
     cells = _ConcurrencyProbeCells()
 
-    rc = main(project_dir=tmp_path, run_cell=cells, env={})
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells, env={})
 
     assert rc == 0
     assert cells.max_concurrent > 1, "the default must stay parallel"
+
+
+def test_every_minor_is_prepared_once_before_any_cell_starts(tmp_path: Path) -> None:
+    """Installing a Python rewrites every minor alias in uv's store (bmk OPEN-WORK [102]).
+
+    Run concurrently with the cells, that pulled the interpreter out from under a cell already
+    syncing its venv. So all minors are prepared, serially, before the first cell runs.
+    """
+    _write_pyproject(tmp_path, ["3.10", "3.12", "3.14"])
+    events: list[str] = []
+
+    def prepare(_project_dir: Path, minors: list[str], *, quiet: bool = True) -> None:
+        _ = quiet
+        events.append("prepare:" + ",".join(minors))
+
+    class _Cells(_FakeCells):
+        def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True) -> CellResult:
+            events.append("cell:" + minor)
+            return super().__call__(_project_dir, minor, quiet=quiet)
+
+    assert main(project_dir=tmp_path, prepare_minors=prepare, run_cell=_Cells({})) == 0
+    assert events[0] == "prepare:3.10,3.12,3.14"
+    assert sorted(events[1:]) == ["cell:3.10", "cell:3.12", "cell:3.14"]

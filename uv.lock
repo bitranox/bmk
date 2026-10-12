@@ -110,7 +110,7 @@ dependencies = [
 requires-dist = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "bashate", specifier = ">=2.1.1" },
-    { name = "btx-lib-mail", specifier = ">=4.0.0" },
+    { name = "btx-lib-mail", specifier = ">=4.0.1" },
     { name = "build", specifier = ">=1.6.1" },
     { name = "click", specifier = ">=8.5.0" },
     { name = "filelock", specifier = ">=4.1.0" },
@@ -118,9 +118,9 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.13.1" },
     { name = "hypothesis", specifier = ">=6.168.5" },
     { name = "import-linter", specifier = ">=2.15" },
-    { name = "lib-cli-exit-tools", specifier = ">=2.4.0" },
-    { name = "lib-layered-config", specifier = ">=7.1.7" },
-    { name = "lib-log-rich", specifier = ">=6.5.1" },
+    { name = "lib-cli-exit-tools", specifier = ">=2.4.1" },
+    { name = "lib-layered-config", specifier = ">=7.1.9" },
+    { name = "lib-log-rich", specifier = ">=6.5.2" },
     { name = "orjson", specifier = ">=3.13.0" },
     { name = "packaging", specifier = ">=26.3" },
     { name = "pip-audit", specifier = ">=2.10.1" },
@@ -149,16 +149,16 @@ wheels = [
 
 [[package]]
 name = "btx-lib-mail"
-version = "4.0.0"
+version = "4.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
     { name = "pydantic" },
     { name = "rich-click" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/18/70c209f6d2c1891d30604663ea0038ba3b8b6bbb7c61ee37c0ab56f0a099/btx_lib_mail-4.0.0.tar.gz", hash = "sha256:dba5d8e9896ef8a382d78857f530b7783a70d2670d4b76120418e67591753169", size = 257619, upload-time = "2026-10-06T11:35:10.273Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/cd/54edead478553027a5b6c63b265e9f307332c52208d109ed771b0abaf884/btx_lib_mail-4.0.1.tar.gz", hash = "sha256:197de55e8285c6fef1e8911711473305484e579cb9d16f31ba371056d9422c67", size = 257870, upload-time = "2026-10-12T20:52:04.847Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/68/e87ee733c6519af72393e02fd1afe83cc3c9fe41c305082e080ae2afcd96/btx_lib_mail-4.0.0-py3-none-any.whl", hash = "sha256:4ba7848d7b682d3d5f800544d89f80bb40c8ac672bb3f9b8edda9c4e40f36c2a", size = 104784, upload-time = "2026-10-06T11:35:09.188Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/c2/c0ddf82de8120fdfbe00f323a207f46c5c01dfc4dd0643f4ae93165c028b/btx_lib_mail-4.0.1-py3-none-any.whl", hash = "sha256:7b602af4c7bc5404bbf7912ee39caf0419a65f168d01bc6e360dcf2482b07413", size = 104782, upload-time = "2026-10-12T20:52:03.541Z" },
 ]
 
 [[package]]
@@ -1004,19 +1004,19 @@ wheels = [
 
 [[package]]
 name = "lib-cli-exit-tools"
-version = "2.4.0"
+version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "rich-click" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/2d/5e1e97610c25ad6e4141c2d45cb0a9aa77cc9698c7469c5220968b5b83bf/lib_cli_exit_tools-2.4.0.tar.gz", hash = "sha256:49a2157292a266cd4eb849c2c97321ef066bf6ed126346dea1874e20009992a2", size = 92641, upload-time = "2026-10-05T18:53:17.316Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/24/b05b4306b008fa27795dd1b747ef06f4b49ade46f68248c4d948c3307cde/lib_cli_exit_tools-2.4.1.tar.gz", hash = "sha256:29e04fcc45667bb0996a01dd1905bf6d2bb202244d910610c8b707136d4f4df5", size = 211195, upload-time = "2026-10-12T20:27:50.145Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/a1/11424660b7729fca766b1d4ab70ed99dbfac239f30f4584e6955b42ce50f/lib_cli_exit_tools-2.4.0-py3-none-any.whl", hash = "sha256:93e93908f13208060ae5db90f0276be8e59876135703fe0eb5f6745939c43775", size = 39392, upload-time = "2026-10-05T18:53:16.388Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/24/3b6acbb4ddf03f8549ad7288ace009c7b569ed1c0cb49a389c82d156a382/lib_cli_exit_tools-2.4.1-py3-none-any.whl", hash = "sha256:54eccb9338647c4be02130afc2c8f3154ab62dcd7807597fa14c325e1f14be00", size = 39995, upload-time = "2026-10-12T20:27:48.643Z" },
 ]
 
 [[package]]
 name = "lib-layered-config"
-version = "7.1.7"
+version = "7.1.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
@@ -1024,14 +1024,14 @@ dependencies = [
     { name = "rich-click" },
     { name = "rtoml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/48/88/0f917f752f93473d80c34b181e6c41e4c24cf4f19641dfffee37870d4d13/lib_layered_config-7.1.7.tar.gz", hash = "sha256:c83e30da61007e15475bd6a289a1e05a76eafc0e6932830b0352610c9049e295", size = 337662, upload-time = "2026-10-12T18:27:20.558Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/73/6654c1d46c3e9f8c104145590999c1e0fd4be4c738c2df45ee25027ede2f/lib_layered_config-7.1.9.tar.gz", hash = "sha256:0b1a998dec1d51fccf1c74ff673227e6f199d1173817bb9051a82a7bb898d049", size = 465714, upload-time = "2026-10-12T20:38:35.185Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/fa/d626963b17b3e07f2724ac775d6d53d02a8873aaa767fb46c027b13a1a74/lib_layered_config-7.1.7-py3-none-any.whl", hash = "sha256:8fd28e38cb40537f9de37e4ace5f3122f42fa06361dda7a1bb085d40a44a46ba", size = 143534, upload-time = "2026-10-12T18:27:19.313Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/ec/a59aedab70f16682b2d24d000f8fa8c326d70f63e3717aa75b7fca823a2c/lib_layered_config-7.1.9-py3-none-any.whl", hash = "sha256:744320fcfa6080993f88271a332936fd1e6d7fe6beb0d1adee2be8253c93187d", size = 144432, upload-time = "2026-10-12T20:38:32.718Z" },
 ]
 
 [[package]]
 name = "lib-log-rich"
-version = "6.5.1"
+version = "6.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
@@ -1041,9 +1041,9 @@ dependencies = [
     { name = "rich" },
     { name = "rich-click" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/4c/2cfeb981bd30e7105bda69febd47354bbb32fff53f34682424f927a0348a/lib_log_rich-6.5.1.tar.gz", hash = "sha256:6fdd3f54eee984cccf7bdcdd3cf412c6223e34441603561594c9903bdc09e9d7", size = 404010, upload-time = "2026-10-08T17:18:23.31Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/59/0c29aa834c022a3149d0ae6739c5cd6b72d390a0ed6e25e148097c1b51e6/lib_log_rich-6.5.2.tar.gz", hash = "sha256:a6e95861a0e887ab7330aa9da32341bdeb5f8c040b1760575eaf79c780400aee", size = 548433, upload-time = "2026-10-12T20:43:18.498Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/29/83bb6b89ebc832fb8c19519192e98e8c0c2bc89dcec562c9e4cc7269a109/lib_log_rich-6.5.1-py3-none-any.whl", hash = "sha256:c37a5ec5616f70d06e009e1fda7e812848acd07e7ffe5d120287fb308010f91f", size = 204929, upload-time = "2026-10-08T17:18:22.014Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/6c/83108261c91e804437782b207efffdf737ab0edac5165da6fd486ff0a0f8/lib_log_rich-6.5.2-py3-none-any.whl", hash = "sha256:a902a271794b78982f58a2d2bfd7b0f2a882af9b822b33bb8ad34ce307072752", size = 205540, upload-time = "2026-10-12T20:43:17.279Z" },
 ]
 
 [[package]]

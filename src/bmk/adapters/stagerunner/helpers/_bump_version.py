@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.adapters.stagerunner.venv import lock_project
 from bmk.domain.enums import BumpPart
 from bmk.domain.version import next_version
 
@@ -172,6 +173,15 @@ def main() -> int:
         # Update files
         old_version = update_pyproject(args.project_dir, new_version)
         update_changelog(args.project_dir, new_version)
+
+        # uv.lock records the project's own version; left stale it fails `uv sync --locked`
+        # and CI's `uv export --locked` on the very commit that is about to be released.
+        if (args.project_dir / "uv.lock").is_file() and not lock_project(args.project_dir):
+            print(
+                "Error: the version was bumped but `uv lock` failed; uv.lock still names the old version",
+                file=sys.stderr,
+            )
+            return 1
 
         print(f"Bumped version: {old_version} -> {new_version}")
         return 0
