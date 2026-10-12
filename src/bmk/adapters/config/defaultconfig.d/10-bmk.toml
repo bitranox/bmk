@@ -59,6 +59,29 @@ package_name = ""
 #          filtering the warning at its source over silencing the whole channel.
 show_warnings = true
 
+[bmk.supply_chain]
+
+# The cooldown bmk writes into a project's [tool.uv] exclude-newer when the project has none.
+#
+# Default: "1 day"
+# Effect:  uv refuses every release file uploaded within this window, for the whole tree
+#          including transitive dependencies, and bmk raises third-party floors only to
+#          releases older than it. A project that already sets exclude-newer keeps its own.
+# Accepted: "<N> hours", "<N> days", "<N> weeks" (lowercase, N >= 1) or an ISO 8601 span such
+#          as "P7D" or "PT36H" - a subset of uv's grammar, because uv only WARNS about a value it
+#          cannot read and then ignores the whole [tool.uv] block. Anything else stops the command.
+cooldown = "1 day"
+
+# Our own packages: exempt from the cooldown (they always take the newest release).
+#
+# Default: the bitranox packages on PyPI (see _supply_chain.DEFAULT_OWN_PACKAGES)
+# Effect:  bmk adds `<name> = false` under [tool.uv] exclude-newer-package for every one of
+#          these the project reaches, directly or through another own package.
+# When to set: when you publish a new package of your own. Setting it REPLACES the default
+#          list, so repeat the names you keep. Git-URL dependencies need no entry: uv's cooldown
+#          applies only to packages from an index.
+# own_packages = ["lib_cli_exit_tools", "lib_layered_config", "lib_log_rich"]
+
 # ==============================================================================
 # What bmk reads from YOUR pyproject.toml
 # ==============================================================================

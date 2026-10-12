@@ -8,6 +8,38 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Added
 
+- **A supply-chain cooldown: third-party releases are adopted only once they are 1 day old.**
+  A malicious release is usually found and pulled within days of its upload. `make test` (the
+  `update_deps` stage) now keeps `[tool.uv] exclude-newer = "1 day"` in the project's
+  `pyproject.toml`, and uv refuses every file uploaded inside that window for the whole tree,
+  transitive dependencies included. The floor update follows the same rule: a third-party floor
+  rises only to the newest release older than the cooldown, a release still inside it no longer
+  counts as outdated, and a floor that is itself younger than the cooldown is never lowered:
+  when nothing it admits has passed the cooldown, `deps --update` gives it a per-package cutoff
+  just after the upload of the satisfying release uploaded first that installs on the oldest
+  supported Python (`exclude-newer-package`, `<name> = "<timestamp>"`), walks that release's own
+  requirements the same way (pydantic 2.14.1 needs exactly pydantic-core 2.50.1) on every platform,
+  Python and requested extra `uv lock` resolves for, and drops the entry once the cooldown admits
+  the release. Entries the project set itself are never touched, and a
+  `[tool.uv.exclude-newer-package]` table keeps its comments. A bare `deps` check fails on a floor
+  `uv lock` cannot satisfy; one it could not read from PyPI is reported and does not fail it. Our
+  own packages follow their newest
+  release: bmk adds `<name> = false` under `exclude-newer-package` for every own package the
+  project reaches, walking own packages' requirements on PyPI, because an exempt package whose
+  newest release needs a non-exempt own package silently resolves to an OLDER release. A value
+  the project already set (its own cooldown, or a shorter one for a young security fix) is kept.
+  The cooldown and the own-package list are configurable under `[bmk.supply_chain]`; bmk writes
+  only values uv certainly reads, and a value uv refused stops the check instead of silently
+  disabling the cooldown: floors are judged against the cutoff uv resolved, read back from
+  `uv.lock`, never from a second parser of uv's grammar. An own package's floor rises only to the
+  newest release `uv lock` can resolve under the cooldown. `push`, `deps`, `cov`, `build` and the
+  integration lane now honour `[bmk.supply_chain]` and `[bmk].package_name` like `test` does.
+- **Venvs are built from `uv.lock`.** Every venv bmk provisions, the `test-all` matrix included,
+  is synced with `uv sync --locked` after `uv lock`, so `make test`, pyright and pip-audit check
+  exactly the tree the lock pins and CI installs; `uv pip install --upgrade` used to keep a release
+  newer than the cooldown. `update_deps` re-locks with `uv lock --upgrade` and re-syncs, and the
+  `uv_lock` stage that follows only checks the lock (`uv lock --check`). Without a lock, bmk falls
+  back to installing from `pyproject.toml` and says so.
 - **`--env-file PATH`** root option: read this `.env` file instead of searching upward for one.
   Without it, the upward search behaves as before.
 

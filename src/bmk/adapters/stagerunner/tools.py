@@ -39,6 +39,15 @@ def _helper(name: str) -> str:
 # --- ruff -------------------------------------------------------------------
 
 
+def uv_lock_argv(_ctx: StageContext) -> list[str]:
+    """Refuse a ``uv.lock`` that no longer matches ``pyproject.toml``, without changing it.
+
+    ``update_deps`` already re-locked at the newest admitted releases and synced the venv from that
+    lock. Moving the lock here would put it ahead of the venv every gate after this one tests.
+    """
+    return ["uv", "lock", "--check"]
+
+
 def ruff_format_apply_argv(_ctx: StageContext) -> list[str]:
     return ["ruff", "format", "."]
 

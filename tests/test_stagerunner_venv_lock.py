@@ -45,8 +45,8 @@ def _make_venv(path: Path) -> None:
 
 
 def _run_that_creates_venv_on_uv_venv() -> MagicMock:
-    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True) -> int:
-        _ = quiet
+    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
+        _ = quiet, env
         if argv[:2] == ["uv", "venv"]:
             _make_venv(Path(argv[-1]))
         return 0

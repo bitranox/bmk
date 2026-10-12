@@ -157,3 +157,55 @@ def test_deps_update_passes_no_target_without_a_venv(tmp_path: Path, monkeypatch
     PIPELINES["deps_update"][0].action(_ctx(tmp_path), CapturingSink())
 
     assert captured["python"] is None
+
+
+def test_deps_update_locks_the_project_and_syncs_its_own_venv_from_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the floors are judged the stage re-locks, then syncs the project's own venv from the lock."""
+    from bmk.adapters.stagerunner.helpers import _dependencies
+
+    captured: dict[str, Any] = {}
+    ran: list[tuple[list[str], Path, dict[str, str] | None]] = []
+
+    def _fake_main(**kw: Any) -> int:
+        captured.update(kw)
+        return 0
+
+    def _fake_run(argv: list[str], cwd: Path, *, quiet: bool = True, env: dict[str, str] | None = None) -> int:
+        _ = quiet
+        ran.append((argv, cwd, env))
+        return 0
+
+    monkeypatch.setattr(_dependencies, "main", _fake_main)
+    monkeypatch.setattr("bmk.adapters.stagerunner.venv._run", _fake_run)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    venv = _make_venv(tmp_path / ".venv-win")
+
+    PIPELINES["deps_update"][0].action(_ctx(tmp_path, env={"UV_PROJECT_ENVIRONMENT": ".venv-win"}), CapturingSink())
+    locked = captured["locked"]
+
+    assert locked.upgrade() is True
+    assert ran[-1][:2] == (["uv", "lock", "--upgrade"], tmp_path)
+    assert locked.sync() is True
+    sync_argv, _, sync_env = next(r for r in reversed(ran) if r[0][:2] == ["uv", "sync"])
+    assert "--locked" in sync_argv
+    assert sync_env is not None and sync_env["UV_PROJECT_ENVIRONMENT"] == str(venv)
+
+
+def test_deps_update_has_nothing_to_sync_without_a_project_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bmk.adapters.stagerunner.helpers import _dependencies
+
+    captured: dict[str, Any] = {}
+
+    def _fake_main(**kw: Any) -> int:
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(_dependencies, "main", _fake_main)
+
+    PIPELINES["deps_update"][0].action(_ctx(tmp_path), CapturingSink())
+
+    assert captured["locked"].sync() is None

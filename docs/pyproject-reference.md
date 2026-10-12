@@ -178,11 +178,13 @@ workers = 1
   `[tool.*]` key here has for a malformed value) but is an error from the environment
   variable, since that one has no "unset" reading to fall back to.
 
-## The one key bmk writes back
+## The keys bmk writes back
 
-| Key                      | Behaviour                                                                                                                             |
-|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| `[tool.pyright].exclude` | If present (and `[tool.pyright].include` is not), bmk appends the venv directories it creates and **rewrites your `pyproject.toml`**. |
+| Key                               | Behaviour                                                                                                                                                       |
+|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `[tool.pyright].exclude`          | If present (and `[tool.pyright].include` is not), bmk appends the venv directories it creates and **rewrites your `pyproject.toml`**.                           |
+| `[tool.uv].exclude-newer`         | Written by `make test` / `deps update` when absent, from `[bmk.supply_chain].cooldown` (default `"1 day"`).  Never overwritten.                                 |
+| `[tool.uv].exclude-newer-package` | bmk adds `<own-package> = false` for every own package the project reaches, and keeps its own floor pins current (see below). Entries the project set are kept. |
 
 This exists because pyright's `exclude` **replaces** its built-in defaults rather than
 extending them. The moment you list any exclude of your own, you lose `**/.*` - the rule
@@ -190,6 +192,55 @@ that was keeping bmk's venvs out of the walk - and a strict run starts crawling
 site-packages. That is not hypothetical: one such run spun for 6h20m at 78% CPU across 21
 repos before this was added. bmk leaves the file alone when the key is absent (pyright's
 defaults already cover it) or when `include` narrows the scope.
+
+### The supply-chain cooldown (`[tool.uv]`)
+
+A malicious release is usually found and pulled within days. uv refuses every file uploaded
+after `exclude-newer`, for the whole dependency tree including transitive packages, so a
+project with `exclude-newer = "1 day"` never installs a release younger than one day.
+bmk judges floors against the cutoff uv itself resolved, read back from `uv.lock`, and follows it:
+
+- A third-party floor rises only to the newest release older than the cooldown. A newer
+  release still inside the cooldown is not "outdated", so the `deps` gate does not fail on it.
+- A floor that is itself younger than the cooldown is never lowered: lowering would drop the
+  fixes it was raised for. When no release the floor admits is outside the cooldown yet,
+  `make test` / `deps update` gives the floor a per-package cutoff one second after the newest file
+  of the satisfying release uploaded FIRST, among those that install on the oldest Python the
+  project supports (`exclude-newer-package`, `pydantic = "2026-10-11T18:37:56Z"`), so it admits no
+  more than the floor asked for. That release's own requirements are walked the same way, as are
+  the releases an exempt package's floor brings in - every requirement `uv lock` can need, since it
+  resolves for all platforms and Pythons at once: any marker that can hold for some value of the
+  variables it names (judged on every value it compares against, never the host's own), on any
+  Python from the oldest supported up, and behind the extras requested. bmk recognises
+  its own entries by their value (one second after one of the release's files), drops each once the
+  cooldown admits its release, and never touches an entry the project set itself. A
+  `[tool.uv.exclude-newer-package]` table keeps its form and its comments. A bare `deps` check (no
+  update) reports such a floor as an error, floor kept, and FAILS: `uv lock` cannot satisfy it.
+- A package listed under `exclude-newer-package` follows its own value: `false` for no
+  cooldown (our own packages), or a shorter duration or a date to admit a young security fix.
+- Our own packages must be exempt **transitively**: an exempt package whose newest release
+  needs a newer release of another own package resolves to an OLDER release unless that one is
+  exempt too. bmk walks the own packages' requirements on PyPI and adds every one it reaches. If
+  PyPI does not answer for one of them, bmk leaves `[tool.uv]` as it is and says so, rather than
+  write a list that misses whatever sits behind it.
+- An exempt package's floor rises only to the newest release `uv lock` can resolve: one whose
+  own requirements each have a release the cooldown admits. Our libs' newest release can need a
+  third-party release younger than the cooldown, and a floor on it makes the lock unsatisfiable
+  until the lib is re-released with cooled floors.
+
+bmk does not parse uv's input grammar. It reads the cutoff uv resolved from `uv.lock`'s
+`[options]`, so the two can never disagree about what `"14 Days"` or a bare date means. uv only
+warns about a value it cannot read and then ignores the whole `[tool.uv]` block; bmk sees the
+missing cutoff in the lock and stops the check, naming the value.
+
+`update_deps` locks before judging, re-locks with `uv lock --upgrade` afterwards (every package at
+its newest admitted release), and syncs the project venv from that lock. The `uv_lock` stage that
+follows only runs `uv lock --check`, so the gates test exactly the tree the committed `uv.lock`
+pins with hashes.
+
+Every venv bmk provisions (`.venv`, `.venv-win`, the `test-all` matrix) is built from `uv.lock`
+with `uv sync --locked`. Only when no lock can be made does bmk fall back to installing from
+`pyproject.toml`, and it says so on stderr.
 
 ## Extending a pipeline
 

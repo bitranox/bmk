@@ -66,6 +66,9 @@ def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> Non
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the
             name, or the pipeline's exit code on failure.
     """
+    # Deferred like run_command's own imports: `bmk --version` must not load the stage runner.
+    from bmk.adapters.stagerunner.helpers._supply_chain import SupplyChainSettings  # noqa: PLC0415
+
     cwd = Path.cwd()
 
     exit_code = run_command(
@@ -74,6 +77,7 @@ def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> Non
         command_prefix=command_name,
         package_name=config.get("bmk.package_name", default=""),
         show_warnings=config.get("bmk.show_warnings", default=True),
+        supply_chain=SupplyChainSettings.from_config(config.get("bmk.supply_chain", default={})),
     )
 
     if exit_code != 0:

@@ -133,6 +133,10 @@ system-dependencies-windows-pip = []
 system-dependencies-windows-choco = []
 os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
+[tool.uv]
+exclude-newer = "1 day"
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, pydantic = "2026-10-11T18:37:56Z", pydantic-core = "2026-10-11T18:35:45Z", rtoml = "2026-10-12T00:17:16Z"}
+
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"
 Repository = "https://github.com/bitranox/bmk.git"

@@ -27,11 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
+from tomlkit.items import Table
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping
 
-__all__ = ["TOMLKitError", "dumps", "parse"]
+__all__ = ["TOMLKitError", "dumps", "inline_table", "is_standard_table", "parse", "table"]
 
 
 def parse(text: str) -> MutableMapping[str, Any]:
@@ -46,3 +47,18 @@ def parse(text: str) -> MutableMapping[str, Any]:
 def dumps(document: Mapping[str, Any]) -> str:
     """Serialize a parsed document back to TOML, byte-identical but for edits."""
     return tomlkit.dumps(document)  # pyright: ignore[reportUnknownMemberType]
+
+
+def table(*, super_table: bool = False) -> MutableMapping[str, Any]:
+    """A new ``[table]``; a super table renders only through its sub-tables (``[tool.uv]``)."""
+    return tomlkit.table(is_super_table=super_table)
+
+
+def inline_table() -> MutableMapping[str, Any]:
+    """A new ``{ key = value }`` table."""
+    return tomlkit.inline_table()
+
+
+def is_standard_table(value: object) -> bool:
+    """Whether ``value`` is a ``[table]`` of a parsed document, as opposed to an inline ``{ ... }`` one."""
+    return isinstance(value, Table)

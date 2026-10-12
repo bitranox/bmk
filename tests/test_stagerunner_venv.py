@@ -109,21 +109,30 @@ def test_is_venv_false_when_absent(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_that_creates_venv_on_uv_venv() -> MagicMock:
+def _run_that_creates_venv_on_uv_venv(*, lock_rc: int = 0, sync_rc: int = 0) -> MagicMock:
     """A `_run` mock that materializes the venv when it sees `uv venv <path>`.
 
     Without this the create path returns None (is_venv stays False under a pure mock),
     so the install/sync argv is never reached. The side effect makes the flow realistic.
+    ``lock_rc`` / ``sync_rc`` are what ``uv lock`` / ``uv sync`` answer.
     """
 
-    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True) -> int:
-        _ = quiet  # matches _run's real signature; the code calls quiet=...
+    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
+        _ = quiet, env  # matches _run's real signature
         if argv[:2] == ["uv", "venv"]:
             _make_venv(Path(argv[-1]))
+        if argv[:2] == ["uv", "lock"]:
+            return lock_rc
+        if argv[:2] == ["uv", "sync"]:
+            return sync_rc
         return 0
 
     mock = MagicMock(side_effect=side_effect)
     return mock
+
+
+def _commands(mock_run: MagicMock) -> list[list[str]]:
+    return [c.args[0] for c in mock_run.call_args_list]
 
 
 @pytest.mark.os_agnostic
@@ -141,8 +150,80 @@ def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> 
     assert "--python" in create and "3.12" in create and str(target) in create
     assert ["uv", "python", "install", "3.12"] in cmds
     assert ["uv", "python", "upgrade", "3.12"] in cmds
-    install = next(c for c in cmds if c[:3] == ["uv", "pip", "install"])
-    assert str(venv_python(target)) in install
+    sync = next(c for c in cmds if c[:2] == ["uv", "sync"])
+    assert sync[sync.index("--python") + 1] == str(venv_python(target))
+
+
+# --- the venv is built FROM uv.lock (user decision 2026-10-12, review M3 of 064688b) ---------------
+# `uv pip install --upgrade` keeps an installed release newer than the [tool.uv] cooldown (measured:
+# ruff 0.17.0 stayed), so make test checked a different tree from the one uv.lock pins and CI installs.
+
+
+@pytest.mark.os_agnostic
+def test_the_project_is_locked_and_the_venv_synced_from_the_lock(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    target = tmp_path / ".venv-3.12"
+    mock_run = _run_that_creates_venv_on_uv_venv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        assert ensure_project_venv_at(tmp_path, target, "3.12") == target
+
+    cmds = _commands(mock_run)
+    assert cmds.index(["uv", "lock"]) < next(i for i, c in enumerate(cmds) if c[:2] == ["uv", "sync"])
+    assert not any(c[:3] == ["uv", "pip", "install"] for c in cmds)
+    [sync_call] = [c for c in mock_run.call_args_list if c.args[0][:2] == ["uv", "sync"]]
+    assert "--locked" in sync_call.args[0]
+    # uv sync targets the project environment, so the matrix venv is named through the env.
+    assert sync_call.kwargs["env"]["UV_PROJECT_ENVIRONMENT"] == str(target)
+    assert "VIRTUAL_ENV" not in sync_call.kwargs["env"]
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("extras", "expected"), [("", []), ('[project.optional-dependencies]\ndev = ["pytest"]\n', ["--extra", "dev"])]
+)
+def test_the_dev_extra_is_synced_only_when_the_project_declares_it(
+    tmp_path: Path, extras: str, expected: list[str]
+) -> None:
+    # uv refuses an undeclared extra outright (exit 2), unlike pip's warning.
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nname = "demo"\n{extras}')
+    mock_run = _run_that_creates_venv_on_uv_venv()
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        ensure_project_venv_at(tmp_path, tmp_path / ".venv", None)
+
+    sync = next(c for c in _commands(mock_run) if c[:2] == ["uv", "sync"])
+    assert [a for a in sync if a in ("--extra", "dev")] == expected
+
+
+@pytest.mark.os_agnostic
+def test_without_a_lock_the_venv_falls_back_to_the_manifest_and_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    mock_run = _run_that_creates_venv_on_uv_venv(lock_rc=1)
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        assert ensure_project_venv_at(tmp_path, tmp_path / ".venv", None) == tmp_path / ".venv"
+
+    cmds = _commands(mock_run)
+    assert any(c[:3] == ["uv", "pip", "install"] for c in cmds)
+    assert not any(c[:2] == ["uv", "sync"] for c in cmds)
+    assert "uv lock" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_a_failed_sync_from_a_good_lock_is_not_papered_over_by_the_manifest_install(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    mock_run = _run_that_creates_venv_on_uv_venv(sync_rc=1)
+
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        assert ensure_project_venv_at(tmp_path, tmp_path / ".venv", None) is None
+
+    assert not any(c[:3] == ["uv", "pip", "install"] for c in _commands(mock_run))
+    assert "uv sync" in capsys.readouterr().err
 
 
 @pytest.mark.os_agnostic
@@ -208,9 +289,8 @@ def test_ensure_project_venv_syncs_an_existing_venv_without_recreating(mock_run:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.venv._run", return_value=0)
-def test_ensure_project_venv_sync_is_exact_and_upgrading(mock_run: MagicMock, tmp_path: Path) -> None:
-    """The sync passes both --exact and --upgrade.
+def test_ensure_project_venv_sync_is_exact_and_upgrading(tmp_path: Path) -> None:
+    """Without a lock, the manifest install passes both --exact and --upgrade.
 
     Neither flag alone makes the venv honest, and each covers a distinct way it
     can drift:
@@ -227,11 +307,12 @@ def test_ensure_project_venv_sync_is_exact_and_upgrading(mock_run: MagicMock, tm
     """
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
+    mock_run = _run_that_creates_venv_on_uv_venv(lock_rc=1)
 
-    ensure_project_venv(tmp_path, {})
+    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+        ensure_project_venv(tmp_path, {})
 
-    install = mock_run.call_args_list[0].args[0]
-    assert install[:3] == ["uv", "pip", "install"]
+    install = next(c for c in _commands(mock_run) if c[:3] == ["uv", "pip", "install"])
     assert "--exact" in install
     assert "--upgrade" in install
     assert install[install.index("--python") + 1] == str(venv_python(tmp_path / ".venv"))
@@ -284,12 +365,12 @@ def test_ensure_project_venv_falls_back_when_no_dev_extra(mock_run: MagicMock, t
     """
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
-    mock_run.side_effect = [1, 0]  # ".[dev]" fails, "." succeeds
+    mock_run.side_effect = [1, 1, 0]  # no lock can be made, ".[dev]" fails, "." succeeds
 
     result = ensure_project_venv(tmp_path, {})
 
     assert result == tmp_path / ".venv"
-    targets = [call.args[0][-1] for call in mock_run.call_args_list]
+    targets = [call.args[0][-1] for call in mock_run.call_args_list if call.args[0][:3] == ["uv", "pip", "install"]]
     assert targets == [".[dev]", "."]
 
 

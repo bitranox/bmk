@@ -28,8 +28,11 @@ import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, lru_cache
+from itertools import product
+from math import prod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -41,11 +44,24 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
+from bmk.adapters.stagerunner.helpers._supply_chain import (
+    OwnPackageUnreadableError,
+    ReleasePolicy,
+    SupplyChainConfigError,
+    SupplyChainSettings,
+    admitted_releases,
+    ensure_uv_cooldown,
+    floor_pin,
+    normalize,
+    own_closure,
+    reconcile_floor_pins,
+    uv_resolved_options,
+)
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import ToolOutputFormat
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator, Iterable
 
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
@@ -110,6 +126,8 @@ class DependencyInfo:
     status: DependencyStatus
     original_spec: str = ""  # Original dependency specification string
     upper_bound: str = ""  # Upper version bound if specified (e.g., "<9" means "9")
+    # An ERROR that `uv lock` fails on too, as opposed to one about reading PyPI: it fails the check.
+    blocks_lock: bool = False
 
 
 def _normalize_name(name: str) -> str:
@@ -177,27 +195,34 @@ _PYPI_DOCUMENTS: ContextVar[dict[str, dict[str, Any] | None] | None] = ContextVa
 
 @contextmanager
 def _one_fetch_per_package() -> Generator[None]:
-    """Within the block, ``_fetch_pypi_data`` downloads each package at most once."""
-    token = _PYPI_DOCUMENTS.set({})
+    """Within the block, ``_fetch_pypi_data`` downloads each package at most once.
+
+    A nested block shares the outer one's documents, so a caller that checks twice (before and
+    after writing ``[tool.uv]``) reads each package once in all.
+    """
+    token = _PYPI_DOCUMENTS.set(_PYPI_DOCUMENTS.get() if _PYPI_DOCUMENTS.get() is not None else {})
     try:
         yield
     finally:
         _PYPI_DOCUMENTS.reset(token)
 
 
-def _fetch_pypi_data(package_name: str) -> dict[str, Any] | None:
-    """Fetch package data from PyPI, once per package inside ``_one_fetch_per_package``.
+def _fetch_pypi_data(package_name: str, version: str | None = None) -> dict[str, Any] | None:
+    """Fetch package data from PyPI, once per document inside ``_one_fetch_per_package``.
+
+    ``version`` selects that release's own document, whose ``info.requires_dist`` is the one
+    release's requirements (the package document carries only the newest release's).
 
     A failed download is remembered as well, so the dependency reports one error rather than
     a mix of answers from different requests.
     """
-    normalized = _normalize_name(package_name)
+    path = _normalize_name(package_name) if version is None else f"{_normalize_name(package_name)}/{version}"
     documents = _PYPI_DOCUMENTS.get()
-    if documents is not None and normalized in documents:
-        return documents[normalized]
-    data = _download_pypi_data(normalized)
+    if documents is not None and path in documents:
+        return documents[path]
+    data = _download_pypi_data(path)
     if documents is not None:
-        documents[normalized] = data
+        documents[path] = data
     return data
 
 
@@ -487,10 +512,11 @@ class PythonSupport:
         marker = _marker_of_spec(spec)
         if marker is None:
             return admitted[0]
-        for version in admitted:
-            if marker.evaluate({"python_version": version.rsplit(".", 1)[0], "python_full_version": version}):
-                return version
-        return admitted[0]
+        # Judged on every platform, never the host's: uv locks a Windows-only requirement on Linux too.
+        text = str(marker)
+        requires = self.requires_python
+        pythons = [v for v in _python_candidates(text, admitted[0]) if requires is None or requires.contains(v)]
+        return _oldest_python_holding(text, pythons, ()) or admitted[0]
 
     @cached_property
     def _admitted(self) -> tuple[str, ...]:
@@ -557,11 +583,11 @@ def _specifier_or_none(text: str) -> SpecifierSet | None:
         return None
 
 
-def _installs_on(files: list[Any], python: str, *, yanked_ok: bool = False) -> bool:
+def _installs_on(files: list[Any], python: str | None, *, yanked_ok: bool = False) -> bool:
     """Whether a release has a file whose Requires-Python admits ``python``.
 
     Yanked files count only with ``yanked_ok``. Missing or unparseable Requires-Python metadata
-    admits, as pip treats it.
+    admits, as pip treats it. ``python`` None (the project names no oldest Python) admits any file.
     """
     for entry in files:
         if not isinstance(entry, dict):
@@ -570,7 +596,7 @@ def _installs_on(files: list[Any], python: str, *, yanked_ok: bool = False) -> b
         if file_info.get("yanked") and not yanked_ok:
             continue
         requires = _specifier_or_none(str(file_info.get("requires_python") or ""))
-        if requires is None or requires.contains(python):
+        if python is None or requires is None or requires.contains(python):
             return True
     return False
 
@@ -605,7 +631,13 @@ def _ceiling_of(specifier: SpecifierSet) -> SpecifierSet:
     return SpecifierSet(",".join(str(s) for s in specifier if s.operator in _CEILING_OPERATORS))
 
 
-def _admits_installable(releases: dict[str, Any], *, python: str, specifier: SpecifierSet) -> bool:
+def _admits_installable(
+    releases: dict[str, Any],
+    *,
+    python: str | None,
+    specifier: SpecifierSet,
+    accept: Callable[[str], bool] | None = None,
+) -> bool:
     """Whether anything ``specifier`` admits installs on ``python``, judged as uv would choose.
 
     A prerelease counts only when the specifier names one, as uv resolves it; ``prereleases`` is
@@ -614,16 +646,32 @@ def _admits_installable(releases: dict[str, Any], *, python: str, specifier: Spe
     for ``==`` / ``===``, and uv (which provisions bmk's venvs) takes it in no other case.
     """
     exact = any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
+    # Newest first: ``accept`` reads PyPI per release, and the newest admitted one usually settles it.
+    ordered = sorted(releases.items(), key=lambda item: _sort_key(item[0]), reverse=True)
     return any(
         isinstance(files, list)
         and specifier.contains(version, prereleases=bool(specifier.prereleases))
         and _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
-        for version, files in releases.items()
+        and (accept is None or accept(version))
+        for version, files in ordered
     )
 
 
-def _newest_installable(releases: dict[str, Any], *, python: str, ceiling: SpecifierSet) -> str | None:
-    """The newest final release in ``releases`` that installs on ``python`` and ``ceiling`` admits."""
+def _sort_key(text: str) -> tuple[int, Version]:
+    """Valid versions in PEP 440 order, every invalid one below them."""
+    try:
+        return (1, Version(text))
+    except InvalidVersion:
+        return (0, Version("0"))
+
+
+def _newest_installable(
+    releases: dict[str, Any], *, python: str | None, ceiling: SpecifierSet, accept: Callable[[str], bool] | None = None
+) -> str | None:
+    """The newest final release in ``releases`` that installs on ``python`` and ``ceiling`` admits.
+
+    ``accept`` is asked last and newest first, so a costly judgement runs on as few releases as it can.
+    """
     candidates: list[tuple[tuple[int, ...], str]] = []
     for version, files in releases.items():
         if _RE_PRERELEASE.search(version) or not _parse_version_tuple(version):
@@ -632,50 +680,348 @@ def _newest_installable(releases: dict[str, Any], *, python: str, ceiling: Speci
             continue
         if isinstance(files, list) and _installs_on(cast("list[Any]", files), python):
             candidates.append((_parse_version_tuple(version), version))
-    return max(candidates)[1] if candidates else None
+    return next((v for _, v in sorted(candidates, reverse=True) if accept is None or accept(v)), None)
 
 
 # A floor is judged in these states; UNKNOWN has no floor to judge and ERROR has no release data.
 _JUDGED_FLOORS = frozenset({DependencyStatus.OUTDATED, DependencyStatus.UP_TO_DATE, DependencyStatus.PINNED})
 
 
-def _hold_to_supported_python(dep: DependencyInfo, support: PythonSupport | None) -> DependencyInfo:
-    """Keep a dependency's floor installable on the oldest Python the project supports.
+def _hold_to_supported_python(
+    dep: DependencyInfo, support: PythonSupport | None, policy: ReleasePolicy | None = None
+) -> DependencyInfo:
+    """Keep a dependency's floor installable on the oldest supported Python, under the cooldown.
 
-    Two cases, both judged against the newest release that oldest Python can install:
+    Two limits apply, both judged against the newest release that is still admitted:
 
-    * The CURRENT floor is above it, so nothing the requirement admits installs there. The floor
-      is lowered to that release and reported OUTDATED: an unresolvable floor is repaired, the one
-      case in which bmk lowers one. Newer Pythons keep installing the newest release, since a
-      floor is only a minimum.
-    * An OUTDATED suggestion is above it. The suggestion is held to that release, or the
-      dependency is PINNED when the floor already is that release.
+    * the oldest Python the project supports must be able to install it, and
+    * under ``[tool.uv] exclude-newer`` it must have been uploaded before the cutoff, since uv
+      will not resolve anything newer (``policy``).
+
+    Two cases follow:
+
+    * The CURRENT floor admits no such release. If nothing it allows installs on that Python, the
+      floor is lowered to the newest admitted release and reported OUTDATED: the one case in which
+      bmk lowers one. If only the cooldown keeps it out, the floor is kept and reported as an
+      ERROR: lowering would drop the fixes it was raised for, and ``deps --update`` pins the
+      release instead (``_pin_young_floors``), after which it is admitted.
+    * An OUTDATED suggestion is above it. The suggestion is held to that release. When the floor
+      already is that release, the dependency is PINNED if the Python is what holds it, and
+      UP-TO-DATE if only the cooldown does: a release still in its cooldown is not yet due.
 
     When the release list cannot be read, an OUTDATED floor is kept and reported as an ERROR:
     raising it blind is exactly the move this check exists to prevent.
     """
-    if support is None or dep.status not in _JUDGED_FLOORS or not dep.current_min:
+    if dep.status not in _JUDGED_FLOORS or not dep.current_min:
         return dep
-    python = support.oldest_for(dep.original_spec)
-    return dep if python is None else _judge_floor(dep, python=python)
+    cutoff = policy.cutoff_for(dep.name) if policy is not None else None
+    python = support.oldest_for(dep.original_spec) if support is not None else None
+    # An exempt package under an active cooldown takes its newest release, but only one whose own
+    # requirements the cooldown admits: a floor on any other makes `uv lock` unsatisfiable.
+    exempt = policy is not None and policy.default is not None and cutoff is None
+    if python is None and cutoff is None and not exempt:
+        return dep
+    lockable = (
+        _LockJudge(policy, python).accepts(dep.name, _requested_extras(dep.original_spec))
+        if policy is not None and exempt
+        else None
+    )
+    try:
+        return _judge_floor(dep, python=python, cutoff=cutoff, lockable=lockable)
+    except _UnjudgeableError as exc:
+        return _keep_outdated_floor(dep, why=str(exc))
 
 
-def _judge_floor(dep: DependencyInfo, *, python: str) -> DependencyInfo:
-    """Lower, hold or keep ``dep``'s floor against ``python``, the oldest Python it installs on."""
+# One release as it is requested: its name (PEP 503), its version and the extras asked of it.
+_ReleaseKey = tuple[str, str, frozenset[str]]
+
+
+class _UnjudgeableError(Exception):
+    """A release's requirements, or a requirement's releases, could not be read from PyPI."""
+
+
+class _LockJudge:
+    """Whether ``uv lock`` can resolve a release under the project's cooldown.
+
+    A release locks when every requirement that applies to the project has a release the cooldown
+    admits; a requirement on another exempt package needs one that itself locks. Judged from PyPI
+    metadata, not by running uv: ``requires-python`` of transitive releases is not consulted.
+    """
+
+    def __init__(self, policy: ReleasePolicy, python: str | None) -> None:
+        self._policy = policy
+        self._python = python
+        self._judged: dict[_ReleaseKey, bool] = {}
+
+    def accepts(self, name: str, extras: frozenset[str] = frozenset()) -> Callable[[str], bool]:
+        return lambda version: self.locks(name, version, frozenset(), extras=extras)
+
+    def locks(
+        self, name: str, version: str, seen: frozenset[_ReleaseKey], *, extras: frozenset[str] = frozenset()
+    ) -> bool:
+        key = (_normalize_name(name), version, extras)
+        if key in seen:
+            return True  # a cycle among own packages adds no requirement of its own
+        if key not in self._judged:
+            requires = _requires_of_release(name, version)
+            if requires is None:
+                raise _UnjudgeableError(f"requirements of {name} {version} unreadable")
+            applying = (r for r in requires if _marker_applies(r, self._python, extras=extras))
+            self._judged[key] = all(self._satisfiable(r, seen | {key}) for r in applying)
+        return self._judged[key]
+
+    def _satisfiable(self, requirement: Requirement, seen: frozenset[_ReleaseKey]) -> bool:
+        releases = _releases_of(requirement.name)
+        if releases is None:
+            raise _UnjudgeableError(f"release list of {requirement.name} unreadable")
+        cutoff = self._policy.cutoff_for(requirement.name)
+        specifier = requirement.specifier
+        matching = sorted(
+            (
+                v
+                for v in admitted_releases(releases, cutoff)
+                if _is_version(v) and specifier.contains(v, prereleases=bool(specifier.prereleases))
+            ),
+            key=Version,
+            reverse=True,
+        )
+        if cutoff is not None:
+            return bool(matching)
+        extras = frozenset(requirement.extras)
+        return any(self.locks(requirement.name, v, seen, extras=extras) for v in matching)
+
+
+# `uv lock` is universal: it resolves for every platform and Python the project admits, so whether a
+# marker applies is decided over every value a comparison in it can see - the literals it names,
+# values below, above, between and around them, and every Python minor from the oldest up - never the
+# host's own values, which packaging fills in for any variable left unset. Variables are varied
+# independently, so a combination no real platform has (os_name "nt" with sys_platform "linux") can
+# count as applying; that costs at most a pin nothing needed, never a missing one.
+_MARKER_OP = r"(?:===|==|!=|<=|>=|~=|<|>|not in|in)"
+_MARKER_LITERAL = r"(?:\"([^\"]*)\"|'([^']*)')"
+_MARKER_COMPARISON = re.compile(
+    rf"\b([a-z_]+) {_MARKER_OP} {_MARKER_LITERAL}|{_MARKER_LITERAL} {_MARKER_OP} ([a-z_]+)\b"
+)
+_PYTHON_VARIABLES = frozenset({"python_version", "python_full_version"})
+# Below and above every literal, as a version and as a string, and equal to none of them.
+_BEYOND_LITERALS = frozenset({"", "0", "9999", "~"})
+# Past this many environments a marker is taken to apply: a wasted pin is cheap, a hung gate is not.
+_MARKER_ENVIRONMENT_CAP = 50_000
+
+
+def _marker_applies(requirement: Requirement, python: str | None, *, extras: Iterable[str] = ()) -> bool:
+    """Whether ``requirement`` applies to the project anywhere ``uv lock`` resolves for it.
+
+    ``python`` is the oldest Python the requirement's parent is installed on; every later one counts
+    too. ``extras`` are the extras the parent was requested with: a requirement behind any other
+    extra is never installed.
+    """
+    if requirement.marker is None:
+        return True
+    text = str(requirement.marker)
+    return _marker_holds(text, tuple(_python_candidates(text, python)), tuple(sorted(extras)))
+
+
+def _oldest_python_applying(requirement: Requirement, python: str | None, *, extras: Iterable[str] = ()) -> str | None:
+    """The oldest Python, from ``python`` up, on which ``requirement`` applies.
+
+    ``python`` itself when the marker names no Python version (or when there is no ``python``), so a
+    release gated to newer Pythons is judged installable where uv actually needs it.
+    """
+    marker = requirement.marker
+    if marker is None or python is None:
+        return python
+    return _oldest_python_holding(str(marker), _python_candidates(str(marker), python), tuple(sorted(extras))) or python
+
+
+def _oldest_python_holding(text: str, pythons: list[str], extras: tuple[str, ...]) -> str | None:
+    """The first of ``pythons`` on which the marker ``text`` can hold, or None; None also when it
+    names no Python version at all, since then no Python decides it."""
+    if not _literals(text).keys() & _PYTHON_VARIABLES:
+        return None
+    # A capped candidate never decides: answering "holds" there would pick too old a Python. A marker
+    # past the cap on every Python falls back to the caller's oldest, as an unreadable one does.
+    return next((v for v in pythons if _marker_holds(text, (v,), extras, when_capped=False)), None)
+
+
+@lru_cache(maxsize=4096)
+def _marker_holds(text: str, pythons: tuple[str, ...], extras: tuple[str, ...], *, when_capped: bool = True) -> bool:
+    """Whether the marker ``text`` holds for some environment on one of ``pythons`` with ``extras``.
+
+    ``when_capped`` is the answer past ``_MARKER_ENVIRONMENT_CAP`` environments: True where a
+    wrong yes costs a wasted pin, False where it would pick too old a Python.
+    """
+    literals = _literals(text)
+    named = {_normalize_name(e) for e in literals.get("extra", set())}
+    requested = [e for e in extras if _normalize_name(e) in named]
+    axes: list[list[dict[str, str]]] = [[{"extra": e} for e in ("", *requested)]]
+    if literals.keys() & _PYTHON_VARIABLES:
+        axes.append([{"python_version": v.rsplit(".", 1)[0], "python_full_version": v} for v in pythons])
+    axes.extend(
+        [{name: value} for value in sorted(_around(values))]
+        for name, values in literals.items()
+        if name not in _PYTHON_VARIABLES and name != "extra"
+    )
+    if prod(len(axis) for axis in axes) > _MARKER_ENVIRONMENT_CAP:
+        return when_capped
+    try:
+        marker = Marker(text)
+        return any(
+            marker.evaluate({k: v for part in combination for k, v in part.items()}) for combination in product(*axes)
+        )
+    except Exception:  # an unevaluable marker may apply, so it is judged
+        return True
+
+
+def _around(values: set[str]) -> set[str]:
+    """``values``, values beyond all of them, and a value just above each: between it and the next as a
+    version, and containing it but unequal to it, for ``in``."""
+    return values | _BEYOND_LITERALS | {f"{v}.1" for v in values}
+
+
+def _literals(text: str) -> dict[str, set[str]]:
+    """Every value each variable is compared against in the marker ``text``."""
+    found: dict[str, set[str]] = {}
+    for match in _MARKER_COMPARISON.finditer(text):
+        if match.group(1) is not None:
+            variable, value = match.group(1), _first(match.group(2), match.group(3))
+        else:
+            variable, value = match.group(6), _first(match.group(4), match.group(5))
+        found.setdefault(variable, set()).add(value)
+    return found
+
+
+def _first(*groups: str | None) -> str:
+    return next(g for g in groups if g is not None)
+
+
+def _python_candidates(text: str, python: str | None) -> list[str]:
+    """The Pythons from ``python`` up that decide every Python comparison in the marker ``text``.
+
+    The first and last patch of every minor from ``python``'s up, ``python`` itself, and beside each
+    version the marker names (in any spelling: ``3.11.*``, ``'3.11 3.12'``, ``3.12.0rc1``) that
+    patch and the ones next to it.
+    """
+    oldest = Version(python or "3.0.0")
+    last = _PATCH_SCAN - 1
+    found = {str(oldest)} | {f"3.{m}.{p}" for m in range(oldest.minor, oldest.minor + _MINOR_SCAN) for p in (0, last)}
+    for variable, values in _literals(text).items():
+        if variable in _PYTHON_VARIABLES:
+            for value in values:
+                found.update(_pythons_beside(value))
+    return sorted((v for v in found if Version(v) >= oldest), key=Version)
+
+
+def _pythons_beside(value: str) -> list[str]:
+    """The patches at and next to each version ``value`` names (a list for ``in``, ``.*`` stripped)."""
+    beside: list[str] = []
+    for word in value.split():
+        try:
+            release = Version(word.removesuffix(".*")).release
+        except InvalidVersion:
+            continue
+        if len(release) < 2:
+            continue
+        minor, patch = release[1], release[2] if len(release) > 2 else 0
+        beside += [f"3.{minor}.{p}" for p in (patch, patch + 1, max(patch - 1, 0))]
+    return beside
+
+
+def _is_version(text: str) -> bool:
+    try:
+        Version(text)
+    except InvalidVersion:
+        return False
+    return True
+
+
+def _requires_of_release(name: str, version: str) -> list[Requirement] | None:
+    """One release's parsed requirements from its own PyPI document, or None when unreadable."""
+    data = _fetch_pypi_data(name, version)
+    info = data.get("info") if data else None
+    if not isinstance(info, dict):
+        return None
+    raw: object = cast("dict[str, Any]", info).get("requires_dist")
+    specs: list[object] = cast("list[object]", raw) if isinstance(raw, list) else []
+    parsed = (_requirement_or_none(str(spec)) for spec in specs)
+    return [r for r in parsed if r is not None]
+
+
+def _requested_extras(spec: str) -> frozenset[str]:
+    """The extras ``spec`` requests (``widget[fast]`` requests ``fast``), none when it is not PEP 508."""
+    requirement = _requirement_or_none(spec)
+    return frozenset(requirement.extras) if requirement is not None else frozenset()
+
+
+def _requirement_or_none(spec: str) -> Requirement | None:
+    """``spec`` parsed, or None when it is not valid PEP 508 (an installer skips it too)."""
+    try:
+        return Requirement(spec)
+    except InvalidRequirement:
+        return None
+
+
+def _judge_floor(
+    dep: DependencyInfo, *, python: str | None, cutoff: datetime | None, lockable: Callable[[str], bool] | None = None
+) -> DependencyInfo:
+    """Lower, hold or keep ``dep``'s floor against ``python``, the cooldown ``cutoff`` and ``lockable``.
+
+    Raises:
+        _UnjudgeableError: When ``lockable`` cannot read the metadata it judges from.
+    """
     specifier = _specifier_of(dep.original_spec)
     if specifier is None:
         return _keep_outdated_floor(dep, why="requirement is not valid PEP 508")
     releases = _releases_of(dep.name)
     if releases is None:
-        return _keep_outdated_floor(dep, why="Requires-Python unreadable")
-    installable = _newest_installable(releases, python=python, ceiling=_ceiling_of(specifier))
+        return _keep_outdated_floor(dep, why="release list unreadable")
+    admitted = admitted_releases(releases, cutoff)
+    ceiling = _ceiling_of(specifier)
+    installable = _newest_installable(admitted, python=python, ceiling=ceiling, accept=lockable)
     if installable is None:
-        return _keep_outdated_floor(dep, why=f"no release installs on Python {_shown(python)}")
+        return _unsatisfiable_floor(
+            dep, why=_no_release_why(releases, python=python, ceiling=ceiling, lockable=lockable)
+        )
     # Judged on the whole specifier, so ">", "==" and "~=" floors count exactly as written.
-    if not _admits_installable(releases, python=python, specifier=specifier):
-        latest = f"{installable} (floor {dep.constraint} does not install on Python {_shown(python)})"
-        return replace(dep, status=DependencyStatus.OUTDATED, latest=latest)
-    return _hold_suggestion(dep, installable=installable, python=python)
+    if not _admits_installable(admitted, python=python, specifier=specifier, accept=lockable):
+        why = _floor_why(admitted, releases, python=python, specifier=specifier, lockable=lockable is not None)
+        if _admits_installable(releases, python=python, specifier=specifier):
+            # Only the cooldown stands in the way. Lowering would drop the fixes the floor was
+            # raised for; `deps --update` pins the release instead (reconcile_floor_pins).
+            return _unsatisfiable_floor(dep, why=f"floor {dep.constraint} {why}; not pinned")
+        return replace(dep, status=DependencyStatus.OUTDATED, latest=f"{installable} (floor {dep.constraint} {why})")
+    newest = _newest_installable(releases, python=python, ceiling=ceiling)
+    held_back = newest if newest is not None and newest != installable else None
+    limit = _LOCK_LIMIT if lockable is not None else f"inside the {_COOLDOWN} cooldown"
+    return _hold_suggestion(dep, installable=installable, python=python, held_back=held_back, limit=limit)
+
+
+def _floor_why(
+    admitted: dict[str, Any], releases: dict[str, Any], *, python: str | None, specifier: SpecifierSet, lockable: bool
+) -> str:
+    if lockable and _admits_installable(admitted, python=python, specifier=specifier):
+        return f"needs a release younger than the {_COOLDOWN} cooldown, so uv cannot lock it"
+    if _admits_installable(releases, python=python, specifier=specifier):
+        return f"is younger than the {_COOLDOWN} cooldown"
+    return f"does not install on Python {_shown(python or '')}"
+
+
+# How report lines name the cooldown; the actual length is the project's own exclude-newer.
+_COOLDOWN = "exclude-newer"
+
+
+# How a report names the limit on an exempt package whose newer releases uv cannot lock yet.
+_LOCK_LIMIT = f"not lockable yet: it needs releases younger than the {_COOLDOWN} cooldown"
+
+
+def _no_release_why(
+    releases: dict[str, Any], *, python: str | None, ceiling: SpecifierSet, lockable: Callable[[str], bool] | None
+) -> str:
+    if python is not None and _newest_installable(releases, python=python, ceiling=ceiling) is None:
+        return f"no release installs on Python {_shown(python)}"
+    if lockable is not None:
+        return f"no release uv can lock under the {_COOLDOWN} cooldown"
+    return f"no release is older than the {_COOLDOWN} cooldown"
 
 
 def _keep_outdated_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
@@ -686,16 +1032,53 @@ def _keep_outdated_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
     return replace(dep, status=DependencyStatus.ERROR, latest=f"{proposed} ({why}, floor kept)")
 
 
-def _hold_suggestion(dep: DependencyInfo, *, installable: str, python: str) -> DependencyInfo:
-    """Hold an OUTDATED suggestion to ``installable``, the newest release ``python`` installs."""
+def _unsatisfiable_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
+    """A floor nothing admitted can satisfy is an ERROR whatever it was judged before.
+
+    ``uv lock`` fails on it, so reporting it ``[ok]`` would leave only uv's own message to explain
+    a red gate; the floor is kept, since no release bmk could write would resolve either.
+    """
+    proposed = dep.latest.split(" ", 1)[0]
+    return replace(dep, status=DependencyStatus.ERROR, latest=f"{proposed} ({why}, floor kept)", blocks_lock=True)
+
+
+def _hold_suggestion(
+    dep: DependencyInfo, *, installable: str, python: str | None, held_back: str | None, limit: str
+) -> DependencyInfo:
+    """Hold an OUTDATED suggestion to ``installable``, the newest release still admitted.
+
+    ``held_back`` is the newest release the Python alone would allow, when ``limit`` (the cooldown,
+    or what uv can lock under it) is what keeps it out; None when only the Python holds.
+    """
     proposed = dep.latest.split(" ", 1)[0]
     if dep.status is not DependencyStatus.OUTDATED or installable == proposed:
         return dep
     if _version_gte(dep.current_min, installable):
+        if held_back is not None:
+            return replace(dep, status=DependencyStatus.UP_TO_DATE, latest=f"{held_back} ({limit})")
         return replace(
-            dep, status=DependencyStatus.PINNED, latest=f"{proposed} (needs a newer Python than {_shown(python)})"
+            dep, status=DependencyStatus.PINNED, latest=f"{proposed} (needs a newer Python than {_shown(python or '')})"
         )
-    return replace(dep, latest=f"{installable} (newest for Python {_shown(python)}, absolute: {proposed})")
+    if held_back is not None:
+        return replace(dep, latest=f"{installable} (newest admitted; {held_back} is {limit}, absolute: {proposed})")
+    return replace(dep, latest=f"{installable} (newest for Python {_shown(python or '')}, absolute: {proposed})")
+
+
+def release_policy(config: PyprojectConfig, *, now: datetime | None = None) -> ReleasePolicy:
+    """The cooldown the project's ``[tool.uv]`` states, as uv itself resolves it.
+
+    Raises:
+        SupplyChainConfigError: When uv refused a stated value, or could not be asked.
+    """
+    uv = config.tool.uv
+    stated = uv.exclude_newer is not None or bool(uv.exclude_newer_package)
+    lock_options = uv_resolved_options(uv.exclude_newer, uv.exclude_newer_package) if stated else None
+    return ReleasePolicy.from_project(
+        exclude_newer=uv.exclude_newer,
+        packages=uv.exclude_newer_package,
+        lock_options=lock_options,
+        now=now if now is not None else datetime.now(timezone.utc),
+    )
 
 
 def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[DependencyInfo]:
@@ -706,11 +1089,15 @@ def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[Depende
 
     Returns:
         List of DependencyInfo objects for all found dependencies.
+
+    Raises:
+        SupplyChainConfigError: When ``[tool.uv]`` states a cooldown uv would not accept.
     """
     config = load_pyproject_config(pyproject)
     support = python_support(config)
+    policy = release_policy(config)
     with _one_fetch_per_package():
-        return [_hold_to_supported_python(dep, support) for dep in _extract_all_dependencies(config)]
+        return [_hold_to_supported_python(dep, support, policy) for dep in _extract_all_dependencies(config)]
 
 
 def _group_by_source(deps: list[DependencyInfo]) -> dict[str, list[DependencyInfo]]:
@@ -766,7 +1153,7 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
         verbose: If True, show all dependencies; if False, show only outdated
 
     Returns:
-        Exit code (0 if all up-to-date, 1 if any outdated)
+        Exit code: 1 if any floor is outdated or makes ``uv lock`` fail, else 0
     """
     if not deps:
         print("No dependencies found in pyproject.toml")
@@ -777,10 +1164,18 @@ def print_report(deps: list[DependencyInfo], *, verbose: bool = False) -> int:
 
     _print_summary(deps)
 
-    if any(d.status == DependencyStatus.OUTDATED for d in deps):
+    if _check_fails(deps):
         print("\nRun with --verbose to see all dependencies")
         return 1
     return 0
+
+
+def _check_fails(deps: list[DependencyInfo]) -> bool:
+    """Whether the check fails: a floor is outdated, or ``uv lock`` cannot satisfy it.
+
+    An ERROR about reading PyPI does not fail it, so an outage of the index cannot block every push.
+    """
+    return any(d.status == DependencyStatus.OUTDATED or d.blocks_lock for d in deps)
 
 
 def _get_status_icon(status: DependencyStatus) -> str:
@@ -982,7 +1377,249 @@ def _print_install_report(needs_install: list[tuple[str, str | None, str, str]],
         print(f"  {name}: {status} -> >={required}{marker}")
 
 
-def _run_pip_install(needs_install: list[tuple[str, str | None, str, str]], python: str) -> int:
+@dataclass(frozen=True)
+class LockedProject:
+    """How :func:`main` keeps ``uv.lock`` and the project venv current; the stage wires uv in.
+
+    Attributes:
+        upgrade: Runs ``uv lock --upgrade``: every package at its newest admitted release.
+        sync: Brings the project venv to the lock; True synced, False failed, None no venv.
+    """
+
+    upgrade: Callable[[], bool]
+    sync: Callable[[], bool | None]
+
+
+def _complete_block(pyproject: Path, supply_chain: SupplyChainSettings, *, quiet: bool) -> bool:
+    """Write the cooldown and the own-package exemptions into ``[tool.uv]``; True when it changed.
+
+    The caller re-locks and re-syncs on every update anyway, so it does not branch on the answer;
+    the return value states what happened for a reader and a test.
+
+    Runs before anything is locked or judged: the lock resolves under this block, and the floors
+    are judged against the cutoff that lock records.
+    """
+    config = load_pyproject_config(pyproject)
+    try:
+        exempt = own_closure(
+            [d.name for d in _extract_all_dependencies(config)],
+            own=supply_chain.own_packages,
+            requires_of=_requires_of_newest,
+            project=config.project.name,
+        )
+    except OwnPackageUnreadableError as exc:
+        print(
+            f"{pyproject}: [tool.uv] left as it is: PyPI did not answer for {exc}, so the exemptions would be incomplete",
+            file=sys.stderr,
+        )
+        return False
+    changes = ensure_uv_cooldown(pyproject, cooldown=supply_chain.cooldown, exempt=exempt)
+    changes += _pin_young_floors(pyproject)
+    if not quiet:
+        for change in changes:
+            print(f"  {change}")
+    return bool(changes)
+
+
+def _pin_young_floors(pyproject: Path) -> list[str]:
+    """Keep bmk's floor pins in ``[tool.uv]`` exactly what the declared floors need today.
+
+    Nothing is changed when PyPI does not answer: a pin judged on missing data could be dropped
+    while its floor still needs it, and ``uv lock`` would then fail on that floor.
+
+    Raises:
+        SupplyChainConfigError: When uv refuses the project's ``exclude-newer``.
+    """
+    config = load_pyproject_config(pyproject)
+    uv = config.tool.uv
+    try:
+        pins = _demanded_pins(config, uv.exclude_newer, uv.exclude_newer_package)
+    except _UnjudgeableError as exc:
+        print(f"{pyproject}: floor pins left as they are: {exc}", file=sys.stderr)
+        return []
+    return reconcile_floor_pins(pyproject, pins=pins, is_floor_pin=_is_floor_pin)
+
+
+def _demanded_pins(config: PyprojectConfig, exclude_newer: object, packages: dict[str, Any]) -> dict[str, str]:
+    """The floor pins the project's declared floors need under its ``exclude-newer``.
+
+    Raises:
+        _UnjudgeableError: When a release list or a release's requirements cannot be read.
+    """
+    if exclude_newer is None:
+        return {}
+    cutoff = ReleasePolicy.from_lock(uv_resolved_options(exclude_newer, {}), now=datetime.now(timezone.utc)).default
+    if cutoff is None:
+        return {}
+    exempt = frozenset(normalize(n) for n, v in packages.items() if v is False)
+    kept = frozenset(normalize(n) for n, v in packages.items() if v is not False and not _is_floor_pin(normalize(n), v))
+    support = python_support(config)
+    demand = _FloorDemand(cutoff=cutoff, exempt=exempt, kept=kept)
+    for dep in _extract_all_dependencies(config):
+        requirement = _requirement_or_none(dep.original_spec)
+        if requirement is not None:
+            demand.add(requirement, python=support.oldest_for(dep.original_spec) if support is not None else None)
+    return demand.pins
+
+
+def _is_floor_pin(name: str, value: object) -> bool:
+    """Whether ``value`` is a pin bmk wrote: the next whole second after one file of one release.
+
+    Any file, not only the newest: bmk pins a release at its newest file as of that day, and a file
+    uploaded later (a wheel built after the sdist) must not turn bmk's own pin into what reads as the
+    project's choice, which would then hold the package back for good. A timestamp the project chose
+    reads as bmk's only if it falls on exactly that second after one of the package's uploads; no
+    value-based rule can tell those apart, and a record kept beside the table could disagree with it.
+
+    Raises:
+        _UnjudgeableError: When the release list cannot be read.
+    """
+    if not isinstance(value, str):
+        return False
+    releases = _releases_of(name)
+    if releases is None:
+        raise _UnjudgeableError(f"release list of {name} unreadable")
+    return any(
+        floor_pin([entry]) == value
+        for files in releases.values()
+        if isinstance(files, list)
+        for entry in cast("list[Any]", files)
+    )
+
+
+class _FloorDemand:
+    """The releases a project's declared floors demand, and the pins those inside the cooldown need.
+
+    A floor needs no pin while a release it admits is already outside the cooldown. Otherwise the pin
+    goes to the satisfying release uploaded FIRST, among those that install on the Python the floor
+    serves, so it admits no more than the floor asked for. An exempt package needs no pin of its own,
+    but the release it demands brings floors of its own, which are walked the same way - and so does
+    a pinned release, whose own requirements can be just as young (pydantic 2.14.1 requires exactly
+    pydantic-core 2.50.1, uploaded the same evening). A requirement is walked wherever ``uv lock``
+    can need it: on any platform, any Python from the oldest up, and behind the extras requested.
+    """
+
+    def __init__(self, *, cutoff: datetime, exempt: frozenset[str], kept: frozenset[str]) -> None:
+        self._cutoff = cutoff
+        self._exempt = exempt
+        self._kept = kept
+        self._walked: set[_ReleaseKey] = set()
+        self.pins: dict[str, str] = {}
+
+    def add(self, requirement: Requirement, *, python: str | None) -> None:
+        name = normalize(requirement.name)
+        if name in self._kept:
+            return  # an override the project set itself decides this package
+        releases = _releases_of(name)
+        if releases is None:
+            raise _UnjudgeableError(f"release list of {name} unreadable")
+        extras = frozenset(requirement.extras)
+        satisfying = _satisfying_releases(releases, requirement.specifier, python=python)
+        if not satisfying:
+            return
+        if name in self._exempt:
+            self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
+            return
+        if admitted_releases(satisfying, self._cutoff):
+            return  # a release the cooldown already admits serves the floor
+        pin = _earliest_whole_pin(satisfying, at_least=self.pins.get(name))
+        if pin is None:
+            return
+        self.pins[name] = pin
+        # What uv resolves at that pin: the highest release a file uploaded before it makes visible
+        # and installable on this Python (the pinned release itself always is).
+        visible = admitted_releases(satisfying, datetime.fromisoformat(pin.replace("Z", "+00:00")))
+        exact = _exact_pin(requirement.specifier)
+        takeable = [
+            v for v, files in visible.items() if _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
+        ]
+        if not takeable:
+            raise _UnjudgeableError(f"no file of {name} that installs on Python {python} has an upload time")
+        self._walk(name, max(takeable, key=Version), python=python, extras=extras)
+
+    def _walk(self, name: str, version: str, *, python: str | None, extras: frozenset[str]) -> None:
+        if (name, version, extras) in self._walked:
+            return
+        self._walked.add((name, version, extras))
+        requires = _requires_of_release(name, version)
+        if requires is None:
+            raise _UnjudgeableError(f"requirements of {name} {version} unreadable")
+        for requirement in requires:
+            if _marker_applies(requirement, python, extras=extras):
+                self.add(requirement, python=_oldest_python_applying(requirement, python, extras=extras))
+
+
+def _exact_pin(specifier: SpecifierSet) -> bool:
+    """Whether ``specifier`` pins one release exactly, the one case in which uv takes a yanked file."""
+    return any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
+
+
+def _earliest_whole_pin(satisfying: dict[str, Any], *, at_least: str | None) -> str | None:
+    """The earliest cutoff, from ``at_least`` on, at which every release in ``satisfying`` is whole.
+
+    Each candidate is one second after a release's newest file, so that release is admitted whole;
+    one at which another satisfying release has files on both sides is skipped, since uv would lock
+    that release with only its older files (pydantic-core 2.50.1 kept one macOS wheel of dozens), and
+    every other platform would build from source or fail. The latest candidate always qualifies.
+    """
+    candidates = sorted({pin for files in satisfying.values() if (pin := floor_pin(files)) is not None})
+    if at_least is not None:
+        candidates = sorted({at_least, *(c for c in candidates if c > at_least)})
+    return next((c for c in candidates if not _cuts_a_release(satisfying, c)), None)
+
+
+def _cuts_a_release(satisfying: dict[str, Any], pin: str) -> bool:
+    """Whether some release in ``satisfying`` has timed files both before and after ``pin``."""
+    visible = admitted_releases(satisfying, datetime.fromisoformat(pin.replace("Z", "+00:00")))
+    for version, files in satisfying.items():
+        timed = sum(1 for entry in cast("list[Any]", files) if floor_pin([entry]) is not None)
+        if len(visible.get(version, [])) not in (0, timed):
+            return True
+    return False
+
+
+def _satisfying_releases(releases: dict[str, Any], specifier: SpecifierSet, *, python: str | None) -> dict[str, Any]:
+    """The releases ``specifier`` admits that uv would take on ``python``: a file installing there,
+    and not only yanked ones (a yanked one counts under an exact pin)."""
+    exact = _exact_pin(specifier)
+    return {
+        version: files
+        for version, files in releases.items()
+        if _is_version(version)
+        and isinstance(files, list)
+        and specifier.contains(version, prereleases=bool(specifier.prereleases))
+        and _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
+    }
+
+
+def _upgrade_and_sync(locked: LockedProject, pyproject: Path) -> int:
+    """Re-lock at the newest admitted releases, then bring the venv to that lock.
+
+    Runs whether or not a floor moved: a transitive package can move inside an unchanged manifest,
+    and the gates after this stage must test exactly what the lock pins.
+    """
+    if not locked.upgrade():
+        print(f"{pyproject.parent}: uv lock --upgrade failed after the floor update", file=sys.stderr)
+        return 1
+    if locked.sync() is False:
+        print(f"{pyproject.parent}: uv sync from uv.lock failed after the floor update", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _requires_of_newest(package_name: str) -> list[str] | None:
+    """The requirement strings of a package's newest release on PyPI; None when PyPI did not answer."""
+    data = _fetch_pypi_data(package_name)
+    info = data.get("info") if data else None
+    if not isinstance(info, dict):
+        return None
+    requires = cast("dict[str, Any]", info).get("requires_dist")
+    return [str(r) for r in cast("list[Any]", requires)] if isinstance(requires, list) else []
+
+
+def _run_pip_install(
+    needs_install: list[tuple[str, str | None, str, str]], python: str, *, project_dir: Path | None = None
+) -> int:
     """Install packages into ``python``'s environment.
 
     Installs into the *explicitly passed* interpreter (the project's venv), never
@@ -995,6 +1632,10 @@ def _run_pip_install(needs_install: list[tuple[str, str | None, str, str]], pyth
     interpreter (see ``tools.ensure_audit_pip_argv``). Because the target is an
     explicit venv, no PEP 668 override is needed or wanted.
 
+    It runs in ``project_dir`` because ``--upgrade`` takes the newest release, and uv
+    holds that to the project's ``[tool.uv]`` cooldown only when it reads the project's
+    own configuration, which it finds from the working directory.
+
     Returns:
         uv exit code
     """
@@ -1004,7 +1645,7 @@ def _run_pip_install(needs_install: list[tuple[str, str | None, str, str]], pyth
     argv.extend(f"{name}>={required}{marker}" for name, _, required, marker in needs_install)
 
     try:
-        return subprocess.run(argv, check=False).returncode
+        return subprocess.run(argv, check=False, cwd=project_dir).returncode
     except OSError:
         print("uv not found on PATH; cannot install dependencies", file=sys.stderr)
         return 1
@@ -1016,6 +1657,7 @@ def sync_installed_packages(
     python: str,
     dry_run: bool = False,
     quiet: bool = False,
+    project_dir: Path | None = None,
 ) -> tuple[int, int]:
     """Ensure packages installed in ``python``'s env match pyproject.toml.
 
@@ -1027,6 +1669,7 @@ def sync_installed_packages(
         python: Interpreter whose environment is inspected and installed into
         dry_run: If True, only show what would be installed without installing
         quiet: Suppress informational output
+        project_dir: The project whose ``[tool.uv]`` cooldown the install must honour.
 
     Returns:
         (number of packages that needed updating, exit code of the install).
@@ -1050,7 +1693,7 @@ def sync_installed_packages(
 
     if not quiet:
         print("\nInstalling/updating packages...")
-    exit_code = _run_pip_install(needs_install, python)
+    exit_code = _run_pip_install(needs_install, python, project_dir=project_dir)
 
     if exit_code == 0:
         if not quiet:
@@ -1167,6 +1810,8 @@ def main(
     quiet: bool = False,
     pyproject: Path = Path("pyproject.toml"),
     python: str | None = None,
+    supply_chain: SupplyChainSettings | None = None,
+    locked: LockedProject | None = None,
 ) -> int:
     """Main entry point for dependency checking.
 
@@ -1179,22 +1824,34 @@ def main(
         python: Interpreter to inspect and install into. Required for ``update``;
             without it there is no environment bmk may safely write to, so the
             sync is skipped rather than defaulting to the ambient interpreter.
+        supply_chain: With ``update``, the cooldown and own packages to keep in the
+            project's ``[tool.uv]`` before any floor is judged. None leaves the block alone.
+        locked: With ``update``, re-locks at the newest admitted releases after the floors are
+            judged and syncs the venv from that lock, instead of installing floors into it.
 
     Returns:
         Exit code (0 if all up-to-date or the update succeeded, non-zero if any
-        dependency is outdated or an install failed)
+        dependency is outdated, an install failed or ``[tool.uv]`` states a cooldown
+        uv would refuse)
     """
     if not quiet:
         print(f"Checking dependencies in {pyproject}...")
-    deps = check_dependencies(pyproject)
-    if not quiet:
-        exit_code = print_report(deps, verbose=verbose)
-    else:
-        exit_code = 1 if any(d.status == DependencyStatus.OUTDATED for d in deps) else 0
+    try:
+        with _one_fetch_per_package():
+            if update and not dry_run and supply_chain is not None:
+                _complete_block(pyproject, supply_chain, quiet=quiet)
+            deps = check_dependencies(pyproject)
+    except SupplyChainConfigError as exc:
+        print(f"{pyproject}: {exc}", file=sys.stderr)
+        return 1
+    exit_code = int(_check_fails(deps)) if quiet else print_report(deps, verbose=verbose)
 
     if update:
         # Update pyproject.toml with latest versions
         updated = update_dependencies(deps, pyproject, dry_run=dry_run, quiet=quiet)
+
+        if locked is not None:
+            return 0 if dry_run else _upgrade_and_sync(locked, pyproject)
 
         # Re-check dependencies after pyproject.toml update
         if updated > 0 and not dry_run:
@@ -1208,7 +1865,9 @@ def main(
             return 0
 
         # Sync installed packages with pyproject.toml requirements
-        _, install_code = sync_installed_packages(deps, python=python, dry_run=dry_run, quiet=quiet)
+        _, install_code = sync_installed_packages(
+            deps, python=python, dry_run=dry_run, quiet=quiet, project_dir=pyproject.parent
+        )
         return install_code
 
     return exit_code
@@ -1225,15 +1884,33 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument(
         "--project-dir", type=Path, default=Path.cwd(), help="Project directory containing pyproject.toml"
     )
-    from bmk.adapters.stagerunner.venv import is_venv, resolve_project_venv, venv_python
+    from bmk.adapters.stagerunner.venv import (
+        desired_python_minor,
+        ensure_project_venv_at,
+        is_venv,
+        lock_project,
+        resolve_project_venv,
+        venv_python,
+    )
 
     args, _unknown = parser.parse_known_args()
     pyproject = args.project_dir / "pyproject.toml"
     quiet = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
 
-    # Same rule as the stage path: install only into the project's own venv.
+    # Same rule as the stage path: install only into the project's own venv, synced from the lock.
     project_venv = resolve_project_venv(args.project_dir, os.environ)
     target = str(venv_python(project_venv)) if is_venv(project_venv) else None
+
+    def _sync() -> bool | None:
+        if not is_venv(project_venv):
+            return None
+        minor = desired_python_minor(args.project_dir)
+        return ensure_project_venv_at(args.project_dir, project_venv, minor, quiet=quiet) is not None
+
+    locked = LockedProject(
+        upgrade=lambda: lock_project(args.project_dir, quiet=quiet, upgrade=True),
+        sync=_sync,
+    )
 
     sys.exit(
         main(
@@ -1243,5 +1920,6 @@ if __name__ == "__main__":  # pragma: no cover
             quiet=quiet,
             pyproject=pyproject,
             python=target,
+            locked=locked,
         )
     )

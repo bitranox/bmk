@@ -179,10 +179,10 @@ codecov.xml
 # Nix build result symlink
 result
 
-# Optional lockfiles (for alternative managers)
+# Lockfiles of other managers. uv.lock is NOT ignored: it is committed, so CI and every
+# clone install the exact tree, with hashes, that passed the supply-chain cooldown.
 poetry.lock
 pdm.lock
-uv.lock
 
 # div
 #  .devcontainer/   --> we need that for github codespaces

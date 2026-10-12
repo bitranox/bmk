@@ -18,7 +18,14 @@ from .context import resolve_audit_python
 from .helpers import _clean, _dependencies, _matrix
 from .model import Stage, StageContext
 from .overrides import load_overlay, resolve_stages
-from .venv import is_venv, resolve_project_venv, venv_python
+from .venv import (
+    desired_python_minor,
+    ensure_project_venv_at,
+    is_venv,
+    lock_project,
+    resolve_project_venv,
+    venv_python,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,6 +92,30 @@ def deps_action(ctx: StageContext) -> int:
     )
 
 
+def _locked_project(ctx: StageContext) -> _dependencies.LockedProject:
+    """``uv lock --upgrade`` for the project, and a sync of the project's OWN venv from that lock.
+
+    The sync re-runs the same lock-based provisioning ``run_command`` used before the pipeline,
+    at the same path, so the pins ``build_context`` froze stay valid. No project venv means
+    nothing to sync (None), never a retarget at bmk's own interpreter.
+    """
+    quiet = ctx.output_format is not ToolOutputFormat.TEXT
+    venv = resolve_project_venv(ctx.project_dir, ctx.env)
+
+    def sync() -> bool | None:
+        if not is_venv(venv):
+            return None
+        return (
+            ensure_project_venv_at(ctx.project_dir, venv, desired_python_minor(ctx.project_dir), quiet=quiet)
+            is not None
+        )
+
+    return _dependencies.LockedProject(
+        upgrade=lambda: lock_project(ctx.project_dir, quiet=quiet, upgrade=True),
+        sync=sync,
+    )
+
+
 def deps_update_action(ctx: StageContext) -> int:
     """Update outdated dependencies to their latest versions."""
     return _dependencies.main(
@@ -92,6 +123,8 @@ def deps_update_action(ctx: StageContext) -> int:
         pyproject=ctx.project_dir / "pyproject.toml",
         quiet=ctx.output_format is not ToolOutputFormat.TEXT,
         python=_project_python(ctx),
+        supply_chain=ctx.supply_chain,
+        locked=_locked_project(ctx),
     )
 
 
@@ -99,6 +132,7 @@ def deps_update_action(ctx: StageContext) -> int:
 # checks at order 40, then shellcheck.
 _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("update_deps", 10, PipelineAction("deps_update")),
+    Stage("uv_lock", 15, ToolAction(tools.uv_lock_argv)),
     Stage("ruff_format_apply", 20, ToolAction(tools.ruff_format_apply_argv)),
     Stage("ruff_fix_apply", 30, ToolAction(tools.ruff_fix_apply_argv)),
     Stage("bandit", 40, ToolAction(tools.bandit_argv)),

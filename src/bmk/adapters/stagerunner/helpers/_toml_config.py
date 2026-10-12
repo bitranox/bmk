@@ -297,12 +297,21 @@ class PdmConfig(BaseModel):
 
 
 class UvConfig(BaseModel):
-    """[tool.uv] - uv's dev dependency array."""
+    """[tool.uv] - uv's dev dependency array and its supply-chain cooldown.
+
+    ``exclude_newer`` and ``exclude_newer_package`` are kept as raw TOML values and never parsed
+    here: bmk reads the cutoff uv RESOLVED from ``uv.lock`` (``_supply_chain.ReleasePolicy``), and
+    uses these only to notice a value uv refused, so uv's own grammar is the only one that applies.
+    """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     dev_dependencies: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = Field(
         default=(), validation_alias="dev-dependencies"
+    )
+    exclude_newer: Any = Field(default=None, validation_alias="exclude-newer")
+    exclude_newer_package: Annotated[dict[str, Any], BeforeValidator(_coerce_table)] = Field(
+        default_factory=lambda: {}, validation_alias="exclude-newer-package"
     )
 
 

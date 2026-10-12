@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
+
+from .helpers._supply_chain import SupplyChainSettings
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -29,6 +31,7 @@ class StageContext:
     package_name: str
     env: Mapping[str, str]
     show_warnings: bool
+    supply_chain: SupplyChainSettings = field(default_factory=SupplyChainSettings)
 
 
 class StageAction(Protocol):

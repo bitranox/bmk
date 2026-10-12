@@ -40,6 +40,9 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
             or the pipeline's exit code on failure.
     """
+    # Deferred like run_command's own imports: `bmk --version` must not load the stage runner.
+    from bmk.adapters.stagerunner.helpers._supply_chain import SupplyChainSettings  # noqa: PLC0415
+
     cwd = Path.cwd()
     bmk_config = config.as_dict().get("bmk", {})
 
@@ -50,6 +53,7 @@ def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> 
         package_name=bmk_config.get("package_name", ""),
         show_warnings=bmk_config.get("show_warnings", True),
         output_format=resolve_output_format(human=human),
+        supply_chain=SupplyChainSettings.from_config(bmk_config.get("supply_chain", {})),
     )
 
     if exit_code != 0:

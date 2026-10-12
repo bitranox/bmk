@@ -222,13 +222,15 @@ def _uv_env() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
 
 
-def _run(argv: list[str], cwd: Path, *, quiet: bool) -> int:
-    """Run ``argv`` in ``cwd``, silencing output when quiet."""
+def _run(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None) -> int:
+    """Run ``argv`` in ``cwd``, silencing output when quiet; ``env`` defaults to :func:`_uv_env`."""
     output = subprocess.DEVNULL if quiet else None
     try:
         # argv is built from literals and a resolved path, never from user
         # input, and runs without a shell.
-        return subprocess.run(argv, cwd=cwd, stdout=output, stderr=output, env=_uv_env(), check=False).returncode
+        return subprocess.run(
+            argv, cwd=cwd, stdout=output, stderr=output, env=dict(env) if env is not None else _uv_env(), check=False
+        ).returncode
     except OSError:
         # uv missing from PATH. Degrade to the caller's fallback rather than
         # breaking a run that may not have needed the venv at all.
@@ -676,8 +678,70 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     ensure_venv_typecheck_excluded(cwd, venv)
 
     python = venv_python(venv)
+    synced = _sync_from_lock(cwd, venv, python, quiet=quiet)
+    if synced is not None:
+        return venv if synced else None
     for target in _INSTALL_TARGETS:
         argv = ["uv", "pip", "install", "--python", str(python), "--exact", "--upgrade", "-e", target]
         if _run(argv, cwd, quiet=quiet) == 0:
             return venv
     return None
+
+
+def _sync_from_lock(cwd: Path, venv: Path, python: Path, *, quiet: bool) -> bool | None:
+    """Lock the project, then make ``venv`` exactly what ``uv.lock`` pins.
+
+    The lock is the source because ``uv pip install --upgrade`` keeps an installed release that
+    still satisfies the manifest, even one newer than the project's ``[tool.uv]`` cooldown
+    (measured: ruff 0.17.0 stayed installed while the lock pinned 0.16.9). The gates would then
+    check a different tree from the one the lock pins and CI installs.
+
+    ``uv sync`` installs into the PROJECT environment, so the target venv is named through
+    ``UV_PROJECT_ENVIRONMENT``; that is how the per-version matrix venvs get their own sync.
+
+    Returns:
+        True when synced from the lock; False when the lock was made but the sync failed, which
+        must surface rather than be covered by a manifest install; None when no lock could be
+        made, so the caller may fall back to the manifest.
+    """
+    if not lock_project(cwd, quiet=quiet):
+        print(f"[venv] uv lock failed in {cwd}; provisioning {venv.name} from pyproject.toml instead", file=sys.stderr)
+        return None
+    argv = ["uv", "sync", "--locked", "--python", str(python), "--no-default-groups", *_sync_extras(cwd)]
+    env = {**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)}
+    if _run(argv, cwd, quiet=quiet, env=env) == 0:
+        return True
+    print(
+        f"[venv] uv sync from uv.lock failed for {venv.name}; re-run with BMK_OUTPUT_FORMAT=text to see why",
+        file=sys.stderr,
+    )
+    return False
+
+
+def _sync_extras(cwd: Path) -> list[str]:
+    """``--extra dev`` when the project declares it: uv refuses an undeclared extra (exit 2)."""
+    try:
+        extras = load_pyproject_config(cwd / "pyproject.toml").project.optional_dependencies
+    except Exception:  # an unreadable manifest is uv's to report, never a reason to skip the sync
+        return []
+    return ["--extra", "dev"] if "dev" in extras else []
+
+
+def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> bool:
+    """Run ``uv lock`` once at a time per project: matrix cells sync in parallel from one lock.
+
+    ``upgrade`` re-resolves every package at its newest release the project's cooldown admits;
+    without it an existing lock is only brought in line with the manifest.
+    """
+    argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
+    path = _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(path), timeout=_lock_timeout()):
+            return _run(argv, cwd, quiet=quiet) == 0
+    except Timeout:
+        print(f"[venv] another bmk is still locking {cwd}; waited {_lock_timeout():g}s and gave up", file=sys.stderr)
+        return False
+    except OSError:
+        # An unlockable location must not make bmk unusable there; lock unguarded instead.
+        return _run(argv, cwd, quiet=quiet) == 0
