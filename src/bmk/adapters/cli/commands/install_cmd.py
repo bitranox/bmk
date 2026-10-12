@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import lib_log_rich.runtime
@@ -42,6 +43,11 @@ def _extract_version(first_line: str) -> str | None:
     return first_line[len(_BMK_MAKEFILE_SENTINEL) :].strip() or None
 
 
+def _stdin_is_a_terminal() -> bool:
+    """Whether a person can answer a prompt on stdin (``sys.stdin`` is None under pythonw)."""
+    return sys.stdin is not None and sys.stdin.isatty()
+
+
 def check_makefile_update() -> bool:
     """Check if the project Makefile is outdated and prompt to update.
 
@@ -50,6 +56,11 @@ def check_makefile_update() -> bool:
 
     When ``BMK_OUTPUT_FORMAT`` is not ``text`` (i.e. JSON mode), the update
     is applied automatically without prompting.
+
+    In text mode the question is asked only when stdin is a terminal. Anything else - an
+    agent's pipe, a CI step, ``yes y |`` - is not a person answering, and an open pipe nobody
+    writes to would block the read forever. The update is then declined, as the prompt's own
+    default would, and stderr names ``bmk install`` as the way to apply it.
 
     Silently returns False on any I/O error or non-interactive Abort.
     """
@@ -68,6 +79,13 @@ def check_makefile_update() -> bool:
         return False
 
     auto_accept = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
+
+    if not auto_accept and not _stdin_is_a_terminal():
+        safe_console.echo(
+            f"Makefile is outdated ({local_ver} \u2192 {bundled_ver}); run 'bmk install' to update it.",
+            err=True,
+        )
+        return False
 
     if not auto_accept and not click.confirm(
         f"Makefile is outdated ({local_ver} \u2192 {bundled_ver}). Update?",

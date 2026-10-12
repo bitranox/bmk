@@ -14,6 +14,22 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `Input should be a valid string`. The model now turns such a number back into the text the
   operator wrote. The email settings already did this for the user name and password; a test now
   pins it end to end through a real `.env`.
+- **The "Makefile is outdated ... Update? [y/N]" question no longer hangs an unattended run.** In
+  text mode (`BMK_OUTPUT_FORMAT=text`) bmk asked it on every command whose project carried an
+  older Makefile, and read the answer from stdin whatever stdin was. An agent or a CI step hands
+  its child an open pipe that nobody writes to, so the read never returned, and the stuck process
+  kept holding the shared tool-env lock, so other repos' `make` runs waited out their timeouts as
+  well. bmk now asks only when stdin is a terminal. Otherwise it keeps the Makefile, as the
+  question's own default does, and prints `run 'bmk install' to update it` on stderr. JSON mode
+  still updates the Makefile without asking. A terminal nobody answers (a pty driven by tmux,
+  pexpect or `ssh -tt`) is still asked, so run such callers in JSON mode.
+
+### Changed
+
+- **Piped text no longer answers the Makefile question.** `yes y | make test` used to accept the
+  update in text mode; it now gets the stderr note and the Makefile is kept. Run `bmk install` to
+  update it. A console that Python does not see as a terminal - native Windows Python in mintty /
+  Git Bash without winpty - gets the note instead of the question too.
 
 ## [3.20.0] 2026-10-12 18:25:31
 
