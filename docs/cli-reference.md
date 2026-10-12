@@ -51,8 +51,9 @@ stage runner captures all tool output and only shows it when a stage fails. On s
 a single JSON summary line is emitted: `{"result":"pass","stages":N,"scripts":N}`.
 Dependency checking runs silently, Makefile version updates are auto-accepted, and
 pytest uses `--tb=short -q --no-header` for concise failure output. Use `--human` for
-full verbose output. The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`)
-can also control output format; `--human` takes precedence over the env var.
+full verbose output. The `BMK_OUTPUT_FORMAT` environment variable (`json` or `text`, in any
+case) can also control output format; `--human` takes precedence over the env var. Any other
+non-empty value runs JSON mode and prints one warning naming it on stderr.
 
 **Note:** `make test --human` does not work because Make intercepts `--` flags.
 Use `make test-human` (alias `make th`) instead.

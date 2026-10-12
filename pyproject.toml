@@ -19,7 +19,7 @@ dependencies = [
     "lib_cli_exit_tools>=2.4.0",
     "lib_log_rich>=6.5.1",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses
-    "lib_layered_config>=7.1.6",
+    "lib_layered_config>=7.1.7",
     "btx_lib_mail>=4.0.0",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.1",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
@@ -135,7 +135,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "1 day"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, pydantic = "2026-10-11T18:37:56Z", pydantic-core = "2026-10-11T18:35:45Z", rtoml = "2026-10-12T00:17:16Z"}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, pydantic = "2026-10-11T18:37:56Z", rtoml = "2026-10-12T00:17:16Z"}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import rich_click as click
 
+from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
 from bmk.domain.enums import ToolOutputFormat
 from bmk.domain.stages import normalize_returncode
 
@@ -133,12 +134,13 @@ def _supply_chain_from(section: Mapping[str, Any]) -> SupplyChainSettings:
 def resolve_output_format(*, human: bool) -> ToolOutputFormat:
     """Parse the tool output format at the CLI boundary.
 
-    ``--human`` forces TEXT; otherwise ``BMK_OUTPUT_FORMAT=text`` selects TEXT and
-    anything else (including unset) defaults to JSON.
+    ``--human`` forces TEXT; otherwise ``BMK_OUTPUT_FORMAT=text`` (any case) selects TEXT and
+    anything else (including unset) defaults to JSON, with a stderr warning for a value that is
+    neither unset, empty, ``text`` nor ``json``.
     """
     if human:
         return ToolOutputFormat.TEXT
-    return ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT"))
+    return read_tool_output_format()
 
 
 __all__ = ["normalize_returncode", "resolve_output_format", "run_command"]

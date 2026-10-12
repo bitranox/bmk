@@ -652,6 +652,23 @@ def test_a_pin_the_cooldown_has_caught_up_with_is_removed(tmp_path: Path, pypi: 
 
 
 @pytest.mark.os_agnostic
+def test_a_self_reference_of_an_unpublished_project_does_not_freeze_the_pins(tmp_path: Path, pypi: _FakeIndex) -> None:
+    """`demo[cli]` in demo's own requirements comes from the source tree, never from PyPI.
+
+    PyPI knowing nothing of an unpublished project used to make every release list "unjudgeable",
+    so bmk left all pins as they were - and a pin the cooldown had caught up with then held its
+    package at that release for good.
+    """
+    assert "demo" not in pypi.packages
+    tool_uv = f'exclude-newer = "14 days"\nexclude-newer-package = {{ widget = "{_pin_of(30)}" }}'
+    pyproject = _write(tmp_path, deps='"widget>=1.1", "demo[cli]"', tool_uv=tool_uv)
+
+    _update(pyproject, _Uv(tmp_path), _NO_OWN)
+
+    assert _pins(pyproject) == {}
+
+
+@pytest.mark.os_agnostic
 def test_a_pin_follows_a_floor_raised_by_hand(tmp_path: Path, pypi: _FakeIndex) -> None:
     pypi.packages["widget"] = _doc("1.2", {"1.0": _uploaded(90), "1.1": _uploaded(5), "1.2": _uploaded(3)})
     tool_uv = f'exclude-newer = "14 days"\nexclude-newer-package = {{ widget = "{_pin_of(5)}" }}'

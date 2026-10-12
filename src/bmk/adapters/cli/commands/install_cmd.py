@@ -12,7 +12,6 @@ Contents:
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -20,6 +19,7 @@ from pathlib import Path
 import lib_log_rich.runtime
 import rich_click as click
 
+from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
 from bmk.domain.enums import ToolOutputFormat
 
 from .. import safe_console
@@ -78,7 +78,7 @@ def check_makefile_update() -> bool:
     if bundled_ver is None or local_ver == bundled_ver:
         return False
 
-    auto_accept = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
+    auto_accept = read_tool_output_format() is not ToolOutputFormat.TEXT
 
     if not auto_accept and not _stdin_is_a_terminal():
         safe_console.echo(

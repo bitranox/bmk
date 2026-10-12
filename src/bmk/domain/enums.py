@@ -26,6 +26,11 @@ class OutputFormat(str, Enum):
     JSON = "json"
 
 
+def _normalised(value: str | None) -> str:
+    """``value`` case-folded; ``""`` when unset."""
+    return (value or "").casefold()
+
+
 class ToolOutputFormat(str, Enum):
     """Tool output mode for the stage runner.
 
@@ -45,11 +50,31 @@ class ToolOutputFormat(str, Enum):
     def from_env(cls, value: str | None) -> ToolOutputFormat:
         """Decode a raw ``BMK_OUTPUT_FORMAT`` value to a member.
 
-        ``TEXT`` only when the value is exactly ``"text"``; unset or anything else is the
-        ``JSON`` default. The single place that env var's string is interpreted, so the
-        ``BMK_OUTPUT_FORMAT`` rule cannot drift between call sites.
+        ``TEXT`` when the value is ``text`` in any case; unset or anything else is the ``JSON``
+        default. The single place that env var's string is
+        interpreted, so the ``BMK_OUTPUT_FORMAT`` rule cannot drift between call sites.
+
+        Example:
+            >>> ToolOutputFormat.from_env("TEXT")
+            <ToolOutputFormat.TEXT: 'text'>
+            >>> ToolOutputFormat.from_env(None)
+            <ToolOutputFormat.JSON: 'json'>
         """
-        return cls.TEXT if value == cls.TEXT.value else cls.JSON
+        return cls.TEXT if _normalised(value) == cls.TEXT.value else cls.JSON
+
+    @classmethod
+    def is_recognised(cls, value: str | None) -> bool:
+        """Whether ``value`` is unset, empty, or a member's value in any case.
+
+        Anything else still decodes to ``JSON`` in :meth:`from_env`; this tells the caller that
+        it did so for a value nobody meant as JSON, so the fallback can be reported.
+
+        Example:
+            >>> ToolOutputFormat.is_recognised("Json"), ToolOutputFormat.is_recognised("txt")
+            (True, False)
+        """
+        normalised = _normalised(value)
+        return normalised == "" or normalised in {member.value for member in cls}
 
 
 class BumpPart(str, Enum):

@@ -6,6 +6,32 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An unpublished project that names itself in its own extras no longer freezes its floor pins.**
+  bmk 3.20.0 keeps per-package `[tool.uv] exclude-newer-package` pins for floors younger than the
+  cooldown and removes each one once the cooldown has passed its release. To decide that, it reads
+  every requirement's release list from PyPI - including a self-reference such as `demo[cli]` in
+  demo's own `dev` extra. For a project that is not on PyPI that read fails, and bmk then left every
+  pin as it was ("floor pins left as they are: release list of demo unreadable"), so a pin dated a
+  second after today's pydantic release held pydantic at that version for good, and the next floor
+  raise past it could not lock. The project's own name is now skipped: it is installed from the
+  source tree and needs no pin. Pins already written are removed on the next `make test` once their
+  release is older than the cooldown.
+
+### Changed
+
+- **`BMK_OUTPUT_FORMAT` is read in any case, and an unknown value is named.** bmk matched the
+  value exactly, so `BMK_OUTPUT_FORMAT=TEXT` - the spelling people type - ran JSON mode without a
+  word, and so did a typo: the reader saw no verbose output and concluded text mode had none to
+  show. `text` and `json` are now accepted in any case. Any other non-empty value (whitespace
+  included: `" text "` is not trimmed) still runs JSON mode, unless `--human` asks for text, and
+  prints one line on stderr naming it:
+  `[bmk] BMK_OUTPUT_FORMAT='txt' is not 'text' or 'json' (in any case); it is ignored.` An unset or
+  empty variable is the JSON default, as before, without a warning. A caller that set `TEXT` and
+  was silently getting JSON now gets text mode: verbose output, and the Makefile-outdated question
+  when stdin is a terminal.
+
 ## [3.20.1] 2026-10-12 19:25:20
 
 ### Fixed

@@ -58,6 +58,7 @@ from bmk.adapters.stagerunner.helpers._supply_chain import (
     uv_resolved_options,
 )
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
 from bmk.domain.enums import ToolOutputFormat
 
 if TYPE_CHECKING:
@@ -1455,9 +1456,13 @@ def _demanded_pins(config: PyprojectConfig, exclude_newer: object, packages: dic
     kept = frozenset(normalize(n) for n, v in packages.items() if v is not False and not _is_floor_pin(normalize(n), v))
     support = python_support(config)
     demand = _FloorDemand(cutoff=cutoff, exempt=exempt, kept=kept)
+    # A self-reference (`demo[cli]` in demo's own extras) is installed from the source tree: it
+    # needs no pin, and for a project not on PyPI its release list cannot be read, which would
+    # leave every pin unjudgeable and frozen. The extras it names are walked as declared anyway.
+    own = normalize(config.project.name)
     for dep in _extract_all_dependencies(config):
         requirement = _requirement_or_none(dep.original_spec)
-        if requirement is not None:
+        if requirement is not None and normalize(requirement.name) != own:
             demand.add(requirement, python=support.oldest_for(dep.original_spec) if support is not None else None)
     return demand.pins
 
@@ -1895,7 +1900,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     args, _unknown = parser.parse_known_args()
     pyproject = args.project_dir / "pyproject.toml"
-    quiet = ToolOutputFormat.from_env(os.environ.get("BMK_OUTPUT_FORMAT")) is not ToolOutputFormat.TEXT
+    quiet = read_tool_output_format() is not ToolOutputFormat.TEXT
 
     # Same rule as the stage path: install only into the project's own venv, synced from the lock.
     project_venv = resolve_project_venv(args.project_dir, os.environ)
