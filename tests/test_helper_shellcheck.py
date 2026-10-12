@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import subprocess
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock, patch
@@ -409,13 +410,27 @@ def test_find_sh_files_warns_when_git_refuses_a_work_tree(
 
     ``GIT_TEST_ASSUME_DIFFERENT_OWNER`` makes git refuse the repository as it does for
     dubious ownership, so the walk lints the ignored script again - which must not be silent.
+    git's configuration is pinned to nothing, because a ``safe.directory = *`` anywhere in it
+    (GitHub's runners set one) makes git accept the repository and the premise never holds.
     """
     (tmp_path / ".gitignore").write_text("scratch/\n")
     (tmp_path / "ok.sh").write_text("# ok")
     (tmp_path / "scratch").mkdir()
     (tmp_path / "scratch" / "junk.sh").write_text("# junk")
     git_project("add", "ok.sh", ".gitignore")
+    empty_config = tmp_path.parent / f"{tmp_path.name}-gitconfig"
+    empty_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in [n for n in os.environ if n.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))]:
+        monkeypatch.delenv(name)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_PARAMETERS", raising=False)
     monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    refused = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"], cwd=tmp_path, capture_output=True, check=False
+    )
+    assert refused.returncode != 0, "premise: git must refuse this repository"
 
     files = find_sh_files(tmp_path)
 
