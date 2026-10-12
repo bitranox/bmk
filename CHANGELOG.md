@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.20.1] 2026-10-12 19:25:20
+
 ### Fixed
 
 - **An all-digit value in a text setting no longer stops startup.** lib_layered_config reads an
