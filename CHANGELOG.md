@@ -36,6 +36,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - Command output goes through `safe_console.echo`, so a console with a legacy code page (cp1252)
   does not abort it.
 
+### Fixed
+- The `graylog_endpoint` and `rate_limit` notes in `.env.example` and `90-logging.toml` said a
+  `host:port` or `100:60` string makes every command exit 22. It does not: `info` still runs
+  (exit 0) and the commands that read the configuration exit 78. The notes now say that only the
+  native `LOG_GRAYLOG_ENDPOINT` and `LOG_RATE_LIMIT` variables take that form.
+
 ## [3.19.0] 2026-10-12 09:38:11
 
 ### Fixed
