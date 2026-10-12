@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An all-digit value in a text setting no longer stops startup.** lib_layered_config reads an
+  unquoted `.env` or environment value that spells a number losslessly as an int, so
+  `LIB_LOG_RICH__SERVICE=2770` reached the logging settings model as `2770` and was refused with
+  `Input should be a valid string`. The model now turns such a number back into the text the
+  operator wrote. The email settings already did this for the user name and password; a test now
+  pins it end to end through a real `.env`.
+
 ## [3.20.0] 2026-10-12 18:25:31
 
 ### Added
