@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.20.1"
+version = "3.21.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -135,7 +135,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "1 day"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, pydantic = "2026-10-11T18:37:56Z", rtoml = "2026-10-12T00:17:16Z"}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, rtoml = "2026-10-12T00:17:16Z"}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"

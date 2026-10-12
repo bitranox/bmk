@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.21.0] 2026-10-12 20:51:09
+
 ### Fixed
 
 - **An unpublished project that names itself in its own extras no longer freezes its floor pins.**
