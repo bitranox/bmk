@@ -10,7 +10,7 @@ Contents
 * ``get_excluded_rules`` -- Read excluded rules from pyproject.toml.
 * ``check_pwsh`` -- Detect the ``pwsh`` interpreter.
 * ``ensure_psscriptanalyzer`` -- Auto-install PSScriptAnalyzer if absent.
-* ``find_ps1_files`` -- Discover ``.ps1`` files, skipping vendored dirs.
+* ``find_ps1_files`` -- Discover the project's own ``.ps1`` files (gitignored ones skipped).
 * ``run_psscriptanalyzer`` -- Invoke PSScriptAnalyzer via subprocess.
 * ``main`` -- Main entry point orchestrating the full lint flow.
 
@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from bmk.adapters.stagerunner.helpers._project_files import find_project_files
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import ToolOutputFormat
 
@@ -39,11 +40,6 @@ _FALLBACK_EXCLUDED_RULES: tuple[str, ...] = (
     "PSAvoidUsingWriteHost",
     "PSUseBOMForUnicodeEncodedFile",
     "PSUseUsingScopeModifierInNewRunspaces",
-)
-
-_EXCLUDED_DIRS: tuple[str, ...] = (
-    "node_modules",
-    ".git",
 )
 
 __all__ = [
@@ -138,22 +134,12 @@ def ensure_psscriptanalyzer(pwsh: str) -> None:
         )
 
 
-def _is_excluded_dir(path: Path) -> bool:
-    """Return True if any path component is a virtualenv or vendored directory.
-
-    A component starting with ``.venv`` counts as a Python virtualenv - the plain
-    ``.venv`` plus the dual-OS ``.venv-win`` / ``.venv-linux`` layout - so vendored
-    scripts bundled inside any of them (an ``Activate.ps1``, an ``npm.ps1``) never
-    trip the linter. ``node_modules`` and ``.git`` still match exactly.
-    """
-    parts = path.parts
-    if any(part.startswith(".venv") for part in parts):
-        return True
-    return any(excluded in parts for excluded in _EXCLUDED_DIRS)
-
-
 def find_ps1_files(project_dir: Path) -> list[Path]:
-    """Find all ``.ps1`` files under ``project_dir``, excluding vendored directories.
+    """Find the project's own ``.ps1`` files under ``project_dir``.
+
+    Inside a git work tree a script git ignores is skipped; vendored directories,
+    virtualenvs and nested checkouts (a linked worktree or a nested clone) are always
+    skipped.
 
     Args:
         project_dir: Root directory to search.
@@ -161,8 +147,7 @@ def find_ps1_files(project_dir: Path) -> list[Path]:
     Returns:
         Sorted list of ``.ps1`` file paths.
     """
-    files = [p for p in project_dir.rglob("*.ps1") if not _is_excluded_dir(p.relative_to(project_dir))]
-    return sorted(files)
+    return find_project_files(project_dir, ".ps1")
 
 
 def _ps_single_quote(value: str) -> str:

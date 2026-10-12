@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
-from typing import TYPE_CHECKING
-from unittest.mock import patch
+from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,7 +19,30 @@ from bmk.adapters.stagerunner.helpers._shellcheck import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
     from pathlib import Path
+
+_REAL_RUN = subprocess.run
+
+
+@contextlib.contextmanager
+def _fake_linters(**mock_kwargs: Any) -> Generator[MagicMock]:
+    """Fake every subprocess.run the linters make; git (the file discovery) runs for real.
+
+    The patch target is process-wide, so without the routing the discovery's
+    ``git ls-files`` would be answered by the linter fake.
+    """
+    fake = MagicMock(**mock_kwargs)
+
+    def route(cmd: list[str], **kwargs: Any) -> object:
+        if cmd[0] == "git":
+            # Forwarding Any kwargs leaves pyright unable to pick a run() overload.
+            return cast("subprocess.CompletedProcess[bytes]", _REAL_RUN(cmd, **kwargs))
+        return fake(cmd, **kwargs)
+
+    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=route):
+        yield fake
+
 
 # ---------------------------------------------------------------------------
 # get_bashate_config
@@ -244,6 +268,192 @@ def test_find_sh_files_returns_sorted(tmp_path: Path) -> None:
     assert files[2].name == "z_script.sh"
 
 
+@pytest.mark.os_agnostic
+def test_find_sh_files_skips_a_script_git_ignores(tmp_path: Path, git_project: Callable[..., None]) -> None:
+    """A script in a directory whose own ``.gitignore`` says ``*`` is not linted.
+
+    Scratch launchers left in such a directory are not project source; linting them
+    turned ``make test`` red while the code under test was clean.
+    """
+    (tmp_path / "build.sh").write_text("# build")
+    git_project("add", "build.sh")
+    scratch = tmp_path / ".bitranox" / "sdd"
+    scratch.mkdir(parents=True)
+    (scratch / ".gitignore").write_text("*\n")
+    (scratch / "launch.sh").write_text("cd somewhere\n")
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == ["build.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_keeps_an_untracked_script_git_does_not_ignore(
+    tmp_path: Path, git_project: Callable[..., None]
+) -> None:
+    """A new script that is not yet added but not ignored either is still linted."""
+    (tmp_path / "build.sh").write_text("# build")
+    git_project("add", "build.sh")
+    (tmp_path / "new.sh").write_text("# new")
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.name for f in files] == ["build.sh", "new.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_skips_a_tracked_script_deleted_from_disk(
+    tmp_path: Path, git_project: Callable[..., None]
+) -> None:
+    """The index still lists a deleted file; only files that exist reach the linters."""
+    (tmp_path / "build.sh").write_text("# build")
+    (tmp_path / "gone.sh").write_text("# gone")
+    git_project("add", "build.sh", "gone.sh")
+    (tmp_path / "gone.sh").unlink()
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.name for f in files] == ["build.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_returns_a_non_ascii_name_unquoted(tmp_path: Path, git_project: Callable[..., None]) -> None:
+    """git quotes a non-ASCII path by default; the returned path must be the real file."""
+    (tmp_path / "skript-ä.sh").write_text("# umlaut")
+    git_project("add", "skript-ä.sh")
+
+    files = find_sh_files(tmp_path)
+
+    assert files == [tmp_path / "skript-ä.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_answers_for_the_project_despite_an_inherited_git_dir(
+    tmp_path: Path, git_project: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``GIT_DIR`` inherited from a hook must not make git answer for another repository.
+
+    Only the project's own index knows the script below is tracked; read through a
+    foreign repository it looks like an ignored, untracked file and drops out.
+    """
+    (tmp_path / ".gitignore").write_text("vendor/\n")
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "keep.sh").write_text("# tracked on purpose")
+    git_project("add", "-f", "vendor/keep.sh")
+    other = tmp_path.parent / f"{tmp_path.name}-other"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=other, check=True, capture_output=True)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == ["vendor/keep.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_keeps_a_tracked_script_under_an_ignored_path(
+    tmp_path: Path, git_project: Callable[..., None]
+) -> None:
+    """A script git tracks is project source even where a ``.gitignore`` pattern covers it."""
+    (tmp_path / ".gitignore").write_text("vendor/\n")
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "keep.sh").write_text("# tracked on purpose")
+    (tmp_path / "vendor" / "scratch.sh").write_text("# ignored")
+    git_project("add", "-f", "vendor/keep.sh")
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == ["vendor/keep.sh"]
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("variable", ["GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS"])
+def test_find_sh_files_ignores_an_inherited_pathspec_mode(
+    tmp_path: Path, git_project: Callable[..., None], monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """git exports these for ``git --literal-pathspecs``; inherited, they made the list empty."""
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "top.sh").write_text("# top")
+    (tmp_path / "sub" / "deep.sh").write_text("# deep")
+    git_project("add", "top.sh", "sub/deep.sh")
+    monkeypatch.setenv(variable, "1")
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == ["sub/deep.sh", "top.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_walks_a_project_directory_its_parent_repository_ignores(
+    tmp_path: Path, git_project: Callable[..., None]
+) -> None:
+    """A project inside a repository that ignores it is not that repository's source, so walk it."""
+    (tmp_path / ".gitignore").write_text("proj/\n")
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "tool.sh").write_text("# tool")
+
+    files = find_sh_files(project)
+
+    assert [f.name for f in files] == ["tool.sh"]
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_warns_when_git_refuses_a_work_tree(
+    tmp_path: Path,
+    git_project: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When git fails inside a checkout the walk is used, and the reader is told why.
+
+    ``GIT_TEST_ASSUME_DIFFERENT_OWNER`` makes git refuse the repository as it does for
+    dubious ownership, so the walk lints the ignored script again - which must not be silent.
+    """
+    (tmp_path / ".gitignore").write_text("scratch/\n")
+    (tmp_path / "ok.sh").write_text("# ok")
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "junk.sh").write_text("# junk")
+    git_project("add", "ok.sh", ".gitignore")
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == ["ok.sh", "scratch/junk.sh"]
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "git" in err
+
+
+@pytest.mark.os_agnostic
+def test_find_sh_files_outside_git_walks_without_a_warning(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Outside any checkout the walk is the normal path and says nothing."""
+    (tmp_path / "build.sh").write_text("# build")
+
+    files = find_sh_files(tmp_path)
+
+    assert [f.name for f in files] == ["build.sh"]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_lints_only_the_scripts_git_lists(tmp_path: Path, git_project: Callable[..., None]) -> None:
+    """End to end through the git listing: the ignored script never reaches a linter."""
+    (tmp_path / "build.sh").write_text("#!/bin/bash\n")
+    (tmp_path / ".gitignore").write_text("scratch/\n")
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "launch.sh").write_text("cd somewhere\n")
+    git_project("add", "build.sh", ".gitignore")
+
+    with _fake_linters(return_value=_make_completed(0)) as fake:
+        result = main(project_dir=tmp_path)
+
+    linted = [arg for call in fake.call_args_list for arg in call.args[0]]
+    assert result == 0
+    assert any(arg.endswith("build.sh") for arg in linted)
+    assert not any("launch.sh" in arg for arg in linted)
+
+
 # ---------------------------------------------------------------------------
 # run_shellcheck
 # ---------------------------------------------------------------------------
@@ -414,7 +624,7 @@ def test_main_returns_zero_when_all_tools_pass(tmp_path: Path) -> None:
         '[project]\nname = "test"\n\n[tool.bashate]\nmax-line-length = 120\nignores = ["E003"]\n'
     )
 
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", return_value=_make_completed(0)):
+    with _fake_linters(return_value=_make_completed(0)):
         result = main(project_dir=tmp_path)
 
     assert result == 0
@@ -433,7 +643,7 @@ def test_main_returns_one_when_shellcheck_fails(tmp_path: Path) -> None:
             return _make_completed(1)
         return _make_completed(0)
 
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
+    with _fake_linters(side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1
@@ -452,7 +662,7 @@ def test_main_returns_one_when_shfmt_fails(tmp_path: Path) -> None:
             return _make_completed(0, stdout="--- diff output\n")
         return _make_completed(0)
 
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
+    with _fake_linters(side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1
@@ -471,7 +681,7 @@ def test_main_returns_one_when_bashate_fails(tmp_path: Path) -> None:
             return _make_completed(1)
         return _make_completed(0)
 
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
+    with _fake_linters(side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1
@@ -491,7 +701,7 @@ def test_main_aggregates_failures_from_multiple_tools(tmp_path: Path) -> None:
         call_count += 1
         return _make_completed(1)
 
-    with patch("bmk.adapters.stagerunner.helpers._shellcheck.subprocess.run", side_effect=_side_effect):
+    with _fake_linters(side_effect=_side_effect):
         result = main(project_dir=tmp_path)
 
     assert result == 1

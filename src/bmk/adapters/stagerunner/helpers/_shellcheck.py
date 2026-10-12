@@ -8,7 +8,7 @@ with bashate options driven by ``pyproject.toml`` configuration.
 Contents
 --------
 * ``get_bashate_config`` -- Read bashate settings from pyproject.toml.
-* ``find_sh_files`` -- Discover ``.sh`` files, skipping vendored dirs.
+* ``find_sh_files`` -- Discover the project's own ``.sh`` files (gitignored ones skipped).
 * ``run_shellcheck`` -- Invoke shellcheck via subprocess.
 * ``run_shfmt`` -- Invoke shfmt via subprocess.
 * ``run_bashate`` -- Invoke bashate via subprocess.
@@ -27,16 +27,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from bmk.adapters.stagerunner.helpers._project_files import find_project_files
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import ToolOutputFormat
 
 _FALLBACK_BASHATE_MAX_LINE_LENGTH: int = 120
 _FALLBACK_BASHATE_IGNORES: tuple[str, ...] = ("E003",)
-
-_EXCLUDED_DIRS: tuple[str, ...] = (
-    "node_modules",
-    ".git",
-)
 
 __all__ = [
     "find_sh_files",
@@ -84,45 +80,12 @@ def get_bashate_config(pyproject: Path = Path("pyproject.toml")) -> tuple[int, t
     return _FALLBACK_BASHATE_MAX_LINE_LENGTH, _FALLBACK_BASHATE_IGNORES
 
 
-def _is_excluded_dir(path: Path) -> bool:
-    """Return True if any path component is a virtualenv or vendored directory.
-
-    A component starting with ``.venv`` counts as a Python virtualenv - the plain
-    ``.venv`` plus the dual-OS ``.venv-win`` / ``.venv-linux`` layout - so vendored
-    shell scripts bundled inside any of them never trip the linter. ``node_modules``
-    and ``.git`` still match exactly.
-    """
-    parts = path.parts
-    if any(part.startswith(".venv") for part in parts):
-        return True
-    return any(excluded in parts for excluded in _EXCLUDED_DIRS)
-
-
-def _is_nested_checkout(dir_parts: tuple[str, ...], project_dir: Path) -> bool:
-    """Return True if a directory between ``project_dir`` and the file is its own git checkout.
-
-    A ``.git`` entry marks a separate repository: a plain nested clone or submodule has
-    a ``.git`` directory, a linked git worktree (e.g. ``.claude/worktrees/<branch>``) has
-    a ``.git`` FILE containing a ``gitdir:`` pointer instead. Either way the directory's
-    contents belong to a different branch/repo checkout than ``project_dir`` and must not
-    be linted as this project's own source - that mismatch is exactly what let a
-    tab-indented script from another branch's worktree fail ``main``'s lint stage.
-
-    Only directories STRICTLY BELOW ``project_dir`` are checked (the loop starts by
-    descending from ``project_dir``, never testing it directly), so the project root's
-    own ``.git`` never excludes the project's own files.
-    """
-    current = project_dir
-    for part in dir_parts:
-        current = current / part
-        if (current / ".git").exists():
-            return True
-    return False
-
-
 def find_sh_files(project_dir: Path) -> list[Path]:
-    """Find all ``.sh`` files under ``project_dir``, excluding vendored directories
-    and any nested git checkout (a linked worktree or a nested clone/submodule).
+    """Find the project's own ``.sh`` files under ``project_dir``.
+
+    Inside a git work tree a script git ignores is skipped (a scratch launcher in a
+    gitignored directory is not project source); vendored directories, virtualenvs and
+    nested checkouts (a linked worktree or a nested clone/submodule) are always skipped.
 
     Args:
         project_dir: Root directory to search.
@@ -130,15 +93,7 @@ def find_sh_files(project_dir: Path) -> list[Path]:
     Returns:
         Sorted list of ``.sh`` file paths.
     """
-    files: list[Path] = []
-    for p in project_dir.rglob("*.sh"):
-        rel = p.relative_to(project_dir)
-        if _is_excluded_dir(rel):
-            continue
-        if _is_nested_checkout(rel.parts[:-1], project_dir):
-            continue
-        files.append(p)
-    return sorted(files)
+    return find_project_files(project_dir, ".sh")
 
 
 def run_shellcheck(

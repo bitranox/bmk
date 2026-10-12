@@ -37,10 +37,23 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   does not abort it.
 
 ### Fixed
+
 - The `graylog_endpoint` and `rate_limit` notes in `.env.example` and `90-logging.toml` said a
   `host:port` or `100:60` string makes every command exit 22. It does not: `info` still runs
   (exit 0) and the commands that read the configuration exit 78. The notes now say that only the
   native `LOG_GRAYLOG_ENDPOINT` and `LOG_RATE_LIMIT` variables take that form.
+- **The shell-lint and PSScriptAnalyzer stages no longer lint scripts git ignores.** Both found
+  their files by walking the whole project, so a scratch launcher left in a gitignored directory
+  (one whose own `.gitignore` says `*`, for instance) failed shellcheck or shfmt and turned
+  `make test` red while the code under test was clean. Inside a git work tree they now lint the
+  scripts git tracks plus untracked ones no `.gitignore` excludes; a tracked script stays linted
+  even where an ignore pattern covers it. Outside a git work tree, or when the enclosing
+  repository ignores the project directory itself, they walk the directory as before; on Windows
+  `Build.PS1` still matches in any letter case. Variables inherited from git that would change
+  its answer (`GIT_DIR`, `GIT_LITERAL_PATHSPECS` and the like) are not passed on. When git
+  refuses a checkout (dubious ownership, for instance) or cannot be started there, the stage walks
+  the directory and says so on stderr. The PowerShell stage now also skips a nested git
+  checkout (a linked worktree or a nested clone), as the shell stage already did.
 
 ## [3.19.0] 2026-10-12 09:38:11
 

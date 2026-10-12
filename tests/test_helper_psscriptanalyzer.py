@@ -4,11 +4,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
 
 from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (
     _exclude_rule_fragment,
@@ -21,6 +26,28 @@ from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (
     run_psscriptanalyzer,
 )
 from bmk.adapters.stagerunner.helpers._toml_config import PSScriptAnalyzerConfig
+
+_REAL_RUN = subprocess.run
+
+
+@contextlib.contextmanager
+def _fake_linters(**mock_kwargs: Any) -> Generator[MagicMock]:
+    """Fake every subprocess.run the linters make; git (the file discovery) runs for real.
+
+    The patch target is process-wide, so without the routing the discovery's
+    ``git ls-files`` would be answered by the linter fake.
+    """
+    fake = MagicMock(**mock_kwargs)
+
+    def route(cmd: list[str], **kwargs: Any) -> object:
+        if cmd[0] == "git":
+            # Forwarding Any kwargs leaves pyright unable to pick a run() overload.
+            return cast("subprocess.CompletedProcess[bytes]", _REAL_RUN(cmd, **kwargs))
+        return fake(cmd, **kwargs)
+
+    with patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", side_effect=route):
+        yield fake
+
 
 # ---------------------------------------------------------------------------
 # get_excluded_rules
@@ -197,6 +224,35 @@ def test_find_ps1_files_returns_sorted(tmp_path: Path) -> None:
     assert files[2].name == "z_script.ps1"
 
 
+@pytest.mark.os_agnostic
+def test_find_ps1_files_skips_a_script_git_ignores(tmp_path: Path, git_project: Callable[..., None]) -> None:
+    """A script in a directory whose own ``.gitignore`` says ``*`` is not linted."""
+    (tmp_path / "build.ps1").write_text("# build")
+    git_project("add", "build.ps1")
+    scratch = tmp_path / ".bitranox" / "sdd"
+    scratch.mkdir(parents=True)
+    (scratch / ".gitignore").write_text("*\n")
+    (scratch / "launch.ps1").write_text("Write-Host scratch")
+
+    files = find_ps1_files(tmp_path)
+
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == ["build.ps1"]
+
+
+@pytest.mark.os_agnostic
+def test_find_ps1_files_excludes_linked_worktree(tmp_path: Path) -> None:
+    """A nested directory whose ``.git`` is a FILE (a linked worktree) belongs to another branch."""
+    worktree_dir = tmp_path / ".claude" / "worktrees" / "other-branch"
+    worktree_dir.mkdir(parents=True)
+    (worktree_dir / ".git").write_text("gitdir: /some/other/repo/.git/worktrees/other-branch\n")
+    (worktree_dir / "vendored.ps1").write_text("# belongs to another branch")
+    (tmp_path / "build.ps1").write_text("# build")
+
+    files = find_ps1_files(tmp_path)
+
+    assert [f.name for f in files] == ["build.ps1"]
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -363,10 +419,7 @@ def test_main_returns_zero_when_no_ps1_files(tmp_path: Path, capsys: pytest.Capt
     """Returns 0 and prints skip message when no .ps1 files exist."""
     with (
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
-        patch(
-            "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run",
-            return_value=_make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n"),
-        ),
+        _fake_linters(return_value=_make_completed(0, stdout="PSScriptAnalyzer  1.22.0\n")),
     ):
         result = main(project_dir=tmp_path)
 
@@ -384,7 +437,7 @@ def test_main_returns_zero_when_lint_passes(tmp_path: Path) -> None:
 
     with (
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
-        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run") as mock_run,
+        _fake_linters() as mock_run,
     ):
         mock_run.side_effect = [
             _make_completed(0),  # check_pwsh launch probe
@@ -406,7 +459,7 @@ def test_main_returns_nonzero_when_lint_fails(tmp_path: Path, capsys: pytest.Cap
 
     with (
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.shutil.which", return_value="/usr/bin/pwsh"),
-        patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run") as mock_run,
+        _fake_linters() as mock_run,
     ):
         mock_run.side_effect = [
             _make_completed(0),  # check_pwsh launch probe
@@ -447,9 +500,7 @@ def test_main_does_not_lint_ps1_files_inside_a_venv(tmp_path: Path) -> None:
     with (
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", return_value="/usr/bin/pwsh"),
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.ensure_psscriptanalyzer"),
-        patch(
-            "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
-        ) as mock_run,
+        _fake_linters(return_value=_make_completed(0)) as mock_run,
     ):
         main(project_dir=tmp_path)
 
@@ -471,9 +522,7 @@ def test_main_scans_every_discovered_file(tmp_path: Path) -> None:
     with (
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", return_value="/usr/bin/pwsh"),
         patch("bmk.adapters.stagerunner.helpers._psscriptanalyzer.ensure_psscriptanalyzer"),
-        patch(
-            "bmk.adapters.stagerunner.helpers._psscriptanalyzer.subprocess.run", return_value=_make_completed(0)
-        ) as mock_run,
+        _fake_linters(return_value=_make_completed(0)) as mock_run,
     ):
         main(project_dir=tmp_path)
 

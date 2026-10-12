@@ -12,6 +12,7 @@ import contextlib
 import logging
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, fields
@@ -219,6 +220,52 @@ def deterministic_cli_output(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rich_click.rich_click, "WIDTH", _CLI_OUTPUT_WIDTH)
     monkeypatch.setattr(rich_click.rich_click, "MAX_WIDTH", _CLI_OUTPUT_WIDTH)
     monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+
+# A push from a linked worktree exports the repository-scoping ones to git hooks, and git
+# reads them before the cwd: a fixture's ``git init`` would then write into the launching
+# repository. The pathspec ones (git exports them for ``git --literal-pathspecs``) change
+# what a ``*.sh`` pathspec matches.
+_GIT_REPO_SCOPING_VARS: tuple[str, ...] = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_LITERAL_PATHSPECS",
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+)
+
+
+@pytest.fixture
+def git_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Make ``tmp_path`` a fresh git repository and return a runner for git in it.
+
+    The repository-scoping ``GIT_*`` variables are removed for the whole test, so
+    both the fixture's git calls and the code under test answer for ``tmp_path``.
+
+    Returns:
+        A function taking git arguments (``run_git("add", "build.sh")``) that runs
+        them in ``tmp_path`` and raises on a non-zero exit.
+
+    Example:
+        def test_x(tmp_path: Path, git_project: Callable[..., None]) -> None:
+            (tmp_path / "build.sh").write_text("# build")
+            git_project("add", "build.sh")
+    """
+    for name in _GIT_REPO_SCOPING_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    def run_git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    run_git("init", "-q")
+    run_git("config", "user.email", "tester@example.com")
+    run_git("config", "user.name", "Tester")
+    return run_git
 
 
 @pytest.fixture
