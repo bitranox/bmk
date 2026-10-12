@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.20.0] 2026-10-12 18:25:31
+
 ### Added
 
 - **A supply-chain cooldown: third-party releases are adopted only once they are 1 day old.**
