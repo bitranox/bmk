@@ -344,6 +344,8 @@ def _entry(version: str, *, installed: bool, implementation: str = "cpython") ->
 
 
 def _record_runs(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    # hermetic: a developer's own python-downloads setting must not decide these tests
+    monkeypatch.delenv("UV_PYTHON_DOWNLOADS", raising=False)
     seen: list[list[str]] = []
 
     def _fake_run(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
@@ -407,3 +409,44 @@ def test_a_newer_pypy_download_does_not_trigger_a_cpython_upgrade(
     venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
 
     assert runs == []
+
+
+def test_a_freethreaded_download_does_not_make_a_current_minor_look_stale(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The real listing: uv shows a not-installed +freethreaded build beside every 3.13+ minor.
+
+    `uv python install 3.14` never installs that variant, so counting it reads every 3.13+
+    minor as stale forever and the alias-rewriting commands run on every gate (review of f6fecca).
+    """
+    freethreaded = {**_entry("3.14.8", installed=False), "variant": "freethreaded"}
+    listing = json.dumps([{**_entry("3.14.8", installed=True), "variant": "default"}, freethreaded])
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.14"])
+
+    assert runs == []
+
+
+def test_the_listing_asks_for_downloads_whatever_python_downloads_says(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """uv hides every download entry under python-downloads manual/never - set in env OR config.
+
+    Then "nothing on offer" would read as "current" and a stale minor would never be upgraded.
+    `--allow-python-downloads` makes the listing show what is on offer regardless (measured, uv
+    0.13.0: 13 download entries again under a pyproject `manual` and under UV_PYTHON_DOWNLOADS=never).
+    """
+    asked: list[list[str]] = []
+
+    def _fake_capture(argv: list[str], *_args: object, **_kwargs: object) -> str | None:
+        asked.append(argv)
+        return None
+
+    monkeypatch.setattr(venv_mod, "_run_capture", _fake_capture)
+    _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert asked == [["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"]]

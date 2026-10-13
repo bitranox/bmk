@@ -110,7 +110,7 @@ dependencies = [
 requires-dist = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "bashate", specifier = ">=2.1.1" },
-    { name = "btx-lib-mail", specifier = ">=4.0.1" },
+    { name = "btx-lib-mail", specifier = ">=4.1.0" },
     { name = "build", specifier = ">=1.6.1" },
     { name = "click", specifier = ">=8.5.0" },
     { name = "filelock", specifier = ">=4.1.0" },
@@ -149,16 +149,16 @@ wheels = [
 
 [[package]]
 name = "btx-lib-mail"
-version = "4.0.1"
+version = "4.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
     { name = "pydantic" },
     { name = "rich-click" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/cd/54edead478553027a5b6c63b265e9f307332c52208d109ed771b0abaf884/btx_lib_mail-4.0.1.tar.gz", hash = "sha256:197de55e8285c6fef1e8911711473305484e579cb9d16f31ba371056d9422c67", size = 257870, upload-time = "2026-10-12T20:52:04.847Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/18/9a/fda2abadd94728aac1f7b32bf2fd31ccb4c2de946e713997b952f69d74fd/btx_lib_mail-4.1.0.tar.gz", hash = "sha256:2bc42224ed8bf3476e0916f43715db91fb0eaf338af49a51564faea4aa8cd51f", size = 259058, upload-time = "2026-10-12T21:23:36.356Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/c2/c0ddf82de8120fdfbe00f323a207f46c5c01dfc4dd0643f4ae93165c028b/btx_lib_mail-4.0.1-py3-none-any.whl", hash = "sha256:7b602af4c7bc5404bbf7912ee39caf0419a65f168d01bc6e360dcf2482b07413", size = 104782, upload-time = "2026-10-12T20:52:03.541Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/58/c5c7e82471ccdfbccef1746532a8e24e1886f08f40a84bff6d673c51c563/btx_lib_mail-4.1.0-py3-none-any.whl", hash = "sha256:777fcc140398cbde54dc36bc36d514363d848d8cdb381a83a86ce2ddbeb9cf44", size = 105015, upload-time = "2026-10-12T21:23:35.176Z" },
 ]
 
 [[package]]

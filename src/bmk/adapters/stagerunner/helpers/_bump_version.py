@@ -147,6 +147,22 @@ def update_changelog(project_dir: Path, new_version: str) -> None:
     changelog_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _snapshot(project_dir: Path) -> dict[Path, bytes]:
+    """The files a bump rewrites, byte for byte (CHANGELOG.md only when present).
+
+    Bytes, not text: a text round trip turns CRLF into the platform's newline, so an undone
+    bump would still leave a whole-file diff behind.
+    """
+    paths = [project_dir / "pyproject.toml", project_dir / "CHANGELOG.md"]
+    return {path: path.read_bytes() for path in paths if path.is_file()}
+
+
+def _restore(originals: dict[Path, bytes]) -> None:
+    """Put back what :func:`_snapshot` read."""
+    for path, data in originals.items():
+        path.write_bytes(data)
+
+
 def main() -> int:
     """CLI entry point for version bump utility.
 
@@ -171,17 +187,25 @@ def main() -> int:
         new_version = next_version(current_version, BumpPart(args.part))
 
         # Update files
-        old_version = update_pyproject(args.project_dir, new_version)
-        update_changelog(args.project_dir, new_version)
-
-        # uv.lock records the project's own version; left stale it fails `uv sync --locked`
-        # and CI's `uv export --locked` on the very commit that is about to be released.
-        if (args.project_dir / "uv.lock").is_file() and not lock_project(args.project_dir):
-            print(
-                "Error: the version was bumped but `uv lock` failed; uv.lock still names the old version",
-                file=sys.stderr,
-            )
-            return 1
+        originals = _snapshot(args.project_dir)
+        # Undone on ANY way out short of success (a failed re-lock, an unwritable file, Ctrl-C):
+        # half-applied, a re-run would bump a second time and skip a version.
+        done = False
+        try:
+            old_version = update_pyproject(args.project_dir, new_version)
+            update_changelog(args.project_dir, new_version)
+            # uv.lock records the project's own version; left stale it fails `uv sync --locked`
+            # and CI's `uv export --locked` on the very commit that is about to be released.
+            if (args.project_dir / "uv.lock").is_file() and not lock_project(args.project_dir):
+                print(
+                    f"Error: `uv lock` failed, so the bump to {new_version} was undone; fix the lock and bump again",
+                    file=sys.stderr,
+                )
+                return 1
+            done = True
+        finally:
+            if not done:
+                _restore(originals)
 
         print(f"Bumped version: {old_version} -> {new_version}")
         return 0
@@ -191,6 +215,9 @@ def main() -> int:
         return 1
     except FileNotFoundError as e:
         print(f"Error: File not found - {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"Error: {e}; the bump was undone", file=sys.stderr)
         return 1
 
 

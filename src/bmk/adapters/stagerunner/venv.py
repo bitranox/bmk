@@ -136,6 +136,7 @@ class _UvPythonEntry(BaseModel):
     version_parts: _UvVersionParts
     implementation: str
     path: str | None = None
+    variant: str = "default"
 
 
 def latest_installed_patch(minor: str, cwd: Path) -> str | None:
@@ -468,8 +469,13 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
     So a download entry for ``minor`` means "install/upgrade has work to do", and no entry at
     all means the minor is absent. Read-only and offline (~0.05s). If uv cannot answer, the
     answer is True: the old always-run behaviour, never a skipped install on a guess.
+
+    Only the ``default`` variant counts: ``uv python install X.Y`` installs that one, while uv
+    also lists a never-installed ``freethreaded`` download beside every 3.13+ minor.
+    ``--allow-python-downloads``: with ``python-downloads`` set to manual or never (env OR any uv
+    config file) uv hides every download entry, and "nothing listed" would read as "current".
     """
-    raw = _run_capture(["uv", "python", "list", "--output-format", "json"], cwd)
+    raw = _run_capture(["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"], cwd)
     if not raw:
         return True
     try:
@@ -484,7 +490,8 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
             entry = _UvPythonEntry.model_validate(raw_entry)
         except ValidationError:
             continue
-        if entry.implementation == "cpython" and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor:
+        same_minor = f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
+        if entry.implementation == "cpython" and entry.variant == "default" and same_minor:
             relevant.append(entry)
     return not relevant or any(entry.path is None for entry in relevant)
 
@@ -791,16 +798,38 @@ def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> boo
     index with ``max-age=600`` and uv honours it, so without a refresh a release from minutes
     ago stays invisible and the own floor, which rises only to what the lock resolves, stays put.
     """
-    refresh = [arg for name in _exempt_packages(cwd) for arg in ("--refresh-package", name)]
-    argv = ["uv", "lock", *(["--upgrade", *refresh] if upgrade else [])]
+    refresh = [arg for name in _exempt_packages(cwd) for arg in ("--refresh-package", name)] if upgrade else []
+    argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
     path = _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(path), timeout=_lock_timeout()):
-            return _run(argv, cwd, quiet=quiet) == 0
+            return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
     except Timeout:
         print(f"[venv] another bmk is still locking {cwd}; waited {_lock_timeout():g}s and gave up", file=sys.stderr)
         return False
     except OSError:
         # An unlockable location must not make bmk unusable there; lock unguarded instead.
+        return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
+
+
+_UV_USAGE_ERROR = 2
+
+
+def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> bool:
+    """Lock with the own-package refresh, and once more without it if uv refuses the refresh.
+
+    uv rejects ``--refresh-package`` outright when offline is configured (``UV_OFFLINE``, or
+    ``offline = true``: "cannot be used with --refresh", exit 2) and for a name it does not accept;
+    the plain lock is the old behaviour, so the refresh may only ever add, never break a gate.
+    """
+    if not refresh:
         return _run(argv, cwd, quiet=quiet) == 0
+    rc = _run([*argv, *refresh], cwd, quiet=quiet)
+    if rc != _UV_USAGE_ERROR:
+        # 0 is success; anything else is a real lock failure, which a second run only repeats
+        return rc == 0
+    print(
+        "[venv] uv refused --refresh-package (offline?); locking without refreshing our own packages", file=sys.stderr
+    )
+    return _run(argv, cwd, quiet=quiet) == 0

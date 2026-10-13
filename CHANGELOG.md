@@ -18,7 +18,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   also broke venvs of any other bmk running on the same machine; that is gone too.
 - **`make bump-*` re-locks a project that commits `uv.lock`.** The lock records the project's own
   version, so a bump left it stale and CI's `uv export --locked` (and `uv sync --locked`) refused
-  the release commit. A failed re-lock now fails the bump.
+  the release commit. If the re-lock (or anything else) fails, the bump is undone byte for byte,
+  so a re-run does not skip a version.
 - **An own package released minutes ago is no longer invisible to the floor update.** PyPI serves
   its index with `max-age=600` and uv honours it, so `uv lock --upgrade` kept resolving the previous
   version and the own floor did not rise. The upgrade lock now passes `--refresh-package` for every

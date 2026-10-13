@@ -365,3 +365,56 @@ def test_main_writes_no_lock_where_the_project_has_none(
     assert bump_module.main() == 0
 
     assert not (tmp_path / "uv.lock").exists()
+
+
+@pytest.mark.os_agnostic
+def test_a_failed_relock_leaves_no_half_applied_bump(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the re-lock fails the bump must not stay written: re-running it would skip a version.
+
+    Measured trigger: offline with a cold cache, uv cannot resolve a dependency it never fetched.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    _uv_project(tmp_path)
+    subprocess.run(["uv", "lock", "-q"], cwd=tmp_path, check=True)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8").replace("dependencies = []", 'dependencies = ["idna>=3"]'),
+        encoding="utf-8",
+    )
+    # CRLF on purpose: the undo must give back the exact bytes, not a re-encoded copy
+    pyproject.write_bytes(pyproject.read_bytes().replace(b"\n", b"\r\n"))
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_bytes(b"# Changelog\r\n\r\n## [Unreleased]\r\n\r\n- something\r\n\r\n## [1.2.3] 2026-01-01\r\n")
+    before = (pyproject.read_bytes(), changelog.read_bytes())
+    (tmp_path / "cold-cache").mkdir()
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cold-cache"))
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
+
+    assert bump_module.main() == 1
+
+    assert (pyproject.read_bytes(), changelog.read_bytes()) == before
+
+
+@pytest.mark.os_agnostic
+def test_a_bump_that_cannot_write_the_changelog_is_undone(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any failure after pyproject.toml was written undoes it, not only a failed re-lock."""
+    _uv_project(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("# Changelog\n\n## [Unreleased]\n\n- x\n", encoding="utf-8")
+    before = pyproject.read_bytes()
+    changelog.chmod(0o444)
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
+    try:
+        rc = bump_module.main()
+    finally:
+        changelog.chmod(0o644)
+
+    assert rc == 1
+    assert pyproject.read_bytes() == before

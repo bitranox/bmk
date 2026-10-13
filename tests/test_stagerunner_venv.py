@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -706,3 +707,57 @@ def test_a_plain_lock_refreshes_nothing(tmp_path: Path) -> None:
         assert lock_project(tmp_path)
 
     assert seen[-1] == ["uv", "lock"]
+
+
+@pytest.mark.os_agnostic
+def test_an_upgrade_lock_that_uv_refuses_with_refresh_is_retried_without_it(tmp_path: Path) -> None:
+    """uv rejects --refresh-package when offline is configured (exit 2) or for a name it ignores.
+
+    Measured: `UV_OFFLINE=1 uv lock --upgrade --refresh-package x` -> "cannot be used with
+    --refresh", rc 2, while the same lock without the refresh succeeds (review of f6fecca).
+    """
+    _project_with_exemptions(tmp_path)
+    seen: list[list[str]] = []
+
+    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
+        _ = quiet, env
+        seen.append(argv)
+        return 2 if "--refresh-package" in argv else 0
+
+    with patch("bmk.adapters.stagerunner.venv._run", MagicMock(side_effect=side_effect)):
+        assert lock_project(tmp_path, upgrade=True)
+
+    assert seen[-1] == ["uv", "lock", "--upgrade"]
+
+
+@pytest.mark.os_agnostic
+def test_offline_upgrade_lock_succeeds_for_real(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\nrequires-python = ">=3.10"\ndependencies = []\n\n'
+        "[tool.uv]\nexclude-newer-package = {lib-cli-exit-tools = false}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UV_OFFLINE", "1")
+
+    assert lock_project(tmp_path, upgrade=True)
+    assert (tmp_path / "uv.lock").is_file()
+
+
+@pytest.mark.os_agnostic
+def test_a_real_lock_failure_with_refresh_is_not_run_a_second_time(tmp_path: Path) -> None:
+    """Only uv's usage error (exit 2: --refresh refused) earns the plain retry; an unsatisfiable
+    lock (exit 1) would just fail again, printing its whole error twice (review round 2)."""
+    _project_with_exemptions(tmp_path)
+    seen: list[list[str]] = []
+
+    def unsatisfiable(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
+        _ = quiet, env
+        seen.append(argv)
+        return 1
+
+    with patch("bmk.adapters.stagerunner.venv._run", MagicMock(side_effect=unsatisfiable)):
+        assert not lock_project(tmp_path, upgrade=True)
+
+    assert len(seen) == 1
