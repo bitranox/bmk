@@ -335,6 +335,14 @@ def test_main_finalizes_a_non_final_version_instead_of_crashing(
 # release commit (bmk OPEN-WORK [101]: lib_cli_exit_tools 2.4.1 in the fleet sweep).
 
 
+def _is_root() -> bool:
+    """POSIX root ignores file and directory modes. Windows has no euid, and pyright checks one
+    platform per run, so the platform test must come first for it to see geteuid as unreachable."""
+    if sys.platform == "win32":
+        return False
+    return os.geteuid() == 0
+
+
 def _uv_project(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "x"\nversion = "1.2.3"\nrequires-python = ">=3.10"\ndependencies = []\n', encoding="utf-8"
@@ -523,7 +531,7 @@ def test_the_undo_writes_through_a_symlink(bump_module: Any, tmp_path: Path) -> 
 @pytest.mark.os_agnostic
 def test_a_file_the_bump_never_changed_is_not_reported_as_still_bumped(bump_module: Any, tmp_path: Path) -> None:
     """uv.lock is snapshotted but only rewritten by a lock that got that far; untouched, there is nothing to undo."""
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
+    if _is_root():
         pytest.skip("root writes a read-only file, so a needless rewrite would go unnoticed")
     lock = tmp_path / "uv.lock"
     lock.write_bytes(b"unchanged")
@@ -539,7 +547,7 @@ def test_a_file_the_bump_never_changed_is_not_reported_as_still_bumped(bump_modu
 @pytest.mark.os_posix
 def test_the_undo_needs_no_write_access_to_the_project_directory(bump_module: Any, tmp_path: Path) -> None:
     """A temp-file-and-rename undo fails in a directory the user may write files in but not create them."""
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
+    if _is_root():
         pytest.skip("root ignores the directory's mode")
     project = tmp_path / "project"
     project.mkdir()
@@ -569,7 +577,7 @@ def test_a_failed_rewrite_is_reported_as_possibly_incomplete_not_as_still_bumped
     bump_module: Any, tmp_path: Path
 ) -> None:
     """An in-place write that fails midway (disk full) leaves neither version: say so."""
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
+    if _is_root():
         pytest.skip("root writes a read-only file")
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_bytes(b"bumped")
