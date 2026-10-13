@@ -593,8 +593,12 @@ def test_a_failed_rewrite_is_reported_as_possibly_incomplete_not_as_still_bumped
 
 @pytest.mark.os_agnostic
 def test_an_unreadable_file_is_reported_as_unread_not_as_rewritten(bump_module: Any, tmp_path: Path) -> None:
-    (tmp_path / "blocker").write_text("x", encoding="utf-8")
-    unreadable = tmp_path / "blocker" / "pyproject.toml"
+    """A directory where the file belongs: IsADirectoryError on POSIX, PermissionError on Windows.
+
+    Not a path under a regular file: Windows reports that as FileNotFoundError, the deleted-file case.
+    """
+    unreadable = tmp_path / "pyproject.toml"
+    unreadable.mkdir()
 
     [(path, reason)] = bump_module._restore({unreadable: b"original"})
 
