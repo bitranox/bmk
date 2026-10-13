@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.21.1] 2026-10-13 14:14:15
+
 ### Fixed
 
 - **`make test-all` no longer loses a cell to "could not provision a venv for this Python".**
