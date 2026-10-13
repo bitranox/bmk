@@ -18,6 +18,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -137,6 +138,12 @@ class _UvPythonEntry(BaseModel):
     implementation: str
     path: str | None = None
     variant: str = "default"
+    key: str = ""
+
+    @property
+    def is_default_build(self) -> bool:
+        """The build ``uv python install X.Y`` installs; older uv lists no ``variant``, only the key."""
+        return self.variant == "default" and "+freethreaded" not in self.key
 
 
 def latest_installed_patch(minor: str, cwd: Path) -> str | None:
@@ -491,7 +498,7 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
         except ValidationError:
             continue
         same_minor = f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
-        if entry.implementation == "cpython" and entry.variant == "default" and same_minor:
+        if entry.implementation == "cpython" and entry.is_default_build and same_minor:
             relevant.append(entry)
     return not relevant or any(entry.path is None for entry in relevant)
 
@@ -684,7 +691,9 @@ def _venv_sync_lock(venv: Path, *, quiet: bool) -> Generator[bool, None, None]:
         lock.release()
 
 
-def ensure_project_venv_at(cwd: Path, venv: Path, minor: str | None, *, quiet: bool = True) -> Path | None:
+def ensure_project_venv_at(
+    cwd: Path, venv: Path, minor: str | None, *, quiet: bool = True, install_python: bool = True
+) -> Path | None:
     """Provision a venv at an EXPLICIT path on an EXPLICIT Python minor, then sync it.
 
     The building block behind both the default ``.venv`` (via :func:`ensure_project_venv`,
@@ -699,12 +708,16 @@ def ensure_project_venv_at(cwd: Path, venv: Path, minor: str | None, *, quiet: b
     (a dropped dep lingering; an unconstrained transitive never moving off a vulnerable
     release). Packages installed by hand do not survive it. See :func:`ensure_project_venv`.
 
+    ``install_python=False`` leaves uv's Python store alone: ``test-all`` prepares every minor
+    serially before its parallel cells, and a cell that installed again could rewrite the minor
+    aliases under a sibling's sync whenever that prep did not converge (bmk OPEN-WORK [102]).
+
     Returns the venv path, or ``None`` if it could not be provisioned. Never raises: a
     failure degrades rather than aborting the command.
     """
     # Outside the lock on purpose: this installs into uv's machine-wide Python store,
     # a DIFFERENT shared resource from this venv, and it is idempotent.
-    if minor:
+    if minor and install_python:
         _ensure_minor_installed(minor, cwd, quiet=quiet)
 
     with _venv_sync_lock(venv, quiet=quiet) as acquired:
@@ -798,8 +811,8 @@ def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> boo
     index with ``max-age=600`` and uv honours it, so without a refresh a release from minutes
     ago stays invisible and the own floor, which rises only to what the lock resolves, stays put.
     """
-    refresh = [arg for name in _exempt_packages(cwd) for arg in ("--refresh-package", name)] if upgrade else []
     argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
+    refresh = _lock_argv(cwd, upgrade=upgrade)[len(argv) :]
     path = _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -813,23 +826,70 @@ def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> boo
         return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
 
 
-_UV_USAGE_ERROR = 2
+def _lock_argv(cwd: Path, *, upgrade: bool) -> list[str]:
+    """``uv lock``; an upgrade adds ``--upgrade`` and a ``--refresh-package`` per exempt own package."""
+    if not upgrade:
+        return ["uv", "lock"]
+    refresh = [arg for name in _exempt_packages(cwd) for arg in ("--refresh-package", name)]
+    return ["uv", "lock", "--upgrade", *refresh]
+
+
+_UV_ERROR_EXIT = 2
+
+# What uv says when it rejects the refresh flag ITSELF (uv 0.13.0, measured): offline configured in
+# the environment, a config file or the command line ("cannot be used with `--refresh`"), or a
+# name clap will not parse. Exit 2 alone is not enough: it is uv's general error status, shared by
+# an unreachable index and a malformed manifest.
+_REFRESH_REFUSALS = ("cannot be used with `--refresh`", "for '--refresh-package")
+# FORCE_COLOR / CLICOLOR_FORCE put escape codes inside those very words, and under CLICOLOR_FORCE
+# `--color never` does not reach clap's own parse errors, so the text is compared with its SGR
+# sequences removed.
+_ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _refresh_refused(rc: int, stderr: str) -> bool:
+    """True only when uv refused ``--refresh-package`` itself, so the plain lock may stand in."""
+    plain = _ANSI_SGR.sub("", stderr)
+    return rc == _UV_ERROR_EXIT and any(marker in plain for marker in _REFRESH_REFUSALS)
+
+
+def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool) -> tuple[int, str]:
+    """Like :func:`_run`, but hands back stderr (still shown when not quiet) to be classified."""
+    try:
+        # argv is built from literals and package names from the project's own manifest; no shell.
+        done = subprocess.run(
+            argv,
+            cwd=cwd,
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=_uv_env(),
+            check=False,
+        )
+    except OSError:
+        return 1, ""
+    if not quiet:
+        sys.stderr.write(done.stderr)
+    return done.returncode, done.stderr
 
 
 def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> bool:
-    """Lock with the own-package refresh, and once more without it if uv refuses the refresh.
+    """Lock with the own-package refresh, and once more without it only if uv refused the refresh.
 
-    uv rejects ``--refresh-package`` outright when offline is configured (``UV_OFFLINE``, or
-    ``offline = true``: "cannot be used with --refresh", exit 2) and for a name it does not accept;
-    the plain lock is the old behaviour, so the refresh may only ever add, never break a gate.
+    The plain lock is the old behaviour, so the refresh may only ever add, never break a gate. Any
+    other failure stands: retried without the refresh, an index that is down for the revalidation
+    could lock from the max-age=600 cache, and the own floor would silently stay put again.
     """
     if not refresh:
         return _run(argv, cwd, quiet=quiet) == 0
-    rc = _run([*argv, *refresh], cwd, quiet=quiet)
-    if rc != _UV_USAGE_ERROR:
-        # 0 is success; anything else is a real lock failure, which a second run only repeats
+    rc, stderr = _run_keeping_stderr([*argv, *refresh], cwd, quiet=quiet)
+    if not _refresh_refused(rc, stderr):
         return rc == 0
     print(
-        "[venv] uv refused --refresh-package (offline?); locking without refreshing our own packages", file=sys.stderr
+        "[venv] uv refused --refresh-package (offline is configured, or a package name it rejects); "
+        "locking without refreshing our own packages",
+        file=sys.stderr,
     )
     return _run(argv, cwd, quiet=quiet) == 0

@@ -16,7 +16,6 @@ btx-lib-mail = false
 lib-cli-exit-tools = false
 lib-layered-config = false
 lib-log-rich = false
-rtoml = "2026-10-12T00:17:16Z"
 
 [[package]]
 name = "annotated-types"

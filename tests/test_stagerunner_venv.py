@@ -13,7 +13,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from bmk.adapters.stagerunner.helpers import _matrix
+from bmk.adapters.stagerunner.helpers._matrix import CellStatus
 from bmk.adapters.stagerunner.venv import (
+    _lock_argv,
+    _refresh_refused,
     ensure_project_venv,
     ensure_project_venv_at,
     ensure_venv_ignored,
@@ -163,6 +167,55 @@ def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> 
     assert ["uv", "python", "upgrade", "3.12"] in cmds
     sync = next(c for c in cmds if c[:2] == ["uv", "sync"])
     assert sync[sync.index("--python") + 1] == str(venv_python(target))
+
+
+@pytest.mark.os_agnostic
+def test_ensure_at_can_leave_uv_s_python_store_alone(tmp_path: Path) -> None:
+    """test-all prepares every minor serially, then its cells must not install again.
+
+    A cell whose prep did not converge (offline, python-downloads = never) would otherwise run
+    install/upgrade in parallel with its siblings' syncs: the alias rewrite of bmk OPEN-WORK [102].
+    """
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    target = tmp_path / ".venv-3.12"
+    mock_run = _run_that_creates_venv_on_uv_venv()
+    newer_on_offer = (
+        '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
+        '"implementation": "cpython", "path": null}]'
+    )
+    with (
+        patch("bmk.adapters.stagerunner.venv._run", mock_run),
+        patch("bmk.adapters.stagerunner.venv._run_capture", return_value=newer_on_offer),
+    ):
+        result = ensure_project_venv_at(tmp_path, target, "3.12", install_python=False)
+
+    assert result == target
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    assert not any(c[:2] == ["uv", "python"] and c[2] in ("install", "upgrade") for c in cmds)
+    create = next(c for c in cmds if c[:2] == ["uv", "venv"])
+    assert "3.12" in create, "the cell still pins its own minor"
+
+
+@pytest.mark.os_agnostic
+def test_a_test_all_cell_never_installs_a_python(tmp_path: Path) -> None:
+    """The cell itself must pass install_python=False; main() already prepared every minor."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    newer_on_offer = (
+        '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
+        '"implementation": "cpython", "path": null}]'
+    )
+    # every uv call fails, so the cell stops at ERROR before it would run pytest in a venv
+    mock_run = MagicMock(return_value=1)
+    with (
+        patch("bmk.adapters.stagerunner.venv._run", mock_run),
+        patch("bmk.adapters.stagerunner.venv._run_capture", return_value=newer_on_offer),
+    ):
+        result = _matrix._run_cell(tmp_path, "3.12", quiet=True)
+
+    assert result.status is CellStatus.ERROR
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    assert any(c[:2] == ["uv", "venv"] for c in cmds), "the cell must have reached provisioning"
+    assert not any(c[:2] == ["uv", "python"] for c in cmds)
 
 
 # --- the venv is built FROM uv.lock (user decision 2026-10-12, review M3 of 064688b) ---------------
@@ -665,17 +718,6 @@ def test_ensure_project_venv_creates_a_real_venv(tmp_path: Path) -> None:
 # `uv lock --upgrade-package lib-cli-exit-tools` kept 2.4.0; adding --refresh-package got 2.4.1.
 
 
-def _record_lock_argv() -> tuple[MagicMock, list[list[str]]]:
-    seen: list[list[str]] = []
-
-    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
-        _ = quiet, env
-        seen.append(argv)
-        return 0
-
-    return MagicMock(side_effect=side_effect), seen
-
-
 def _project_with_exemptions(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "demo"\nversion = "1.0.0"\n\n[tool.uv]\nexclude-newer = "1 day"\n'
@@ -687,51 +729,120 @@ def _project_with_exemptions(tmp_path: Path) -> None:
 @pytest.mark.os_agnostic
 def test_an_upgrade_lock_refreshes_every_exempt_own_package(tmp_path: Path) -> None:
     _project_with_exemptions(tmp_path)
-    mock_run, seen = _record_lock_argv()
 
-    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
-        assert lock_project(tmp_path, upgrade=True)
+    argv = _lock_argv(tmp_path, upgrade=True)
 
-    argv = seen[-1]
     refreshed = [argv[i + 1] for i, a in enumerate(argv) if a == "--refresh-package"]
     assert sorted(refreshed) == ["lib-cli-exit-tools", "lib-log-rich"]
-    assert "--upgrade" in argv
+    assert argv[:3] == ["uv", "lock", "--upgrade"]
 
 
 @pytest.mark.os_agnostic
 def test_a_plain_lock_refreshes_nothing(tmp_path: Path) -> None:
     _project_with_exemptions(tmp_path)
-    mock_run, seen = _record_lock_argv()
 
-    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
-        assert lock_project(tmp_path)
+    assert _lock_argv(tmp_path, upgrade=False) == ["uv", "lock"]
 
-    assert seen[-1] == ["uv", "lock"]
+
+# uv 0.13.0's own words when it rejects the refresh flag itself, measured 2026-10-13: offline from the
+# environment, from pyproject/uv.toml, from the command line, and a name clap refuses to parse.
+_REFRESH_REFUSALS = [
+    "error: the argument `UV_OFFLINE` (environment variable) cannot be used with `--refresh`\n",
+    "error: the argument `offline` (workspace configuration) cannot be used with `--refresh`\n",
+    "error: the argument `--offline` cannot be used with `--refresh`\n",
+    "error: invalid value 'not a name!' for '--refresh-package <REFRESH_PACKAGE>': Not a valid package or extra name\n",
+]
 
 
 @pytest.mark.os_agnostic
-def test_an_upgrade_lock_that_uv_refuses_with_refresh_is_retried_without_it(tmp_path: Path) -> None:
-    """uv rejects --refresh-package when offline is configured (exit 2) or for a name it ignores.
+@pytest.mark.parametrize("stderr", _REFRESH_REFUSALS)
+def test_uv_refusing_the_refresh_flag_itself_earns_the_plain_retry(stderr: str) -> None:
+    assert _refresh_refused(2, stderr)
 
-    Measured: `UV_OFFLINE=1 uv lock --upgrade --refresh-package x` -> "cannot be used with
-    --refresh", rc 2, while the same lock without the refresh succeeds (review of f6fecca).
+
+@pytest.mark.os_agnostic
+def test_a_coloured_refusal_is_still_a_refused_refresh() -> None:
+    """FORCE_COLOR / CLICOLOR_FORCE put escape codes INSIDE the words uv refuses with (measured).
+
+    ``--color never`` does not help: under CLICOLOR_FORCE clap's parse error for a bad name stays coloured.
     """
-    _project_with_exemptions(tmp_path)
-    seen: list[list[str]] = []
-
-    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
-        _ = quiet, env
-        seen.append(argv)
-        return 2 if "--refresh-package" in argv else 0
-
-    with patch("bmk.adapters.stagerunner.venv._run", MagicMock(side_effect=side_effect)):
-        assert lock_project(tmp_path, upgrade=True)
-
-    assert seen[-1] == ["uv", "lock", "--upgrade"]
+    offline = (
+        "error: the argument `UV_OFFLINE` (environment variable) cannot be used with \x1b[32m`--refresh`\x1b[39m\n"
+    )
+    bad_name = "\x1b[1m\x1b[31merror:\x1b[0m invalid value '\x1b[33mbad!\x1b[0m' for '\x1b[1m\x1b[36m--refresh-package\x1b[0m'\n"
+    assert _refresh_refused(2, offline)
+    assert _refresh_refused(2, bad_name)
 
 
 @pytest.mark.os_agnostic
-def test_offline_upgrade_lock_succeeds_for_real(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_real_lock_failure_on_exit_2_is_not_read_as_a_refused_refresh() -> None:
+    """Exit 2 is uv's general error status, not a usage-error code (third review of 58394fe).
+
+    Measured: an unreachable index and a malformed pyproject.toml both exit 2 with and without the
+    refresh. Retrying those without it runs the failure twice, blames "offline", and when only the
+    refresh's revalidation failed, locks from the max-age=600 cache: the own floor stays put again.
+    """
+    unreachable = (
+        "Using CPython 3.15.0\n"
+        "error: Failed to fetch: http://127.0.0.1:9/simple/idna/\n"
+        "  cause: tcp connect error\n"
+        "  cause: Connection refused (os error 111)\n"
+    )
+    assert not _refresh_refused(2, unreachable)
+
+
+@pytest.mark.os_agnostic
+def test_a_refusal_text_under_any_other_exit_code_is_not_a_refused_refresh() -> None:
+    assert not _refresh_refused(1, _REFRESH_REFUSALS[0])
+
+
+def _project_behind_a_dead_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\nrequires-python = ">=3.10"\ndependencies = ["idna"]\n\n'
+        "[tool.uv]\nexclude-newer-package = {idna = false}\n\n"
+        '[[tool.uv.index]]\nname = "dead"\nurl = "http://127.0.0.1:9/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cold-cache"))
+    monkeypatch.setenv("UV_HTTP_RETRIES", "0")
+    monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+
+@pytest.mark.os_agnostic
+def test_an_unreachable_index_fails_the_upgrade_lock_without_blaming_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _project_behind_a_dead_index(tmp_path, monkeypatch)
+
+    assert not lock_project(tmp_path, upgrade=True)
+
+    assert "refused --refresh-package" not in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_a_failing_upgrade_lock_still_shows_uv_s_reason_when_not_quiet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    _project_behind_a_dead_index(tmp_path, monkeypatch)
+
+    assert not lock_project(tmp_path, quiet=False, upgrade=True)
+
+    assert "127.0.0.1:9" in capfd.readouterr().err
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("colour", [{}, {"FORCE_COLOR": "1", "CLICOLOR_FORCE": "1"}], ids=["plain", "forced-colour"])
+def test_offline_upgrade_lock_succeeds_for_real(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], colour: dict[str, str]
+) -> None:
+    """The liveness half of the pair above: offline, uv refuses the refresh and the plain lock runs.
+
+    Forced colour is set explicitly: the suite's autouse fixture removes FORCE_COLOR, which hid it.
+    """
+    for name, value in colour.items():
+        monkeypatch.setenv(name, value)
     if shutil.which("uv") is None:
         pytest.skip("uv is not installed")
     (tmp_path / "pyproject.toml").write_text(
@@ -743,21 +854,4 @@ def test_offline_upgrade_lock_succeeds_for_real(tmp_path: Path, monkeypatch: pyt
 
     assert lock_project(tmp_path, upgrade=True)
     assert (tmp_path / "uv.lock").is_file()
-
-
-@pytest.mark.os_agnostic
-def test_a_real_lock_failure_with_refresh_is_not_run_a_second_time(tmp_path: Path) -> None:
-    """Only uv's usage error (exit 2: --refresh refused) earns the plain retry; an unsatisfiable
-    lock (exit 1) would just fail again, printing its whole error twice (review round 2)."""
-    _project_with_exemptions(tmp_path)
-    seen: list[list[str]] = []
-
-    def unsatisfiable(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
-        _ = quiet, env
-        seen.append(argv)
-        return 1
-
-    with patch("bmk.adapters.stagerunner.venv._run", MagicMock(side_effect=unsatisfiable)):
-        assert not lock_project(tmp_path, upgrade=True)
-
-    assert len(seen) == 1
+    assert "refused --refresh-package" in capsys.readouterr().err

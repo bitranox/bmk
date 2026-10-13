@@ -148,19 +148,80 @@ def update_changelog(project_dir: Path, new_version: str) -> None:
 
 
 def _snapshot(project_dir: Path) -> dict[Path, bytes]:
-    """The files a bump rewrites, byte for byte (CHANGELOG.md only when present).
+    """The files a bump rewrites, byte for byte (CHANGELOG.md and uv.lock only when present).
 
     Bytes, not text: a text round trip turns CRLF into the platform's newline, so an undone
-    bump would still leave a whole-file diff behind.
+    bump would still leave a whole-file diff behind. uv.lock is in it because the re-lock
+    rewrites it, and a Ctrl-C after that write would otherwise leave it on the new version.
     """
-    paths = [project_dir / "pyproject.toml", project_dir / "CHANGELOG.md"]
+    paths = [project_dir / "pyproject.toml", project_dir / "CHANGELOG.md", project_dir / "uv.lock"]
     return {path: path.read_bytes() for path in paths if path.is_file()}
 
 
-def _restore(originals: dict[Path, bytes]) -> None:
-    """Put back what :func:`_snapshot` read."""
-    for path, data in originals.items():
+def _restore_one(path: Path, data: bytes) -> str | None:
+    """Put one file back unless it already holds ``data``; returns why it could not be, or None.
+
+    Written in place, never by temp file and rename: a rename would replace a symlink rather than
+    the file behind it, and needs write access to the directory, which the bump itself never did.
+    The price is that a write failing midway (disk full) leaves neither version, so the reason
+    says the contents may be incomplete rather than calling the file still bumped.
+    """
+    try:
+        if path.read_bytes() == data:
+            return None
+    except FileNotFoundError:
+        pass  # deleted during the bump: the write below recreates it
+    except OSError as error:
+        return f"could not be read, so it was not rewritten ({error.strerror or error})"
+    try:
         path.write_bytes(data)
+    except OSError as error:
+        return f"could not be rewritten, its contents may be incomplete ({error.strerror or error})"
+    return None
+
+
+def _restore(originals: dict[Path, bytes]) -> list[tuple[Path, str]]:
+    """Put back what :func:`_snapshot` read, every file on its own; returns the ones that failed."""
+    outcomes = ((path, _restore_one(path, data)) for path, data in originals.items())
+    return [(path, reason) for path, reason in outcomes if reason is not None]
+
+
+def _undo_bump(originals: dict[Path, bytes], new_version: str) -> int:
+    """Restore the snapshot and say exactly what state the files are in; always exit code 1."""
+    failed = _restore(originals)
+    if not failed:
+        print(f"Error: the bump to {new_version} was undone; fix the cause and bump again", file=sys.stderr)
+        return 1
+    print(f"Error: the bump to {new_version} could NOT be fully undone; not back as they were:", file=sys.stderr)
+    for path, reason in failed:
+        print(f"  {path}: {reason}", file=sys.stderr)
+    print(
+        "Restore those files before bumping again (git checkout -- <file>; `uv lock` rebuilds uv.lock).",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _apply_bump(project_dir: Path, new_version: str) -> str | None:
+    """Write the bump and re-lock; returns why it failed, or None when it is complete."""
+    update_pyproject(project_dir, new_version)
+    update_changelog(project_dir, new_version)
+    # uv.lock records the project's own version; left stale it fails `uv sync --locked`
+    # and CI's `uv export --locked` on the very commit that is about to be released.
+    # Not quiet: when it fails, uv's own reason is the only useful part of the message.
+    if (project_dir / "uv.lock").is_file() and not lock_project(project_dir, quiet=False):
+        return "`uv lock` failed (see above)"
+    return None
+
+
+def _read_bump(project_dir: Path, part: str) -> tuple[str, str, dict[Path, bytes]]:
+    """Current version, next version and the snapshot - everything read before the first write."""
+    config = load_pyproject_config(project_dir / "pyproject.toml")
+    current_version = config.project.version
+    if not current_version:
+        msg = "Could not find [project].version in pyproject.toml"
+        raise ValueError(msg)
+    return current_version, next_version(current_version, BumpPart(part)), _snapshot(project_dir)
 
 
 def main() -> int:
@@ -175,41 +236,7 @@ def main() -> int:
     args, _unknown = parser.parse_known_args()
 
     try:
-        # Read current version using toml_config
-        pyproject_path = args.project_dir / "pyproject.toml"
-        config = load_pyproject_config(pyproject_path)
-        current_version = config.project.version
-
-        if not current_version:
-            print("Error: Could not find [project].version in pyproject.toml", file=sys.stderr)
-            return 1
-
-        new_version = next_version(current_version, BumpPart(args.part))
-
-        # Update files
-        originals = _snapshot(args.project_dir)
-        # Undone on ANY way out short of success (a failed re-lock, an unwritable file, Ctrl-C):
-        # half-applied, a re-run would bump a second time and skip a version.
-        done = False
-        try:
-            old_version = update_pyproject(args.project_dir, new_version)
-            update_changelog(args.project_dir, new_version)
-            # uv.lock records the project's own version; left stale it fails `uv sync --locked`
-            # and CI's `uv export --locked` on the very commit that is about to be released.
-            if (args.project_dir / "uv.lock").is_file() and not lock_project(args.project_dir):
-                print(
-                    f"Error: `uv lock` failed, so the bump to {new_version} was undone; fix the lock and bump again",
-                    file=sys.stderr,
-                )
-                return 1
-            done = True
-        finally:
-            if not done:
-                _restore(originals)
-
-        print(f"Bumped version: {old_version} -> {new_version}")
-        return 0
-
+        old_version, new_version, originals = _read_bump(args.project_dir, args.part)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -217,8 +244,24 @@ def main() -> int:
         print(f"Error: File not found - {e}", file=sys.stderr)
         return 1
     except OSError as e:
-        print(f"Error: {e}; the bump was undone", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    # Undone on ANY way out short of success (a failed re-lock, an unwritable file, Ctrl-C):
+    # half-applied, a re-run would bump a second time and skip a version.
+    try:
+        failure = _apply_bump(args.project_dir, new_version)
+    except (ValueError, OSError) as e:
+        failure = str(e)
+    except BaseException:
+        _undo_bump(originals, new_version)
+        raise
+    if failure is not None:
+        print(f"Error: {failure}", file=sys.stderr)
+        return _undo_bump(originals, new_version)
+
+    print(f"Bumped version: {old_version} -> {new_version}")
+    return 0
 
 
 if __name__ == "__main__":

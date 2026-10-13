@@ -411,6 +411,20 @@ def test_a_newer_pypy_download_does_not_trigger_a_cpython_upgrade(
     assert runs == []
 
 
+def test_a_freethreaded_download_without_a_variant_field_is_still_not_the_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A uv that predates the ``variant`` field still names the build in its ``key``."""
+    freethreaded = {**_entry("3.14.8", installed=False), "key": "cpython-3.14.8+freethreaded-linux-x86_64-gnu"}
+    current = {**_entry("3.14.8", installed=True), "key": "cpython-3.14.8-linux-x86_64-gnu"}
+    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(json.dumps([current, freethreaded])))
+    runs = _record_runs(monkeypatch)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.14"])
+
+    assert runs == []
+
+
 def test_a_freethreaded_download_does_not_make_a_current_minor_look_stale(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

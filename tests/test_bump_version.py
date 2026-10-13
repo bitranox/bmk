@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -369,7 +370,7 @@ def test_main_writes_no_lock_where_the_project_has_none(
 
 @pytest.mark.os_agnostic
 def test_a_failed_relock_leaves_no_half_applied_bump(
-    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """When the re-lock fails the bump must not stay written: re-running it would skip a version.
 
@@ -397,24 +398,197 @@ def test_a_failed_relock_leaves_no_half_applied_bump(
     assert bump_module.main() == 1
 
     assert (pyproject.read_bytes(), changelog.read_bytes()) == before
+    err = capfd.readouterr().err
+    assert "idna" in err, "uv's own reason must reach the user, not only 'fix the lock'"
+    assert "was undone" in err
 
 
 @pytest.mark.os_agnostic
-def test_a_bump_that_cannot_write_the_changelog_is_undone(
+def test_a_bump_whose_changelog_cannot_be_updated_is_undone(
     bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Any failure after pyproject.toml was written undoes it, not only a failed re-lock."""
+    """Any failure after pyproject.toml was written undoes it, not only a failed re-lock.
+
+    An undecodable CHANGELOG.md fails after the pyproject write for root and on Windows alike,
+    where a read-only file would not stop root.
+    """
     _uv_project(tmp_path)
     pyproject = tmp_path / "pyproject.toml"
     changelog = tmp_path / "CHANGELOG.md"
-    changelog.write_text("# Changelog\n\n## [Unreleased]\n\n- x\n", encoding="utf-8")
-    before = pyproject.read_bytes()
-    changelog.chmod(0o444)
+    changelog.write_bytes(b"# Changelog\n\n## [Unreleased]\n\n- caf\xe9\n")
+    before = (pyproject.read_bytes(), changelog.read_bytes())
     monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
-    try:
-        rc = bump_module.main()
-    finally:
-        changelog.chmod(0o644)
 
-    assert rc == 1
-    assert pyproject.read_bytes() == before
+    assert bump_module.main() == 1
+
+    assert (pyproject.read_bytes(), changelog.read_bytes()) == before
+
+
+@pytest.mark.os_agnostic
+def test_the_snapshot_includes_a_committed_uv_lock(bump_module: Any, tmp_path: Path) -> None:
+    """The re-lock rewrites uv.lock; a Ctrl-C after that write must not leave it on the new version."""
+    _uv_project(tmp_path)
+    (tmp_path / "uv.lock").write_bytes(b"version = 1\r\n")
+
+    snapshot = bump_module._snapshot(tmp_path)
+
+    assert snapshot[tmp_path / "uv.lock"] == b"version = 1\r\n"
+
+
+@pytest.mark.os_agnostic
+def test_one_failed_restore_does_not_stop_the_others(bump_module: Any, tmp_path: Path) -> None:
+    (tmp_path / "blocker").write_text("a file where a directory is expected", encoding="utf-8")
+    unrestorable = tmp_path / "blocker" / "pyproject.toml"
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_bytes(b"bumped")
+
+    failed = bump_module._restore({unrestorable: b"old", changelog: b"original"})
+
+    assert [path for path, _reason in failed] == [unrestorable]
+    assert changelog.read_bytes() == b"original"
+
+
+@pytest.mark.os_agnostic
+def test_an_undo_that_could_not_restore_everything_does_not_claim_it_did(
+    bump_module: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Saying "undone" over a still-bumped file sends the user into a second bump and a skipped version."""
+    (tmp_path / "blocker").write_text("x", encoding="utf-8")
+    unrestorable = tmp_path / "blocker" / "pyproject.toml"
+
+    assert bump_module._undo_bump({unrestorable: b"old"}, "1.2.4") == 1
+
+    err = capsys.readouterr().err
+    assert "was undone" not in err
+    assert str(unrestorable) in err
+    assert "1.2.4" in err
+
+
+@pytest.mark.os_agnostic
+def test_a_complete_undo_says_so(bump_module: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_bytes(b"bumped")
+
+    assert bump_module._undo_bump({pyproject: b"old"}, "1.2.4") == 1
+
+    assert pyproject.read_bytes() == b"old"
+    assert "the bump to 1.2.4 was undone" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_a_ctrl_c_during_the_relock_restores_every_file_and_still_interrupts(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """uv rewrote uv.lock, then the user pressed Ctrl-C: all three files go back, and the interrupt stands."""
+    _uv_project(tmp_path)
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("# Changelog\n\n## [Unreleased]\n\n- x\n", encoding="utf-8")
+    lock = tmp_path / "uv.lock"
+    lock.write_bytes(b"version = 1\n# demo 1.2.3\n")
+    before = {path: path.read_bytes() for path in (tmp_path / "pyproject.toml", changelog, lock)}
+
+    def relock_then_interrupt(project_dir: Path, *, quiet: bool = True) -> bool:
+        _ = quiet
+        (project_dir / "uv.lock").write_bytes(b"version = 1\n# demo 1.2.4\n")
+        raise KeyboardInterrupt
+
+    # the re-lock is the one collaborator that runs uv; a real Ctrl-C cannot be timed into it
+    monkeypatch.setattr(bump_module, "lock_project", relock_then_interrupt)
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(tmp_path)])
+
+    with pytest.raises(KeyboardInterrupt):
+        bump_module.main()
+
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.os_agnostic
+def test_the_undo_writes_through_a_symlink(bump_module: Any, tmp_path: Path) -> None:
+    """Replacing the link would leave the real file bumped while the report said "undone"."""
+    (tmp_path / "docs").mkdir()
+    target = tmp_path / "docs" / "CHANGELOG.md"
+    target.write_bytes(b"bumped")
+    link = tmp_path / "CHANGELOG.md"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this platform or account cannot create symlinks")
+
+    assert bump_module._restore({link: b"original"}) == []
+
+    assert link.is_symlink()
+    assert target.read_bytes() == b"original"
+
+
+@pytest.mark.os_agnostic
+def test_a_file_the_bump_never_changed_is_not_reported_as_still_bumped(bump_module: Any, tmp_path: Path) -> None:
+    """uv.lock is snapshotted but only rewritten by a lock that got that far; untouched, there is nothing to undo."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root writes a read-only file, so a needless rewrite would go unnoticed")
+    lock = tmp_path / "uv.lock"
+    lock.write_bytes(b"unchanged")
+    lock.chmod(0o444)
+    try:
+        failed = bump_module._restore({lock: b"unchanged"})
+    finally:
+        lock.chmod(0o644)
+
+    assert failed == []
+
+
+@pytest.mark.os_posix
+def test_the_undo_needs_no_write_access_to_the_project_directory(bump_module: Any, tmp_path: Path) -> None:
+    """A temp-file-and-rename undo fails in a directory the user may write files in but not create them."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores the directory's mode")
+    project = tmp_path / "project"
+    project.mkdir()
+    pyproject = project / "pyproject.toml"
+    pyproject.write_bytes(b"bumped")
+    project.chmod(0o555)
+    try:
+        failed = bump_module._restore({pyproject: b"original"})
+    finally:
+        project.chmod(0o755)
+
+    assert failed == []
+    assert pyproject.read_bytes() == b"original"
+
+
+@pytest.mark.os_agnostic
+def test_a_file_deleted_during_the_bump_is_recreated(bump_module: Any, tmp_path: Path) -> None:
+    lock = tmp_path / "uv.lock"
+
+    assert bump_module._restore({lock: b"version = 1\n"}) == []
+
+    assert lock.read_bytes() == b"version = 1\n"
+
+
+@pytest.mark.os_agnostic
+def test_a_failed_rewrite_is_reported_as_possibly_incomplete_not_as_still_bumped(
+    bump_module: Any, tmp_path: Path
+) -> None:
+    """An in-place write that fails midway (disk full) leaves neither version: say so."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root writes a read-only file")
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_bytes(b"bumped")
+    pyproject.chmod(0o444)
+    try:
+        failed = bump_module._restore({pyproject: b"original"})
+    finally:
+        pyproject.chmod(0o644)
+
+    assert [path for path, _reason in failed] == [pyproject]
+    assert "may be incomplete" in failed[0][1]
+
+
+@pytest.mark.os_agnostic
+def test_an_unreadable_file_is_reported_as_unread_not_as_rewritten(bump_module: Any, tmp_path: Path) -> None:
+    (tmp_path / "blocker").write_text("x", encoding="utf-8")
+    unreadable = tmp_path / "blocker" / "pyproject.toml"
+
+    [(path, reason)] = bump_module._restore({unreadable: b"original"})
+
+    assert path == unreadable
+    assert "could not be read" in reason

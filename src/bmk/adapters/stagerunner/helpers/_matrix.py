@@ -132,8 +132,11 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[Ce
 
 
 def _run_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResult:
-    """Provision ``.venv-<minor>`` and run its gates. Provisioning failure is ERROR, not FAIL."""
-    venv = ensure_project_venv_at(project_dir, project_dir / f".venv-{minor}", minor, quiet=quiet)
+    """Provision ``.venv-<minor>`` and run its gates. Provisioning failure is ERROR, not FAIL.
+
+    ``install_python=False``: :func:`main` already prepared every minor, serially, before any cell.
+    """
+    venv = ensure_project_venv_at(project_dir, project_dir / f".venv-{minor}", minor, quiet=quiet, install_python=False)
     if venv is None:
         return CellResult(minor, "?", CellStatus.ERROR, "could not provision a venv for this Python")
     version = venv_version(venv) or "?"

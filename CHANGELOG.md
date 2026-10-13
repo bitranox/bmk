@@ -14,16 +14,21 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   alias. Each test-all cell ran both before syncing, in parallel, so a cell already syncing (most
   often 3.10, the first to finish) found "No interpreter found at path .venv-3.10/bin/python".
   bmk now asks `uv python list` first and runs neither command when uv has nothing newer for that
-  minor, and test-all prepares every minor serially before its cells start. The no-op rewrite
-  also broke venvs of any other bmk running on the same machine; that is gone too.
+  minor, and test-all prepares every minor serially before its cells start; the cells no longer
+  run `uv python install` or `upgrade` themselves. The no-op rewrite also broke venvs of any other bmk running on
+  the same machine; that is gone too.
 - **`make bump-*` re-locks a project that commits `uv.lock`.** The lock records the project's own
   version, so a bump left it stale and CI's `uv export --locked` (and `uv sync --locked`) refused
-  the release commit. If the re-lock (or anything else) fails, the bump is undone byte for byte,
-  so a re-run does not skip a version.
+  the release commit. If the re-lock fails (uv's own error is shown), a file cannot be written,
+  or the bump is interrupted with Ctrl-C, `pyproject.toml`, `CHANGELOG.md` and `uv.lock` are put
+  back byte for byte, so a re-run does not skip a version. A file that cannot be put back is named
+  with the reason, never reported as undone.
 - **An own package released minutes ago is no longer invisible to the floor update.** PyPI serves
   its index with `max-age=600` and uv honours it, so `uv lock --upgrade` kept resolving the previous
   version and the own floor did not rise. The upgrade lock now passes `--refresh-package` for every
-  package `[tool.uv] exclude-newer-package` exempts (`= false`).
+  package `[tool.uv] exclude-newer-package` exempts (`= false`). Only when uv refuses that flag
+  itself (offline configured) does the lock run once more without it, saying so; any other lock
+  failure stands as it is.
 
 ## [3.21.0] 2026-10-12 20:51:09
 
