@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
+from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
-__all__ = ["CellResult", "CellStatus", "main", "resolve_workers"]
+__all__ = ["CellResult", "CellStatus", "main", "pytest_marker_args", "resolve_workers"]
 
 _MAX_DETAIL_LINES = 40  # how much of a failing tool's output to surface per cell
 
@@ -107,17 +108,28 @@ def _cell_env(venv: Path) -> dict[str, str]:
     return env
 
 
+def pytest_marker_args(project_dir: Path) -> list[str]:
+    """The ``-m`` filter ``make test`` applies, read from the same ``[tool.scripts.test]`` key.
+
+    A project marks tests that must never run in the gate (host-mutating ones, say) through
+    ``exclude-markers``; a matrix with its own hardcoded filter runs them in every cell. An
+    empty value filters nothing, as it does in ``make test``.
+    """
+    exclude = CoverageConfig.from_pyproject(project_dir).exclude_markers
+    return ["-m", f"not {exclude}"] if exclude else []
+
+
 def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[CellStatus, str]:
     """Run pytest then pyright in ``venv``; the first failure wins.
 
-    pytest runs from the venv's own interpreter (the project is installed there), pyright is
-    pinned at it with ``--pythonpath``. ``-p no:cacheprovider`` keeps parallel cells from
-    racing on a shared ``.pytest_cache``. Both run under ``_cell_env`` so the cell's own
-    tools resolve.
+    pytest runs from the venv's own interpreter (the project is installed there), with the
+    project's ``exclude-markers`` filter; pyright is pinned at it with ``--pythonpath``.
+    ``-p no:cacheprovider`` keeps parallel cells from racing on a shared ``.pytest_cache``.
+    Both run under ``_cell_env`` so the cell's own tools resolve.
     """
     python = venv_python(venv)
     env = _cell_env(venv)
-    pytest_cmd = [str(python), "-m", "pytest", "-m", "not integration", "-q", "-p", "no:cacheprovider"]
+    pytest_cmd = [str(python), "-m", "pytest", *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
     result = subprocess.run(pytest_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
         return CellStatus.FAIL, _tail(result.stdout + result.stderr)

@@ -29,6 +29,7 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     _cell_env,
     _tail,
     main,
+    pytest_marker_args,
     resolve_workers,
 )
 from bmk.adapters.stagerunner.venv import venv_python
@@ -194,6 +195,93 @@ def test_e2e_a_version_specific_failure_fails_the_run(tmp_path: Path) -> None:
     _make_project(tmp_path, _E2E_MINORS, body)
 
     assert main(project_dir=tmp_path, quiet=True) == 1
+
+
+_MARKED_FAILURE = (
+    "import pytest\n\n\n"
+    "def test_ok() -> None:\n    assert True\n\n\n"
+    "@pytest.mark.{marker}\n"
+    "def test_marked_fails() -> None:\n    assert False\n"
+)
+
+
+def _make_marker_project(project: Path, *, marker: str, exclude_markers: str | None) -> None:
+    """One-cell project whose only failing test carries ``marker``.
+
+    ``exclude_markers`` is written to ``[tool.scripts.test].exclude-markers`` (``None`` leaves
+    the key out, so bmk's default applies). The marker is registered so pytest does not warn.
+    """
+    _make_project(project, _E2E_MINORS[:1], _MARKED_FAILURE.format(marker=marker))
+    extra = f'[tool.pytest.ini_options]\nmarkers = ["{marker}: test marker"]\n'
+    if exclude_markers is not None:
+        extra += f'[tool.scripts.test]\nexclude-markers = "{exclude_markers}"\n'
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(pyproject.read_text(encoding="utf-8") + extra, encoding="utf-8")
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_a_projects_exclude_markers_reach_every_cell(tmp_path: Path) -> None:
+    """``exclude-markers = "mutating"`` keeps mutating tests out of test-all, as it does in test.
+
+    A project marks host-mutating tests so the gate never runs them; test-all used to hardcode
+    ``not integration`` and ran them in every cell.
+    """
+    _make_marker_project(tmp_path, marker="mutating", exclude_markers="mutating")
+
+    assert main(project_dir=tmp_path, quiet=True) == 0
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_integration_stays_excluded_when_nothing_is_configured(tmp_path: Path) -> None:
+    """With no ``exclude-markers`` the default (``integration``) still applies in every cell."""
+    _make_marker_project(tmp_path, marker="integration", exclude_markers=None)
+
+    assert main(project_dir=tmp_path, quiet=True) == 0
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_an_empty_exclude_markers_runs_every_test(tmp_path: Path) -> None:
+    """``exclude-markers = ""`` filters nothing, as in test, so a failing integration test fails the run."""
+    _make_marker_project(tmp_path, marker="integration", exclude_markers="")
+
+    assert main(project_dir=tmp_path, quiet=True) == 1
+
+
+def _pyproject_with_test_table(project: Path, table: str) -> Path:
+    _write_pyproject(project, ["3.12"])
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(pyproject.read_text(encoding="utf-8") + table, encoding="utf-8")
+    return project
+
+
+@pytest.mark.os_agnostic
+def test_marker_args_follow_the_projects_exclude_markers(tmp_path: Path) -> None:
+    """The cell filter is the project's ``exclude-markers``, not a fixed ``integration``."""
+    project = _pyproject_with_test_table(tmp_path, '[tool.scripts.test]\nexclude-markers = "mutating"\n')
+
+    assert pytest_marker_args(project) == ["-m", "not mutating"]
+
+
+@pytest.mark.os_agnostic
+def test_marker_args_default_to_excluding_integration(tmp_path: Path) -> None:
+    """No ``exclude-markers`` key: the same default as ``make test``."""
+    _write_pyproject(tmp_path, ["3.12"])
+
+    assert pytest_marker_args(tmp_path) == ["-m", "not integration"]
+
+
+@pytest.mark.os_agnostic
+def test_marker_args_are_empty_when_exclude_markers_is_empty(tmp_path: Path) -> None:
+    """An empty ``exclude-markers`` filters nothing, so no ``-m`` at all."""
+    project = _pyproject_with_test_table(tmp_path, '[tool.scripts.test]\nexclude-markers = ""\n')
+
+    assert pytest_marker_args(project) == []
 
 
 @pytest.mark.os_agnostic

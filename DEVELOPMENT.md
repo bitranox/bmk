@@ -47,7 +47,8 @@ runs `uv tool upgrade bmk`, which takes no `--refresh` flag (uv rejects one) and
 ## Test Markers and What Each Command Runs
 
 `make test` runs `pytest -m "not <exclude-markers>"`, where `exclude-markers` comes from
-`[tool.scripts.test].exclude-markers` in `pyproject.toml` and **defaults to `integration`**. The
+`[tool.scripts.test].exclude-markers` in `pyproject.toml` and **defaults to `integration`**.
+`make test-all` applies the same filter in every version cell. The
 markers split tests across the local gate, the integration lane, and CI:
 
 - **`local_only`** - needs a local resource the CI runners lack (a real service, device, or OS

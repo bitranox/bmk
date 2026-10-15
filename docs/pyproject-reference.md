@@ -129,22 +129,22 @@ narrows what bandit scans and what coverage measures, and still reports success.
 
 ## Gates
 
-| Key                                        | Type   | Default           | Effect                                                                                                                    |
-|--------------------------------------------|--------|-------------------|---------------------------------------------------------------------------------------------------------------------------|
-| `[tool.scripts.test].pytest-verbosity`     | string | `"-v"`            | Passed to pytest                                                                                                          |
-| `[tool.scripts.test].exclude-markers`      | string | `"integration"`   | Runs pytest with `-m "not <value>"`, unless integration tests were explicitly requested. A single marker name, not a list |
-| `[tool.scripts.test].coverage-report-file` | string | `"coverage.xml"`  | Where the XML report is written                                                                                           |
-| `[tool.scripts.test].src-path`             | string | `"src"`           | Prepended to `PYTHONPATH` for the test run                                                                                |
-| `[tool.coverage.report].fail_under`        | int    | `80`              | `coverage report --fail-under=<value>`                                                                                    |
-| `[tool.coverage.run].source`               | list   | `["src"]`         | `coverage run --source=<...>`                                                                                             |
-| `[tool.pip-audit].ignore-vulns`            | list   | `[]`              | Each id becomes `--ignore-vuln=<id>`                                                                                      |
-| `[tool.bandit].skips`                      | list   | none              | Read by **bandit itself** (bmk passes `-c pyproject.toml`), never by bmk                                                  |
-| `[tool.bashate].max-line-length`           | int    | `120`             | Line limit for `.sh` linting                                                                                              |
-| `[tool.bashate].ignores`                   | list   | `["E003"]`        | Ignored bashate codes                                                                                                     |
-| `[tool.psscriptanalyzer].exclude-rules`    | list   | 3 built-ins       | Excluded PSScriptAnalyzer rules for `.ps1`                                                                                |
-| `[tool.clean].patterns`                    | list   | 19 built-in globs | What `bmk clean` removes                                                                                                  |
-| `[tool.git].default-remote`                | string | `"origin"`        | Remote that `release` pushes to                                                                                           |
-| `[tool.scripts.test-all].workers`          | int    | parallel          | Caps how many `test-all` version cells run at once. See "test-all: capping the matrix" below                              |
+| Key                                        | Type   | Default           | Effect                                                                                                                                                              |
+|--------------------------------------------|--------|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `[tool.scripts.test].pytest-verbosity`     | string | `"-v"`            | Passed to pytest                                                                                                                                                    |
+| `[tool.scripts.test].exclude-markers`      | string | `"integration"`   | `make test` and every `make test-all` cell run pytest with `-m "not <value>"`, unless integration tests were explicitly requested. A single marker name, not a list |
+| `[tool.scripts.test].coverage-report-file` | string | `"coverage.xml"`  | Where the XML report is written                                                                                                                                     |
+| `[tool.scripts.test].src-path`             | string | `"src"`           | Prepended to `PYTHONPATH` for the test run                                                                                                                          |
+| `[tool.coverage.report].fail_under`        | int    | `80`              | `coverage report --fail-under=<value>`                                                                                                                              |
+| `[tool.coverage.run].source`               | list   | `["src"]`         | `coverage run --source=<...>`                                                                                                                                       |
+| `[tool.pip-audit].ignore-vulns`            | list   | `[]`              | Each id becomes `--ignore-vuln=<id>`                                                                                                                                |
+| `[tool.bandit].skips`                      | list   | none              | Read by **bandit itself** (bmk passes `-c pyproject.toml`), never by bmk                                                                                            |
+| `[tool.bashate].max-line-length`           | int    | `120`             | Line limit for `.sh` linting                                                                                                                                        |
+| `[tool.bashate].ignores`                   | list   | `["E003"]`        | Ignored bashate codes                                                                                                                                               |
+| `[tool.psscriptanalyzer].exclude-rules`    | list   | 3 built-ins       | Excluded PSScriptAnalyzer rules for `.ps1`                                                                                                                          |
+| `[tool.clean].patterns`                    | list   | 19 built-in globs | What `bmk clean` removes                                                                                                                                            |
+| `[tool.git].default-remote`                | string | `"origin"`        | Remote that `release` pushes to                                                                                                                                     |
+| `[tool.scripts.test-all].workers`          | int    | parallel          | Caps how many `test-all` version cells run at once. See "test-all: capping the matrix" below                                                                        |
 
 `ignore-vulns` and `skips` are **different vocabularies and neither tool reads the other's
 table**. `[tool.pip-audit].ignore-vulns` takes PYSEC / GHSA / CVE ids. `[tool.bandit].skips`

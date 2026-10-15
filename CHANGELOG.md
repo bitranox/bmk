@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`make test-all` honours `[tool.scripts.test].exclude-markers`.** Every cell ran pytest with a
+  fixed `-m "not integration"`, so a project that keeps host-mutating tests out of `make test`
+  with `exclude-markers = "mutating"` had them collected in every test-all cell, run in parallel
+  and, on a host with passwordless sudo, run as root. The cells now apply the same filter
+  `make test` does: the project's value, `integration` when the key is unset, and no filter when
+  it is empty.
+
 ## [3.21.1] 2026-10-13 14:14:15
 
 ### Fixed
