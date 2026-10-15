@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.21.2] 2026-10-15 15:23:57
+
 ### Fixed
 
 - **`make test-all` honours `[tool.scripts.test].exclude-markers`.** Every cell ran pytest with a
