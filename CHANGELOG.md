@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.21.4] 2026-10-17 00:39:55
+
+### Fixed
+
+- **`devops-bmk` skill: the empty integration lane.** `make testintegration` that collects no test
+  exits 2 (make's code for a failed recipe, after `Error 5`), not 5; only bmk itself exits 5, so the
+  skill now keys on the `[pytest_integration] (exit code: 5)` line. It also separates the two
+  causes: no test carries the marker (an empty lane, reported as neither passed nor failed) and
+  integration tests that exist but were filtered out (a real fault).
+
 ## [3.21.3] 2026-10-17 00:17:32
 
 ### Changed
