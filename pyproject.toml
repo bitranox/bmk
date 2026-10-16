@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.21.2"
+version = "3.21.3"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,10 +17,10 @@ dependencies = [
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.4.1",
-    "lib_log_rich>=6.5.2",          # 6.4.2: validate_config, the check config --profile runs,
+    "lib_log_rich>=6.5.3",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses
     "lib_layered_config>=7.1.9",
-    "btx_lib_mail>=4.3.0",         # send-email / send-notification (SecretStr password + Transport seam)
+    "btx_lib_mail>=4.5.0",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.1",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.14.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
@@ -52,7 +52,7 @@ dependencies = [
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.17.0",
+    "ruff>=0.17.1",
     "pyright[nodejs]>=1.1.414",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",

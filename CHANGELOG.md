@@ -6,6 +6,23 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.21.3] 2026-10-17 00:17:32
+
+### Changed
+
+- **`devops-bmk` skill: the reds that come from bmk itself, and two corrections.** It now names a
+  `ModuleNotFoundError` inside bmk's own dependencies as bmk's shared env (`bmk_selfcheck` repairs it
+  on the next `make`); says the "waited 10s for the lock ... gave up. Nothing was changed." line
+  speaks only for the skipped upgrade, not for the target that printed it; explains the `push`
+  `deps` stage that fails with only `(no output captured)` when a dependency floor falls behind a
+  fresh PyPI release; states that `release` tags the version already in `pyproject.toml` (bumping
+  first skips it) and pushes the branch then the tag, and that `push` commits with `git add -A`;
+  says `make test-all` is the only cross-version run `local_only` tests get; and explains the
+  exit 5 an empty integration lane produces. Corrected: a version mismatch is cured by the next
+  sync, not by `rm -rf .venv`; the shell-lint gate runs `shfmt -d -i 4 -bn -ci` and takes
+  bashate's line length and ignores from `[tool.bashate]`; and the Makefile no longer passes
+  `--refresh-package bmk`.
+
 ## [3.21.2] 2026-10-15 15:23:57
 
 ### Fixed
