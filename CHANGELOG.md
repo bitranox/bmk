@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.21.5] 2026-10-18 11:34:32
+
+### Added
+
+- **`devops-bmk` skill: a release refused for a dirty tree.** `release` counts only tracked
+  changes as dirty. An unrelated edit is set aside and restored after the release, never
+  committed to get past the refusal, because the tag lands on HEAD and that commit never ran
+  in CI. bmk's own Makefile and floor churn is committed and pushed first, and the release
+  waits for CI on that commit, since `release` does not check it.
+
 ## [3.21.4] 2026-10-17 00:39:55
 
 ### Fixed
