@@ -18,6 +18,7 @@ import orjson
 import pytest
 import rtoml
 
+from bmk.adapters.config.loader import get_default_config_path
 from bmk.adapters.stagerunner.helpers import _dependencies, _supply_chain
 from bmk.adapters.stagerunner.helpers._dependencies import (
     DependencyStatus,
@@ -1068,9 +1069,19 @@ def test_a_standard_pin_table_left_empty_is_removed(tmp_path: Path, pypi: _FakeI
 def test_an_empty_section_keeps_the_defaults() -> None:
     settings = SupplyChainSettings.from_config({})
 
-    # User decision 2026-10-12 16:05: one day for now, raised later once the fleet is stable.
-    assert settings.cooldown == "1 day"
+    # User decision 2026-10-19: seven days, raised from the one day chosen 2026-10-12 once the
+    # fleet's own projects had moved to it.
+    assert settings.cooldown == "7 days"
     assert "lib-log-rich" in settings.own_packages
+
+
+@pytest.mark.os_agnostic
+def test_the_shipped_section_sets_the_same_cooldown() -> None:
+    # The shipped file, not the constant, is what an installed bmk reads, so the two must agree.
+    shipped = get_default_config_path().parent / "defaultconfig.d" / "10-bmk.toml"
+    section = rtoml.load(shipped)["bmk"]["supply_chain"]
+
+    assert SupplyChainSettings.from_config(section).cooldown == "7 days"
 
 
 @pytest.mark.os_agnostic

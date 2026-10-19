@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- **The default supply-chain cooldown is 7 days, up from 1 day.** `[bmk.supply_chain].cooldown`
+  defaults to `"7 days"`, so `make test` and `deps update` write `[tool.uv] exclude-newer = "7 days"`
+  into a project that has none, and raise third-party floors only to releases at least a week old. A
+  project that already sets `exclude-newer` keeps its own value, as before. A test now also pins the
+  value in the shipped `defaultconfig.d/10-bmk.toml`, which is what an installed bmk reads, to the
+  documented default.
+
 ## [3.21.5] 2026-10-18 11:34:32
 
 ### Added

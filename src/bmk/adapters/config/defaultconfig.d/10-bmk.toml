@@ -63,14 +63,14 @@ show_warnings = true
 
 # The cooldown bmk writes into a project's [tool.uv] exclude-newer when the project has none.
 #
-# Default: "1 day"
+# Default: "7 days"
 # Effect:  uv refuses every release file uploaded within this window, for the whole tree
 #          including transitive dependencies, and bmk raises third-party floors only to
 #          releases older than it. A project that already sets exclude-newer keeps its own.
 # Accepted: "<N> hours", "<N> days", "<N> weeks" (lowercase, N >= 1) or an ISO 8601 span such
 #          as "P7D" or "PT36H" - a subset of uv's grammar, because uv only WARNS about a value it
 #          cannot read and then ignores the whole [tool.uv] block. Anything else stops the command.
-cooldown = "1 day"
+cooldown = "7 days"
 
 # Our own packages: exempt from the cooldown (they always take the newest release).
 #

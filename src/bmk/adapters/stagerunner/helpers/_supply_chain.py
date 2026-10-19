@@ -67,7 +67,7 @@ __all__ = [
     "uv_resolved_options",
 ]
 
-DEFAULT_COOLDOWN = "1 day"
+DEFAULT_COOLDOWN = "7 days"
 
 # Our own packages on PyPI: they always follow the newest release, so they are exempt from the
 # cooldown. Every name here was checked to be a bitranox project on PyPI (its project URLs).

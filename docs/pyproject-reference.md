@@ -183,7 +183,7 @@ workers = 1
 | Key                               | Behaviour                                                                                                                                                       |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `[tool.pyright].exclude`          | If present (and `[tool.pyright].include` is not), bmk appends the venv directories it creates and **rewrites your `pyproject.toml`**.                           |
-| `[tool.uv].exclude-newer`         | Written by `make test` / `deps update` when absent, from `[bmk.supply_chain].cooldown` (default `"1 day"`).  Never overwritten.                                 |
+| `[tool.uv].exclude-newer`         | Written by `make test` / `deps update` when absent, from `[bmk.supply_chain].cooldown` (default `"7 days"`). Never overwritten.                                 |
 | `[tool.uv].exclude-newer-package` | bmk adds `<own-package> = false` for every own package the project reaches, and keeps its own floor pins current (see below). Entries the project set are kept. |
 
 This exists because pyright's `exclude` **replaces** its built-in defaults rather than
@@ -197,7 +197,7 @@ defaults already cover it) or when `include` narrows the scope.
 
 A malicious release is usually found and pulled within days. uv refuses every file uploaded
 after `exclude-newer`, for the whole dependency tree including transitive packages, so a
-project with `exclude-newer = "1 day"` never installs a release younger than one day.
+project with `exclude-newer = "7 days"` never installs a release younger than seven days.
 bmk judges floors against the cutoff uv itself resolved, read back from `uv.lock`, and follows it:
 
 - A third-party floor rises only to the newest release older than the cooldown. A newer

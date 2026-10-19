@@ -17,9 +17,9 @@ dependencies = [
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.4.1",
-    "lib_log_rich>=6.5.3",          # 6.4.2: validate_config, the check config --profile runs,
+    "lib_log_rich>=6.5.4",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses
-    "lib_layered_config>=7.1.9",
+    "lib_layered_config>=7.2.0",
     "btx_lib_mail>=4.5.0",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.1",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
@@ -134,8 +134,8 @@ system-dependencies-windows-choco = []
 os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
-exclude-newer = "1 day"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false}
+exclude-newer = "7 days"
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, ruff = "2026-10-15T15:23:19Z"}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"
