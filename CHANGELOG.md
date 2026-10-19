@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.0] 2026-10-19 20:08:07
+
 ### Changed
 
 - **The default supply-chain cooldown is 7 days, up from 1 day.** `[bmk.supply_chain].cooldown`
