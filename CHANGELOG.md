@@ -14,7 +14,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   passed the venv's own `bin/python`, and on CPython 3.10 and older that base executable is inside
   the venv uv had just deleted, so uv failed with `failed to canonicalize path`. The sync now asks
   for the cell's minor (`--python 3.10`), the same request `uv venv` gets; only a venv with no
-  declared minor still passes its interpreter.
+  declared minor still passes its interpreter. One consequence: when the declared minor cannot be
+  found (offline, not installed), the sync now fails with uv's "No interpreter found" and the
+  `[venv]` report, instead of silently re-syncing an existing venv on a different minor.
+- **The devops-bmk skill no longer says JSON mode hides a failed provisioning sync**: it points at
+  the `[venv] uv sync from uv.lock failed ...` line, printed in every output mode since 3.22.2.
 
 ## [3.22.2] 2026-10-21 17:31:29
 
