@@ -744,7 +744,11 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     ensure_venv_typecheck_excluded(cwd, venv)
 
     python = venv_python(venv)
-    synced = _sync_from_lock(cwd, venv, python, quiet=quiet)
+    # Ask uv sync for the MINOR, the request `uv venv` got, never for the interpreter inside the
+    # venv: uv sync may remove the venv and recreate it from that interpreter's
+    # sys._base_executable, which on CPython <= 3.10 is the venv's own bin/python - deleted by
+    # then, so uv failed and left an empty directory (bmk OPEN-WORK [19]).
+    synced = _sync_from_lock(cwd, venv, minor or str(python), quiet=quiet)
     if synced is not None:
         return venv if synced else None
     for target in _INSTALL_TARGETS:
@@ -754,7 +758,7 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     return None
 
 
-def _sync_from_lock(cwd: Path, venv: Path, python: Path, *, quiet: bool) -> bool | None:
+def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool) -> bool | None:
     """Lock the project, then make ``venv`` exactly what ``uv.lock`` pins.
 
     The lock is the source because ``uv pip install --upgrade`` keeps an installed release that
@@ -764,6 +768,7 @@ def _sync_from_lock(cwd: Path, venv: Path, python: Path, *, quiet: bool) -> bool
 
     ``uv sync`` installs into the PROJECT environment, so the target venv is named through
     ``UV_PROJECT_ENVIRONMENT``; that is how the per-version matrix venvs get their own sync.
+    ``python`` is uv's ``--python`` request: the minor when one is known, else the venv's interpreter.
 
     Returns:
         True when synced from the lock; False when the lock was made but the sync failed, which
@@ -773,7 +778,7 @@ def _sync_from_lock(cwd: Path, venv: Path, python: Path, *, quiet: bool) -> bool
     if not lock_project(cwd, quiet=quiet):
         print(f"[venv] uv lock failed in {cwd}; provisioning {venv.name} from pyproject.toml instead", file=sys.stderr)
         return None
-    argv = ["uv", "sync", "--locked", "--python", str(python), "--no-default-groups", *_sync_extras(cwd)]
+    argv = ["uv", "sync", "--locked", "--python", python, "--no-default-groups", *_sync_extras(cwd)]
     env = {**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)}
     if quiet:
         rc, stderr = _run_keeping_stderr(argv, cwd, quiet=True, env=env)

@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A 3.10 (or 3.9) `test-all` cell no longer ends as an ERROR with an empty venv after a Python
+  patch upgrade.** An old venv whose `pyvenv.cfg` names an older patch than its interpreter is
+  removed and recreated by `uv sync`, from the `--python` interpreter's `sys._base_executable`. bmk
+  passed the venv's own `bin/python`, and on CPython 3.10 and older that base executable is inside
+  the venv uv had just deleted, so uv failed with `failed to canonicalize path`. The sync now asks
+  for the cell's minor (`--python 3.10`), the same request `uv venv` gets; only a venv with no
+  declared minor still passes its interpreter.
+
 ## [3.22.2] 2026-10-21 17:31:29
 
 ### Changed

@@ -194,7 +194,7 @@ def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> 
     assert ["uv", "python", "install", "3.12"] in cmds
     assert ["uv", "python", "upgrade", "3.12"] in cmds
     sync = next(c for c in cmds if c[:2] == ["uv", "sync"])
-    assert sync[sync.index("--python") + 1] == str(venv_python(target))
+    assert sync[sync.index("--python") + 1] == "3.12", "the sync asks for the same minor the create did"
 
 
 @pytest.mark.os_agnostic
@@ -334,6 +334,9 @@ _SYNC_COLOURED = "stub-uv-coloured-line-5b1d"
 # its error lines even into a pipe.
 _ESC = chr(0x1B)
 
+# Where the stub's `uv sync` records its argv, one word per line, beside the stub's bin directory.
+_SYNC_ARGV_FILE = "uv-sync-argv"
+
 # What the stub's `uv sync` leaves behind before it exits 1, and the state the failure line must name.
 _SYNC_AFTERMATH = {
     "venv": ":",
@@ -349,7 +352,8 @@ def _install_stub_uv(bin_dir: Path, *, sync_rc: int, aftermath: str = ":") -> No
     ``uv venv <path>`` makes a venv-shaped directory, ``uv lock`` and ``uv python ...`` succeed
     (``list`` answers an empty JSON list), and ``uv sync`` runs ``aftermath`` against
     ``UV_PROJECT_ENVIRONMENT``, prints ``error: <_SYNC_MARKER>`` on stderr, then one line in SGR
-    colour and :data:`_SYNC_FILLER_LINES` filler lines, and exits ``sync_rc``.
+    colour and :data:`_SYNC_FILLER_LINES` filler lines, and exits ``sync_rc``. Its argv is written one
+    word per line to :data:`_SYNC_ARGV_FILE` beside ``bin_dir``.
     The sync refuses (exit 97) a target outside ``bin_dir``'s parent, so a ``rm -rf`` aftermath
     can never reach an inherited ``UV_PROJECT_ENVIRONMENT`` if bmk stopped passing its own.
     """
@@ -368,6 +372,7 @@ def _install_stub_uv(bin_dir: Path, *, sync_rc: int, aftermath: str = ":") -> No
         "  lock) exit 0 ;;\n"
         "  sync)\n"
         f'    case "$UV_PROJECT_ENVIRONMENT" in "{bin_dir.parent}"/*) ;; *) exit 97 ;; esac\n'
+        f'    printf "%s\\n" "$@" > "{bin_dir.parent / _SYNC_ARGV_FILE}"\n'
         f"    {aftermath}\n"
         f'    echo "error: {_SYNC_MARKER}" >&2\n'
         f"    echo '{_ESC}[31m{_SYNC_COLOURED}{_ESC}[0m' >&2\n"
@@ -481,6 +486,27 @@ def test_a_successful_quiet_sync_prints_nothing(stub_uv_project: Path, capfd: py
     assert ensure_project_venv_at(stub_uv_project, venv, None, quiet=True) == venv
 
     assert capfd.readouterr().err == ""
+
+
+# uv sync may remove the venv and recreate it from the --python interpreter's sys._base_executable.
+# On CPython <= 3.10 that is the venv's own bin/python, deleted by then, so a --python pointing INTO
+# the venv left an empty directory (bmk OPEN-WORK [19]). A known minor is asked for by name instead.
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
+@pytest.mark.parametrize(
+    ("minor", "venv_name"), [("3.10", ".venv-3.10"), (None, ".venv")], ids=["minor-known", "no-minor"]
+)
+def test_the_sync_asks_uv_for_the_minor_never_the_interpreter_inside_the_venv(
+    stub_uv_project: Path, minor: str | None, venv_name: str
+) -> None:
+    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=0)
+    venv = stub_uv_project / venv_name
+
+    assert ensure_project_venv_at(stub_uv_project, venv, minor, quiet=True, install_python=False) == venv
+
+    argv = (stub_uv_project.parent / _SYNC_ARGV_FILE).read_text(encoding="utf-8").splitlines()
+    expected = minor if minor else str(venv_python(venv))
+    assert argv[argv.index("--python") + 1] == expected
 
 
 @pytest.mark.os_agnostic
