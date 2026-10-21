@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.2] 2026-10-21 17:31:29
+
 ### Changed
 
 - **A failed `uv sync` while provisioning a venv now shows uv's own error, in every output mode.**
@@ -16,6 +18,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   JSON mode a colon and ALL of uv's stderr follow it, indented, colour codes removed, written as
   one block so parallel `test-all` cells cannot interleave inside it. In text mode uv's output
   streams live as before, with its progress display, so only that line is added after it.
+
+### Security
+
+- **CI pins its third-party actions to full commit shas** (`pypa/gh-action-pypi-publish`,
+  `astral-sh/setup-uv`, `codecov/codecov-action`, the ref kept in a comment), distributed from the
+  `default_cicd_public` template; Dependabot groups their updates into one monthly PR.
 
 ## [3.22.1] 2026-10-21 15:44:41
 
