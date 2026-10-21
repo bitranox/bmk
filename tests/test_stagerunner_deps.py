@@ -177,8 +177,14 @@ def test_deps_update_locks_the_project_and_syncs_its_own_venv_from_the_lock(
         ran.append((argv, cwd, env))
         return 0
 
+    def _fake_run_keeping_stderr(
+        argv: list[str], cwd: Path, *, quiet: bool = True, env: dict[str, str] | None = None
+    ) -> tuple[int, str]:
+        return _fake_run(argv, cwd, quiet=quiet, env=env), ""
+
     monkeypatch.setattr(_dependencies, "main", _fake_main)
     monkeypatch.setattr("bmk.adapters.stagerunner.venv._run", _fake_run)
+    monkeypatch.setattr("bmk.adapters.stagerunner.venv._run_keeping_stderr", _fake_run_keeping_stderr)
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     venv = _make_venv(tmp_path / ".venv-win")
 

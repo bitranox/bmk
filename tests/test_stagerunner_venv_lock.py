@@ -19,6 +19,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
@@ -28,7 +29,7 @@ import pytest
 from bmk.adapters.stagerunner.venv import ensure_project_venv_at, sync_lock_path
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator, Mapping
 
 #: Long enough that a slow machine does not fail the control, short enough that the
 #: contended case does not stall the suite.
@@ -52,6 +53,22 @@ def _run_that_creates_venv_on_uv_venv() -> MagicMock:
         return 0
 
     return MagicMock(side_effect=side_effect)
+
+
+@contextmanager
+def _faked_uv(run: MagicMock) -> Generator[MagicMock, None, None]:
+    """Patch both of venv.py's uv runners with ``run``: ``uv sync`` goes through the stderr-keeping one."""
+
+    def keeping_stderr(
+        argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
+    ) -> tuple[int, str]:
+        return run(argv, cwd, quiet=quiet, env=env), ""
+
+    with (
+        patch("bmk.adapters.stagerunner.venv._run", run),
+        patch("bmk.adapters.stagerunner.venv._run_keeping_stderr", keeping_stderr),
+    ):
+        yield run
 
 
 def _project(tmp_path: Path) -> Path:
@@ -100,7 +117,7 @@ def test_a_sync_refuses_loudly_rather_than_running_under_another_bmk(
     lock_holder(sync_lock_path(venv))  # type: ignore[operator]
     mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+    with _faked_uv(mock_run):
         result = ensure_project_venv_at(project, venv, None, quiet=False)
 
     assert result is None, "must not report success while another bmk holds the venv"
@@ -119,7 +136,7 @@ def test_a_sync_proceeds_when_nobody_holds_the_lock(tmp_path: Path, monkeypatch:
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
     mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with patch("bmk.adapters.stagerunner.venv._run", mock_run):
+    with _faked_uv(mock_run):
         result = ensure_project_venv_at(project, venv, None, quiet=True)
 
     assert result == venv
@@ -143,7 +160,7 @@ def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
     monkeypatch.setattr("bmk.adapters.stagerunner.venv._discard_venv_on_wrong_python", discard)
     lock_holder(sync_lock_path(venv))  # type: ignore[operator]
 
-    with patch("bmk.adapters.stagerunner.venv._run", _run_that_creates_venv_on_uv_venv()):
+    with _faked_uv(_run_that_creates_venv_on_uv_venv()):
         ensure_project_venv_at(project, venv, None, quiet=True)
 
     assert discard.call_count == 0, "the rebuild must not run while another bmk holds the venv"
@@ -161,7 +178,7 @@ def test_the_rebuild_does_run_when_the_lock_is_free(tmp_path: Path, monkeypatch:
     discard = MagicMock()
     monkeypatch.setattr("bmk.adapters.stagerunner.venv._discard_venv_on_wrong_python", discard)
 
-    with patch("bmk.adapters.stagerunner.venv._run", _run_that_creates_venv_on_uv_venv()):
+    with _faked_uv(_run_that_creates_venv_on_uv_venv()):
         ensure_project_venv_at(project, venv, None, quiet=True)
 
     assert discard.call_count == 1

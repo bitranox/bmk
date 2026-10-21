@@ -775,13 +775,44 @@ def _sync_from_lock(cwd: Path, venv: Path, python: Path, *, quiet: bool) -> bool
         return None
     argv = ["uv", "sync", "--locked", "--python", str(python), "--no-default-groups", *_sync_extras(cwd)]
     env = {**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)}
-    if _run(argv, cwd, quiet=quiet, env=env) == 0:
+    rc, stderr = _run_keeping_stderr(argv, cwd, quiet=quiet, env=env)
+    if rc == 0:
         return True
+    _report_failed_sync(venv, rc, stderr, quiet=quiet)
+    return False
+
+
+# How much of uv's stderr a failed sync shows: its error is at the end, after the resolver chatter.
+_SYNC_STDERR_TAIL = 20
+
+
+def _report_failed_sync(venv: Path, rc: int, stderr: str, *, quiet: bool) -> None:
+    """Say on stderr that the sync failed, why uv says it did, and what it left of ``venv``.
+
+    Always printed, never gated on ``quiet``: the caller degrades silently to an ERROR, and the
+    failure is intermittent, so asking for a text-mode re-run would lose the very evidence it
+    asks for. When not quiet, uv's stderr was already shown, so only the header is printed.
+    """
     print(
-        f"[venv] uv sync from uv.lock failed for {venv.name}; re-run with BMK_OUTPUT_FORMAT=text to see why",
+        f"[venv] uv sync from uv.lock failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)}):",
         file=sys.stderr,
     )
-    return False
+    if quiet:
+        for line in _ANSI_SGR.sub("", stderr).splitlines()[-_SYNC_STDERR_TAIL:]:
+            print(f"    {line}", file=sys.stderr)
+
+
+def _venv_state(venv: Path) -> str:
+    """What is at ``venv``: ``venv``, ``directory without pyvenv.cfg``, ``empty directory`` or ``absent``."""
+    if is_venv(venv):
+        return "venv"
+    if not venv.is_dir():
+        return "absent"
+    try:
+        empty = next(venv.iterdir(), None) is None
+    except OSError:
+        empty = False
+    return "empty directory" if empty else "directory without pyvenv.cfg"
 
 
 def _sync_extras(cwd: Path) -> list[str]:
@@ -853,8 +884,10 @@ def _refresh_refused(rc: int, stderr: str) -> bool:
     return rc == _UV_ERROR_EXIT and any(marker in plain for marker in _REFRESH_REFUSALS)
 
 
-def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool) -> tuple[int, str]:
-    """Like :func:`_run`, but hands back stderr (still shown when not quiet) to be classified."""
+def _run_keeping_stderr(
+    argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
+) -> tuple[int, str]:
+    """Like :func:`_run`, but hands back stderr (still shown when not quiet) to be classified or reported."""
     try:
         # argv is built from literals and package names from the project's own manifest; no shell.
         done = subprocess.run(
@@ -865,7 +898,7 @@ def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool) -> tuple[int
             text=True,
             encoding="utf-8",
             errors="replace",
-            env=_uv_env(),
+            env=dict(env) if env is not None else _uv_env(),
             check=False,
         )
     except OSError:
