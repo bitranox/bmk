@@ -653,6 +653,27 @@ def test_a_pin_the_cooldown_has_caught_up_with_is_removed(tmp_path: Path, pypi: 
 
 
 @pytest.mark.os_agnostic
+def test_a_pin_no_floor_demands_stays_while_the_cooldown_does_not_admit_its_release(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """lsdsk, 2026-10-21: certifi pinned by hand at the very value bmk would write, for a release
+    one day old. No declared floor demanded it, so it read as bmk's own, was removed as "the
+    cooldown admits it" although the cooldown did not, and the next lock went back to the release
+    the pin had been placed to leave behind.
+    """
+    pypi.packages["gadget"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": _uploaded(2)})
+    tool_uv = f'exclude-newer = "14 days"\nexclude-newer-package = {{ gadget = "{_pin_of(2)}" }}'
+    pyproject = _write(tmp_path, deps='"widget>=1.0"', tool_uv=tool_uv)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(2)}
+    err = capsys.readouterr().err
+    assert "gadget pin kept" in err
+    assert "no declared floor demands it" in err
+
+
+@pytest.mark.os_agnostic
 def test_a_self_reference_of_an_unpublished_project_does_not_freeze_the_pins(tmp_path: Path, pypi: _FakeIndex) -> None:
     """`demo[cli]` in demo's own requirements comes from the source tree, never from PyPI.
 

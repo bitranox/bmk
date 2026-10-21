@@ -17,9 +17,9 @@ dependencies = [
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.4.1",
-    "lib_log_rich>=6.5.4",          # 6.4.2: validate_config, the check config --profile runs,
+    "lib_log_rich>=6.5.6",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses
-    "lib_layered_config>=7.2.0",
+    "lib_layered_config>=7.3.0",
     "btx_lib_mail>=4.5.0",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.1",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
@@ -80,6 +80,11 @@ dependencies = [
     # bmk never imports urllib3; httpx2 is its HTTP client. This is a floor, not a choice of
     # library, so "replace it with httpx2" is not a thing that can be done.
     "urllib3>=2.8.0",
+    # A transitive of requests (via pip-audit), floored for PYSEC-2026-4320. The fixed release was
+    # younger than the cooldown when this floor was raised, so bmk pins it in [tool.uv]; without
+    # the floor that pin would be one no floor demands, and the lock would fall back to the
+    # vulnerable release.
+    "certifi>=2026.10.19",
 
     # --- deliberately absent ------------------------------------------------------------
     # twine: bmk never uploads to PyPI itself. `release` tags, pushes and calls `gh release`;
@@ -135,7 +140,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "7 days"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, ruff = "2026-10-15T15:23:19Z"}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, ruff = "2026-10-15T15:23:19Z", certifi = "2026-10-20T02:24:17Z"}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"

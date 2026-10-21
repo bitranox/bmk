@@ -213,8 +213,11 @@ bmk judges floors against the cutoff uv itself resolved, read back from `uv.lock
   variables it names (judged on every value it compares against, never the host's own), on any
   Python from the oldest supported up, and behind the extras requested. bmk recognises
   its own entries by their value (one second after one of the release's files), drops each once the
-  cooldown admits its release, and never touches an entry the project set itself. A
-  `[tool.uv.exclude-newer-package]` table keeps its form and its comments. A bare `deps` check (no
+  cooldown admits its release, and never touches an entry the project set itself. An entry set by
+  hand at that same second reads as bmk's, so an entry no declared floor demands is also kept until
+  the cooldown admits its release, with a stderr line "pin kept: no declared floor demands it". To
+  keep a young security fix in a transitive dependency, declare its floor (`certifi>=2026.10.19`):
+  bmk then writes and keeps the pin itself. A `[tool.uv.exclude-newer-package]` table keeps its form and its comments. A bare `deps` check (no
   update) reports such a floor as an error, floor kept, and FAILS: `uv lock` cannot satisfy it.
 - A package listed under `exclude-newer-package` follows its own value: `false` for no
   cooldown (our own packages), or a shorter duration or a date to admit a young security fix.

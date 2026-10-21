@@ -6,6 +6,23 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A hand-placed `exclude-newer-package` pin is no longer removed while the cooldown still
+  excludes its release.** bmk recognises its own floor pins by value (one second after an upload),
+  so a pin a project set by hand at that same second read as bmk's. When no declared floor demanded
+  it, `make test` and `deps update` removed it with "the cooldown admits it", although the cooldown
+  did not, and the next lock went back to the older release the pin was placed to leave (a
+  security fix in a transitive dependency was lost this way). Such a pin is now kept until the
+  cooldown admits its release, and named on stderr as "pin kept: no declared floor demands it". A
+  pin bmk wrote for a floor that has since been lowered therefore stays for at most one cooldown.
+
+### Security
+
+- **certifi is floored at 2026.10.19 (PYSEC-2026-4320).** It reaches bmk through pip-audit's
+  requests. The release is younger than the 7-day cooldown, so `[tool.uv]` carries a per-package
+  pin for it until the cooldown admits it.
+
 ## [3.22.0] 2026-10-19 20:08:07
 
 ### Changed

@@ -1433,23 +1433,32 @@ def _pin_young_floors(pyproject: Path) -> list[str]:
     """
     config = load_pyproject_config(pyproject)
     uv = config.tool.uv
+    cutoff = _default_cutoff(uv.exclude_newer)
     try:
-        pins = _demanded_pins(config, uv.exclude_newer, uv.exclude_newer_package)
+        pins = _demanded_pins(config, cutoff, uv.exclude_newer_package)
     except _UnjudgeableError as exc:
         print(f"{pyproject}: floor pins left as they are: {exc}", file=sys.stderr)
         return []
-    return reconcile_floor_pins(pyproject, pins=pins, is_floor_pin=_is_floor_pin)
+    return reconcile_floor_pins(pyproject, pins=pins, is_floor_pin=_is_floor_pin, cutoff=cutoff)
 
 
-def _demanded_pins(config: PyprojectConfig, exclude_newer: object, packages: dict[str, Any]) -> dict[str, str]:
-    """The floor pins the project's declared floors need under its ``exclude-newer``.
+def _default_cutoff(exclude_newer: object) -> datetime | None:
+    """The cutoff the project's ``exclude-newer`` sets for a package without its own; None without one.
+
+    Raises:
+        SupplyChainConfigError: When uv refuses the value.
+    """
+    if exclude_newer is None:
+        return None
+    return ReleasePolicy.from_lock(uv_resolved_options(exclude_newer, {}), now=datetime.now(timezone.utc)).default
+
+
+def _demanded_pins(config: PyprojectConfig, cutoff: datetime | None, packages: dict[str, Any]) -> dict[str, str]:
+    """The floor pins the project's declared floors need under its default ``cutoff``.
 
     Raises:
         _UnjudgeableError: When a release list or a release's requirements cannot be read.
     """
-    if exclude_newer is None:
-        return {}
-    cutoff = ReleasePolicy.from_lock(uv_resolved_options(exclude_newer, {}), now=datetime.now(timezone.utc)).default
     if cutoff is None:
         return {}
     exempt = frozenset(normalize(n) for n, v in packages.items() if v is False)

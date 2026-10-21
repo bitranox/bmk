@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from collections import deque
 from dataclasses import dataclass, field
@@ -531,12 +532,20 @@ def _upload_moment(entry: object) -> datetime | None:
 
 
 def reconcile_floor_pins(
-    pyproject: Path, *, pins: Mapping[str, str], is_floor_pin: Callable[[str, object], bool]
+    pyproject: Path,
+    *,
+    pins: Mapping[str, str],
+    is_floor_pin: Callable[[str, object], bool],
+    cutoff: datetime | None,
 ) -> list[str]:
     """Make bmk's floor pins in ``[tool.uv] exclude-newer-package`` exactly ``pins``.
 
     An entry ``is_floor_pin`` does not recognise is the project's own choice and is left alone,
-    also when ``pins`` names that package.
+    also when ``pins`` names that package. A recognised entry no declared floor demands is removed
+    only once ``cutoff`` admits the release it serves: recognition is by value, so a pin the project
+    placed by hand at the same second reads as bmk's, and removing it while the cooldown still
+    excludes that release would take away what it was placed for (a security fix in a transitive
+    dependency). Kept, it is named on stderr; a stale pin of bmk's own goes within one cooldown.
 
     Returns:
         One line per change; empty when the file is left untouched.
@@ -551,6 +560,13 @@ def reconcile_floor_pins(
         key = normalize(name)
         if not is_floor_pin(key, value):
             entries[name] = value
+        elif key not in wanted and _admits_beyond(value, cutoff):
+            entries[name] = value
+            print(
+                f"{pyproject}: [tool.uv] exclude-newer-package: {key} pin kept: no declared floor demands it, "
+                "and the cooldown does not admit its release yet",
+                file=sys.stderr,
+            )
         elif key not in wanted:
             changes.append(f"[tool.uv] exclude-newer-package: {key} pin removed, the cooldown admits it")
         else:
@@ -578,6 +594,15 @@ def reconcile_floor_pins(
         del uv["exclude-newer-package"]
     pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
     return changes
+
+
+def _admits_beyond(pin: object, cutoff: datetime | None) -> bool:
+    """Whether ``pin`` admits an upload the default ``cutoff`` excludes.
+
+    A pin at or before the cutoff admits nothing more, and would hold its package back.
+    """
+    moment = _moment(pin) if isinstance(pin, str) else None
+    return cutoff is not None and moment is not None and moment > cutoff
 
 
 def _apply_entries(table: Any, *, current: Mapping[str, object], entries: Mapping[str, object]) -> None:
