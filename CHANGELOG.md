@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.3] 2026-10-21 20:59:38
+
 ### Fixed
 
 - **A 3.10 (or 3.9) `test-all` cell no longer ends as an ERROR with an empty venv after a Python
