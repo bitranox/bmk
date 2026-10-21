@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -151,9 +152,9 @@ def _commands(mock_run: MagicMock) -> list[list[str]]:
 def _faked_uv(run: MagicMock) -> Generator[MagicMock, None, None]:
     """Patch both of venv.py's uv runners with ``run``, the one fake a test inspects.
 
-    ``uv sync`` goes through ``_run_keeping_stderr`` (its stderr is reported on failure), every
-    other provisioning call through ``_run``; routing both into ``run`` keeps a single command
-    list, and keeps a mock-based test from reaching the real uv for the sync.
+    A quiet ``uv sync`` goes through ``_run_keeping_stderr`` (its stderr is reported on failure),
+    a text-mode one and every other provisioning call through ``_run``; routing both into ``run``
+    keeps a single command list, and keeps a mock-based test from reaching the real uv for the sync.
     """
 
     def keeping_stderr(
@@ -323,6 +324,15 @@ def test_a_failed_sync_from_a_good_lock_is_not_papered_over_by_the_manifest_inst
 # external edge, a stub `uv` executable first on PATH, so the real module runs the real subprocess.
 
 _SYNC_MARKER = "stub-uv-sync-error-7f3a"
+# uv puts its verdict FIRST and the detail after it (measured, uv 0.13.0: a failing build printed
+# 26 lines with `error: Failed to build` on line 6), so the stub follows its error with more lines
+# than any tail a reader might be tempted to cap the report at.
+_SYNC_FILLER_LINES = 25
+_SYNC_LAST_FILLER = f"filler-{_SYNC_FILLER_LINES}"
+_SYNC_COLOURED = "stub-uv-coloured-line-5b1d"
+# Built with chr() so no escape sequence has to survive the source text: FORCE_COLOR makes uv colour
+# its error lines even into a pipe.
+_ESC = chr(0x1B)
 
 # What the stub's `uv sync` leaves behind before it exits 1, and the state the failure line must name.
 _SYNC_AFTERMATH = {
@@ -338,7 +348,8 @@ def _install_stub_uv(bin_dir: Path, *, sync_rc: int, aftermath: str = ":") -> No
 
     ``uv venv <path>`` makes a venv-shaped directory, ``uv lock`` and ``uv python ...`` succeed
     (``list`` answers an empty JSON list), and ``uv sync`` runs ``aftermath`` against
-    ``UV_PROJECT_ENVIRONMENT``, prints :data:`_SYNC_MARKER` on stderr and exits ``sync_rc``.
+    ``UV_PROJECT_ENVIRONMENT``, prints ``error: <_SYNC_MARKER>`` on stderr, then one line in SGR
+    colour and :data:`_SYNC_FILLER_LINES` filler lines, and exits ``sync_rc``.
     The sync refuses (exit 97) a target outside ``bin_dir``'s parent, so a ``rm -rf`` aftermath
     can never reach an inherited ``UV_PROJECT_ENVIRONMENT`` if bmk stopped passing its own.
     """
@@ -358,8 +369,9 @@ def _install_stub_uv(bin_dir: Path, *, sync_rc: int, aftermath: str = ":") -> No
         "  sync)\n"
         f'    case "$UV_PROJECT_ENVIRONMENT" in "{bin_dir.parent}"/*) ;; *) exit 97 ;; esac\n'
         f"    {aftermath}\n"
-        '    echo "Resolved 3 packages" >&2\n'
         f'    echo "error: {_SYNC_MARKER}" >&2\n'
+        f"    echo '{_ESC}[31m{_SYNC_COLOURED}{_ESC}[0m' >&2\n"
+        f'    i=1; while [ "$i" -le {_SYNC_FILLER_LINES} ]; do echo "filler-$i" >&2; i=$((i + 1)); done\n'
         f"    exit {sync_rc} ;;\n"
         "esac\n"
         "exit 0\n",
@@ -395,6 +407,69 @@ def test_a_failed_sync_prints_uv_s_own_error_and_the_venv_it_left(
     assert err.count(_SYNC_MARKER) == 1, "uv's reason is shown exactly once, in either output mode"
     assert f"uv sync from uv.lock failed for .venv-3.10 (exit 1; venv afterwards: {state})" in err
     assert "BMK_OUTPUT_FORMAT=text" not in err, "a re-run is what loses the evidence"
+
+
+class _WriteRecorder(io.StringIO):
+    """A ``sys.stderr`` stand-in that keeps every ``write`` call apart, to tell one write from several.
+
+    Parallel test-all cells share the process stderr, so a failure block only stays readable when
+    it arrives in one write; separate prints can interleave with a sibling cell's lines.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes: list[str] = []
+
+    def write(self, s: str, /) -> int:
+        self.writes.append(s)
+        return super().write(s)
+
+
+def _failure_header(state: str) -> str:
+    return f"[venv] uv sync from uv.lock failed for .venv-3.10 (exit 1; venv afterwards: {state})"
+
+
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
+def test_a_quiet_failed_sync_writes_all_of_uv_s_stderr_as_one_plain_block(
+    stub_uv_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=1)
+    recorder = _WriteRecorder()
+    monkeypatch.setattr(sys, "stderr", recorder)
+
+    assert ensure_project_venv_at(stub_uv_project, stub_uv_project / ".venv-3.10", None, quiet=True) is None
+
+    blocks = [w for w in recorder.writes if _failure_header("venv") in w]
+    assert len(blocks) == 1, f"the failure is reported once, as one write: {recorder.writes!r}"
+    lines = blocks[0].splitlines()
+    assert lines[0] == _failure_header("venv") + ":", "in JSON mode uv's stderr follows the header"
+    assert f"    error: {_SYNC_MARKER}" in lines, "uv's FIRST line, its error, rides in the header's write: no tail cap"
+    assert f"    {_SYNC_LAST_FILLER}" in lines, "uv's last line arrives in the same write as the header"
+    assert len(lines) == 1 + 2 + _SYNC_FILLER_LINES, "every line uv wrote, each on its own line"
+    assert _ESC not in recorder.getvalue(), "no escape byte reaches a CI log"
+    assert f"    {_SYNC_COLOURED}" in lines, "a coloured line is kept, its colour codes removed"
+
+
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
+def test_a_text_mode_failed_sync_streams_uv_live_and_adds_a_bare_header(
+    stub_uv_project: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=1)
+    recorder = _WriteRecorder()
+    monkeypatch.setattr(sys, "stderr", recorder)
+
+    assert ensure_project_venv_at(stub_uv_project, stub_uv_project / ".venv-3.10", None, quiet=False) is None
+
+    # uv inherits the terminal's stderr, so its lines reach fd 2 directly while it runs; anything
+    # bmk prints goes through sys.stderr, the recorder.
+    live = capfd.readouterr().err
+    assert live.count(f"error: {_SYNC_MARKER}") == 1, "uv's output streams live, straight from uv"
+    assert _SYNC_LAST_FILLER in live
+    echoed = recorder.getvalue()
+    assert _SYNC_MARKER not in echoed, "bmk does not print uv's lines a second time"
+    assert _failure_header("venv") in echoed.splitlines(), "no trailing colon: uv's output is above it"
 
 
 @pytest.mark.os_posix

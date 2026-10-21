@@ -57,7 +57,7 @@ def _run_that_creates_venv_on_uv_venv() -> MagicMock:
 
 @contextmanager
 def _faked_uv(run: MagicMock) -> Generator[MagicMock, None, None]:
-    """Patch both of venv.py's uv runners with ``run``: ``uv sync`` goes through the stderr-keeping one."""
+    """Patch both of venv.py's uv runners with ``run``: a quiet ``uv sync`` goes through the stderr-keeping one."""
 
     def keeping_stderr(
         argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None

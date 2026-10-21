@@ -11,10 +11,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **A failed `uv sync` while provisioning a venv now shows uv's own error, in every output mode.**
   In JSON mode (the default) the sync's stderr used to be discarded and the failure line only
   suggested a text-mode re-run, which loses the evidence of an intermittent failure. The line now
-  reads `[venv] uv sync from uv.lock failed for <venv> (exit <rc>; venv afterwards: <state>):`,
-  where the state is `venv`, `directory without pyvenv.cfg`, `empty directory` or `absent`, and in
-  JSON mode it is followed by the last 20 lines of uv's stderr, colour codes removed. In text mode
-  uv's stderr is already on screen, so only that line is added.
+  reads `[venv] uv sync from uv.lock failed for <venv> (exit <rc>; venv afterwards: <state>)`,
+  where the state is `venv`, `directory without pyvenv.cfg`, `empty directory` or `absent`. In
+  JSON mode a colon and ALL of uv's stderr follow it, indented, colour codes removed, written as
+  one block so parallel `test-all` cells cannot interleave inside it. In text mode uv's output
+  streams live as before, with its progress display, so only that line is added after it.
 
 ## [3.22.1] 2026-10-21 15:44:41
 

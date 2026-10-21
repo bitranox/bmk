@@ -775,15 +775,16 @@ def _sync_from_lock(cwd: Path, venv: Path, python: Path, *, quiet: bool) -> bool
         return None
     argv = ["uv", "sync", "--locked", "--python", str(python), "--no-default-groups", *_sync_extras(cwd)]
     env = {**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)}
-    rc, stderr = _run_keeping_stderr(argv, cwd, quiet=quiet, env=env)
+    if quiet:
+        rc, stderr = _run_keeping_stderr(argv, cwd, quiet=True, env=env)
+    else:
+        # Text mode inherits the terminal: a piped stderr would hold back a multi-minute first sync
+        # until uv exits, and uv drops its progress display when stderr is not a terminal.
+        rc, stderr = _run(argv, cwd, quiet=False, env=env), ""
     if rc == 0:
         return True
     _report_failed_sync(venv, rc, stderr, quiet=quiet)
     return False
-
-
-# How much of uv's stderr a failed sync shows: its error is at the end, after the resolver chatter.
-_SYNC_STDERR_TAIL = 20
 
 
 def _report_failed_sync(venv: Path, rc: int, stderr: str, *, quiet: bool) -> None:
@@ -791,15 +792,19 @@ def _report_failed_sync(venv: Path, rc: int, stderr: str, *, quiet: bool) -> Non
 
     Always printed, never gated on ``quiet``: the caller degrades silently to an ERROR, and the
     failure is intermittent, so asking for a text-mode re-run would lose the very evidence it
-    asks for. When not quiet, uv's stderr was already shown, so only the header is printed.
+    asks for. When not quiet, uv's output already streamed above, so only the header is printed.
+
+    When quiet, ALL of uv's stderr follows, uncapped: uv puts its verdict first and the detail
+    after it (uv 0.13.0, a failing build: ``error: Failed to build`` on line 6 of 26), so any tail
+    drops the cause, and the block prints only on a failure. The block goes out as ONE write,
+    because parallel test-all cells share this stderr and only the header names the venv.
     """
-    print(
-        f"[venv] uv sync from uv.lock failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)}):",
-        file=sys.stderr,
-    )
+    header = f"[venv] uv sync from uv.lock failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)})"
+    lines = [header]
     if quiet:
-        for line in _ANSI_SGR.sub("", stderr).splitlines()[-_SYNC_STDERR_TAIL:]:
-            print(f"    {line}", file=sys.stderr)
+        lines = [f"{header}:", *(f"    {line}" for line in _ANSI_SGR.sub("", stderr).splitlines())]
+    sys.stderr.write("\n".join(lines) + "\n")
+    sys.stderr.flush()
 
 
 def _venv_state(venv: Path) -> str:
