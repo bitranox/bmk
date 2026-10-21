@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.1] 2026-10-21 15:44:41
+
 ### Fixed
 
 - **A hand-placed `exclude-newer-package` pin is no longer removed while the cooldown still
