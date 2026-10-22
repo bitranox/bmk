@@ -157,6 +157,8 @@ class StubUv:
             f'printf "%s\\n" "{_CALL_SEPARATOR}" "$(pwd -P)" "${{UV_PROJECT_ENVIRONMENT-{_UNSET}}}" '
             f'"${{VIRTUAL_ENV+set}}" "$@" >> {shlex.quote(str(self.log))}\n'
             "inside() {\n"
+            # The match is textual, so a `..` component would climb out of tmp_path unseen.
+            '  case "$1" in */../*|*/..) return 1 ;; esac\n'
             f'  case "$1" in {allowed}/*) return 0 ;; *) return 1 ;; esac\n'
             "}\n"
             'case "$1" in\n'

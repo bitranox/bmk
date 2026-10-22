@@ -71,6 +71,9 @@ def lock_holder() -> Iterator[object]:
     for proc in procs:
         proc.kill()
         proc.wait(timeout=10)
+        # Close the pipe too, or its file object is collected later as an unraisable ResourceWarning.
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 # The installed CPython 3.12 the rebuild check is told about, one patch ahead of the venv's.
