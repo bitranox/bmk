@@ -324,21 +324,15 @@ def _fake_venv(tmp_path: Path, *, cfg_says: str) -> Path:
 
 
 @pytest.mark.os_agnostic
-def test_venv_version_asks_the_interpreter(tmp_path: Path) -> None:
-    v = _real_venv_with_stale_cfg(tmp_path)
-
-    assert venv_mod.venv_version(v) == _RUNNING_VERSION
-
-
-@pytest.mark.os_agnostic
-def test_venv_version_ignores_a_stale_pyvenv_cfg(tmp_path: Path) -> None:
+def test_venv_version_asks_the_interpreter_and_ignores_a_stale_pyvenv_cfg(tmp_path: Path) -> None:
     """The exact post-upgrade state: the cfg names one version, the interpreter is another.
 
-    Returning the cfg text here is what would trigger a needless full rebuild.
+    Returning the cfg text here is what would trigger a needless full rebuild; the running
+    version is the only right answer, which also rules out every other wrong one.
     """
     v = _real_venv_with_stale_cfg(tmp_path)
 
-    assert venv_mod.venv_version(v) != _STALE_CFG_VERSION
+    assert venv_mod.venv_version(v) == _RUNNING_VERSION
 
 
 @pytest.mark.os_agnostic
@@ -533,6 +527,9 @@ def test_the_listing_asks_for_downloads_whatever_python_downloads_says(
     Then "nothing on offer" would read as "current" and a stale minor would never be upgraded.
     `--allow-python-downloads` makes the listing show what is on offer regardless (measured, uv
     0.13.0: 13 download entries again under a pyproject `manual` and under UV_PYTHON_DOWNLOADS=never).
+
+    The stub uv only records its argv, so this pins that bmk passes the flag; what uv does with
+    it is the measurement above, not something this test can see.
     """
     monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
 
