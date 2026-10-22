@@ -110,16 +110,22 @@ def _locked_project(ctx: StageContext, sink: OutputSink) -> _dependencies.Locked
     out = sink if quiet else None
     venv = resolve_project_venv(ctx.project_dir, ctx.env)
 
+    def would_sync() -> bool:
+        return not venv_sync_disabled(ctx.env) and is_venv(venv)
+
     def sync() -> bool | None:
-        if venv_sync_disabled(ctx.env) or not is_venv(venv):
+        if not would_sync():
             return None
         minor = desired_python_minor(ctx.project_dir)
         return ensure_project_venv_at(ctx.project_dir, venv, minor, quiet=quiet, stream=out) is not None
 
+    # Only a re-sync that would RUN can be skipped: when provisioning left no venv, sync() has
+    # nothing to do and the stage passes, so the gates degrade to bmk's own interpreter instead of
+    # the pipeline stopping here.
     return _dependencies.LockedProject(
         upgrade=lambda: lock_project(ctx.project_dir, quiet=quiet, upgrade=True),
         sync=sync,
-        sync_already_failed=ctx.venv_provisioning is VenvProvisioning.FAILED,
+        sync_already_failed=ctx.venv_provisioning is VenvProvisioning.FAILED and would_sync(),
         out=out,
     )
 

@@ -136,7 +136,8 @@ class VenvProvisioning(Enum):
 
     Attributes:
         PROVISIONED: The venv was created or updated and synced.
-        FAILED: Provisioning ran and could not produce a venv; it already said why on stderr.
+        FAILED: Provisioning ran and did not end with a synced venv (a failed ``uv venv``, lock,
+            sync or fallback install, a lock wait that gave up, or no ``pyproject.toml``).
         SKIPPED: ``BMK_NO_VENV_SYNC=1`` opted out of it.
         NOT_ATTEMPTED: The pipeline does not use the project venv, or no provisioning ran at all.
 

@@ -238,7 +238,7 @@ _LOCK_MOVES = _LOCK_WRITE + ' && echo "# lock written by stub pid $$" >> uv.lock
 
 
 def _skip_line(project: Path) -> str:
-    return f"{project}: venv sync already failed above; uv.lock unchanged by the update, not retrying"
+    return f"{project}: venv provisioning already failed above; uv.lock unchanged by the update, not retrying"
 
 
 @pytest.fixture
@@ -274,6 +274,24 @@ def test_a_failed_provisioning_is_reported_once_when_the_update_leaves_the_lock_
     assert _sync_calls(stub_uv) == 1, "an unchanged lock is not synced a second time"
     assert f"[deps_update] (exit code: 1)\n{_skip_line(deps_project)}\n" in out
     assert "(no output captured)" not in out
+
+
+@pytest.mark.os_posix
+def test_a_failed_provisioning_that_left_no_venv_still_degrades_instead_of_failing_the_stage(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """With no venv there is no re-sync to skip: the stage passes and the gates fall back, as before."""
+    from bmk.adapters.cli.commands._shared import run_command
+
+    stub_uv.install(venv_rc=1, lock_aftermath=_LOCK_WRITE)
+
+    rc = run_command(deps_project, (), command_prefix="deps_update", output_format=ToolOutputFormat.JSON)
+
+    out, err = capfd.readouterr()
+    assert rc == 0, f"a provisioning failure degrades, it does not abort:\n{out}\n{err}"
+    assert not (deps_project / ".venv").exists()
+    assert _sync_calls(stub_uv) == 0
+    assert "already failed above" not in out + err
 
 
 @pytest.mark.os_posix

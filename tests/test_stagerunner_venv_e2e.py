@@ -213,7 +213,7 @@ def test_an_update_that_leaves_the_lock_unchanged_reports_the_failed_sync_once(
     headers = [line for line in (out + err).splitlines() if _HEADER.fullmatch(line.removesuffix(":"))]
     assert rc == 1
     assert len(headers) == 1, f"one failure block per run: {headers!r}"
-    skip = f"{failing_project}: venv sync already failed above; uv.lock unchanged by the update, not retrying"
+    skip = f"{failing_project}: venv provisioning already failed above; uv.lock unchanged by the update, not retrying"
     assert f"[deps_update] (exit code: 1)\n{skip}\n" in out
     assert err.count(_MARKER) == 1, "uv's reason, from the one sync that ran"
 

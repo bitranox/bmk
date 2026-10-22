@@ -24,10 +24,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   says why instead of `(no output captured)`.** Provisioning syncs the venv before the pipeline, and
   the `deps_update` stage synced it again after its `uv lock --upgrade`, so a failing sync printed
   its `[venv] ...` block twice while the stage's own block stayed empty: the re-sync wrote to stderr,
-  past the stage's capture. When provisioning already failed this run and the upgrade left `uv.lock`
-  byte-for-byte unchanged, the stage no longer retries; it fails with one line,
-  `<project>: venv sync already failed above; uv.lock unchanged by the update, not retrying`. When
-  the lock did change it still re-syncs, and in JSON mode the `[venv]` report and the
+  past the stage's capture. When provisioning already failed this run on a venv that still exists
+  and the upgrade left `uv.lock` byte-for-byte unchanged, the stage no longer retries; it fails with
+  one line, `<project>: venv provisioning already failed above; uv.lock unchanged by the update, not
+  retrying`. A failed provisioning that left no venv still passes the stage, so the gates fall back
+  to bmk's own interpreter as before. When the lock did change it still re-syncs, and in JSON mode
+  the `[venv]` report and the
   `... failed after the floor update` line now land in the stage's captured output (text mode keeps
   them on stderr). `BMK_NO_VENV_SYNC=1` now also skips that re-sync, as it already skipped
   provisioning.

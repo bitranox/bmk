@@ -1387,9 +1387,10 @@ class LockedProject:
         upgrade: Runs ``uv lock --upgrade``: every package at its newest admitted release.
         sync: Brings the project venv to the lock; True synced, False failed, None nothing to sync
             (no project venv, or ``BMK_NO_VENV_SYNC=1``).
-        sync_already_failed: This run's provisioning sync already failed and said why. A lock the
-            upgrade left byte-for-byte unchanged is then not synced again: it could only fail the
-            same way and print the same report a second time.
+        sync_already_failed: This run's provisioning already failed on a venv that ``sync`` would
+            sync again. A lock the upgrade left byte-for-byte unchanged is then not synced again: it
+            could only fail the same way and print the same report a second time. False when
+            ``sync`` would do nothing (no venv), so that case still passes as it did.
         out: Where the update's failure lines go; None is the process's stderr, looked up when
             written. A JSON-mode stage passes its sink, so the reason lands in its captured output.
     """
@@ -1630,7 +1631,7 @@ def _upgrade_and_sync(locked: LockedProject, pyproject: Path) -> int:
         return 1
     if locked.sync_already_failed and _read_bytes(lock_file) == before:
         _say(
-            f"{pyproject.parent}: venv sync already failed above; uv.lock unchanged by the update, not retrying",
+            f"{pyproject.parent}: venv provisioning already failed above; uv.lock unchanged by the update, not retrying",
             locked.out,
         )
         return 1
