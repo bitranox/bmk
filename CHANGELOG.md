@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.4] 2026-10-22 19:00:45
+
 ### Changed
 
 - **Every venv-provisioning failure now says why, not only a failed sync.** A failed `uv venv`,
