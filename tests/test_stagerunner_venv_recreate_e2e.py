@@ -67,15 +67,20 @@ def offline_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return project
 
 
-def _age_version_info(venv: Path, interpreter_version: str) -> None:
-    """Make ``pyvenv.cfg`` claim an older patch than the interpreter, as an old uv's venv does after a patch move."""
+def _age_version_info(venv: Path, interpreter_version: str) -> str:
+    """Make ``pyvenv.cfg`` claim an older patch than the interpreter, as an old uv's venv does after a patch move.
+
+    Returns the aged ``version_info`` line, so the caller can check uv's recreate replaced it.
+    """
     major, minor, patch = (int(part) for part in interpreter_version.split("."))
     if patch == 0:
         pytest.skip(f"the venv's interpreter is {interpreter_version}: there is no older patch to claim")
     cfg = venv / "pyvenv.cfg"
-    text, count = _VERSION_INFO.subn(f"version_info = {major}.{minor}.{patch - 1}", cfg.read_text(encoding="utf-8"))
+    aged = f"version_info = {major}.{minor}.{patch - 1}"
+    text, count = _VERSION_INFO.subn(aged, cfg.read_text(encoding="utf-8"))
     assert count == 1, f"one version_info line expected in {cfg}"
     cfg.write_text(text, encoding="utf-8")
+    return aged
 
 
 def test_a_310_venv_that_uv_sync_recreates_is_rebuilt_whole(
@@ -91,7 +96,7 @@ def test_a_310_venv_that_uv_sync_recreates_is_rebuilt_whole(
             "outside the venv, so uv's recreate never asks for a deleted interpreter here"
         )
     version = _python_says(python, "import platform; print(platform.python_version())")
-    _age_version_info(venv, version)
+    aged = _age_version_info(venv, version)
     shutil.rmtree(tmp_path / "uv-cache")
     capfd.readouterr()
 
@@ -100,3 +105,6 @@ def test_a_310_venv_that_uv_sync_recreates_is_rebuilt_whole(
     err = capfd.readouterr().err
     assert "[venv] uv sync from uv.lock failed" not in err, err
     assert _python_says(venv_python(venv), "import platform; print(platform.python_version())") == version
+    # The aged line surviving would mean uv never recreated the venv, so this test would pass on the
+    # unfixed code too (a uv that stops recreating, or a second matching interpreter on the runner).
+    assert aged not in (venv / "pyvenv.cfg").read_text(encoding="utf-8"), "uv sync did not recreate the venv"
