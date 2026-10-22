@@ -258,7 +258,11 @@ def _real_venv_that_records_each_start(tmp_path: Path) -> tuple[Path, Path, Path
     project.mkdir()
     (project / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
     venv = project / ".venv"
-    EnvBuilder(with_pip=False).create(str(venv))
+    # Symlinks on POSIX, as `python -m venv` makes them. A copy is unusable when this suite itself
+    # runs in a venv on CPython 3.10: there sys._base_executable is the outer venv's python, so the
+    # copy's pyvenv.cfg home names that venv's bin, which holds no stdlib, and the copied
+    # interpreter dies at startup before any .pth runs.
+    EnvBuilder(with_pip=False, symlinks=sys.platform != "win32").create(str(venv))
     record = tmp_path / "venv-python-started"
     site_packages = next(venv.glob("**/site-packages"))
     (site_packages / "zz_record_start.pth").write_text(
