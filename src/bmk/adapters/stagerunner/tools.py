@@ -93,9 +93,15 @@ def ensure_audit_pip_argv(ctx: StageContext) -> list[str]:
 
 
 def pip_audit_argv(ctx: StageContext) -> list[str]:
+    """``pip-audit --skip-editable``: the project's own editable install is never looked up on PyPI.
+
+    For an unpublished project that lookup is a 404 pip-audit skips, until PyPI's edge answers 503
+    and the gate goes red with nothing wrong in the tree. Auditing the project's PUBLISHED release
+    says nothing about the working tree anyway; its dependencies are not editable and still are.
+    """
     ignores = pip_audit_ignore_flags(ctx.project_dir / "pyproject.toml")
     fmt = ["-f", "json"] if _is_json(ctx) else []
-    return ["pip-audit", *ignores, *fmt]
+    return ["pip-audit", "--skip-editable", *ignores, *fmt]
 
 
 def pyright_argv(ctx: StageContext) -> list[str]:

@@ -6,6 +6,8 @@ import dataclasses
 import os
 from typing import TYPE_CHECKING
 
+import pytest
+
 from bmk.adapters.stagerunner import tools
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.domain.enums import ToolOutputFormat
@@ -107,11 +109,29 @@ def test_pip_audit_argv_with_ignores_and_json(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.pip-audit]\nignore-vulns = ["GHSA-x"]\n', encoding="utf-8")
     assert tools.pip_audit_argv(_ctx(tmp_path, ToolOutputFormat.JSON)) == [
         "pip-audit",
+        "--skip-editable",
         "--ignore-vuln=GHSA-x",
         "-f",
         "json",
     ]
-    assert tools.pip_audit_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)) == ["pip-audit", "--ignore-vuln=GHSA-x"]
+    assert tools.pip_audit_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)) == [
+        "pip-audit",
+        "--skip-editable",
+        "--ignore-vuln=GHSA-x",
+    ]
+
+
+@pytest.mark.parametrize("fmt", [ToolOutputFormat.JSON, ToolOutputFormat.TEXT])
+def test_pip_audit_never_looks_up_the_project_s_own_editable_install(tmp_path: Path, fmt: ToolOutputFormat) -> None:
+    """The project sits in its venv as an editable install, and pip-audit would ask PyPI for it.
+
+    For an unpublished project that lookup is a 404 pip-audit skips - until PyPI's edge answers
+    503 instead, and the gate goes red with nothing wrong in the tree. ``--skip-editable`` drops the
+    package before the query is built (pip-audit 2.10.1, ``_service/pypi.py``: a skipped dependency
+    returns before the URL). Its dependencies are not editable, so they are still audited.
+    """
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    assert "--skip-editable" in tools.pip_audit_argv(_ctx(tmp_path, fmt))
 
 
 def test_ensure_audit_pip_argv_targets_pinned_interpreter(tmp_path: Path) -> None:

@@ -15,6 +15,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `No module named pytest` instead of naming the install that failed. The target now comes from
   `pyproject.toml` - `.[dev]` when the extra is declared, `.` otherwise - and a failed install is
   reported as one.
+- **`pip_audit` no longer reddens an unpublished project when PyPI answers 503.** The stage
+  audited the project's own editable install like any dependency, so pip-audit asked PyPI for
+  `/pypi/<project>/<version>/json`. For a project that is not published that is a 404 pip-audit
+  skips, but an edge `503 Backend is unhealthy` failed the gate with nothing wrong in the tree.
+  The stage now passes `--skip-editable`: the project's own package is skipped before any query,
+  and its dependencies, which are not editable, are still audited.
 
 ## [3.22.4] 2026-10-22 19:00:45
 
