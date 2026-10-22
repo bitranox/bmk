@@ -271,29 +271,44 @@ def fetch_latest_version(package_name: str) -> str | None:
     return ""
 
 
-def _fetch_latest_version_below(package_name: str, upper_bound: str) -> str | None:
-    """Fetch the latest version of a package that is below the upper bound.
+def _fetch_latest_version_within(package_name: str, ceiling: SpecifierSet) -> str | None:
+    """The newest final release of ``package_name`` that ``ceiling`` admits, or None.
 
     Args:
         package_name: Name of the package
-        upper_bound: Upper version bound (exclusive), e.g., "9" for "<9"
+        ceiling: The requirement's upper bounds and exclusions (``<9``, ``<=2``, ``!=2.0``)
 
     Returns:
-        Latest version string below the bound, or None if not found
+        That release's version string, or None when PyPI lists none
     """
-    data = _fetch_pypi_data(package_name)
-    if data is None:
+    releases = _releases_of(package_name)
+    if not releases:
         return None
+    finals = [(v, text) for text in releases if (v := _version_or_none(text)) is not None and not v.is_prerelease]
+    within = [(v, text) for v, text in finals if ceiling.contains(v)]
+    return max(within)[1] if within else None
 
-    releases = data.get("releases")
-    if not isinstance(releases, dict) or not releases:
-        return None
 
-    typed_releases = cast("dict[str, Any]", releases)
+def _ceiling_of_spec(spec: str, upper_bound: str) -> SpecifierSet:
+    """The upper bounds and exclusions of ``spec``; ``<upper_bound`` when it is not valid PEP 508."""
+    specifier = _specifier_of(spec)
+    if specifier is not None:
+        return _ceiling_of(specifier)
+    return SpecifierSet(f"<{upper_bound}") if upper_bound else SpecifierSet()
 
-    finals = [(v, text) for text in typed_releases if (v := _version_or_none(text)) is not None and not v.is_prerelease]
-    below = [(v, text) for v, text in finals if not _version_gte(text, upper_bound)]
-    return max(below)[1] if below else None
+
+def _judge_against_ceiling(
+    name: str, *, min_version: str, ceiling: SpecifierSet, latest: str
+) -> tuple[DependencyStatus, str]:
+    """Status and report text for a floor whose newest release ``ceiling`` excludes.
+
+    Judged on the whole ceiling, so ``<=`` and ``!=`` bound the suggestion as ``<`` does: a floor
+    raised past them is a requirement nothing satisfies.
+    """
+    in_range = _fetch_latest_version_within(name, ceiling)
+    if in_range is None or _version_gte(min_version, in_range):
+        return DependencyStatus.PINNED, f"{latest} (pinned {ceiling})"
+    return DependencyStatus.OUTDATED, f"{in_range} (max {ceiling}, absolute: {latest})"
 
 
 def _version_or_none(text: str) -> Version | None:
@@ -362,26 +377,17 @@ def _extract_dependencies_from_list(
 
         # Fetch latest version (respecting upper bound if present)
         latest_absolute = fetch_latest_version(name)
+        ceiling = _ceiling_of_spec(original_spec, upper_bound)
         if latest_absolute is None:
             status = DependencyStatus.ERROR
             latest_str = "not found"
         elif not min_version:
             status = DependencyStatus.UNKNOWN
             latest_str = latest_absolute
-        elif upper_bound and _version_gte(latest_absolute, upper_bound):
-            # Latest version exceeds our upper bound - check for updates within range
-            latest_in_range = _fetch_latest_version_below(name, upper_bound)
-            if latest_in_range is None:
-                status = DependencyStatus.PINNED
-                latest_str = f"{latest_absolute} (pinned <{upper_bound})"
-            elif _version_gte(min_version, latest_in_range):
-                # We're at the latest version within the allowed range
-                status = DependencyStatus.PINNED
-                latest_str = f"{latest_absolute} (pinned <{upper_bound})"
-            else:
-                # There's a newer version within the allowed range
-                status = DependencyStatus.OUTDATED
-                latest_str = f"{latest_in_range} (max <{upper_bound}, absolute: {latest_absolute})"
+        elif not ceiling.contains(latest_absolute, prereleases=True):
+            status, latest_str = _judge_against_ceiling(
+                name, min_version=min_version, ceiling=ceiling, latest=latest_absolute
+            )
         else:
             # No upper bound constraint or latest is within range
             status = compare_versions(min_version, latest_absolute)

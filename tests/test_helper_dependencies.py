@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import httpx2
 import orjson
 import pytest
+from packaging.specifiers import SpecifierSet
 
 from bmk.adapters.stagerunner.helpers._dependencies import (
     DependencyInfo,
@@ -19,7 +20,7 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
     _build_updated_spec,
     _extract_all_dependencies,
     _extract_dependencies_from_list,
-    _fetch_latest_version_below,
+    _fetch_latest_version_within,
     _fetch_pypi_data,
     _find_packages_needing_install,
     _installed_versions,
@@ -274,13 +275,13 @@ def test_fetch_latest_version_returns_empty_when_version_missing(mock_pypi: Magi
 
 
 # ---------------------------------------------------------------------------
-# _fetch_latest_version_below - filtering, prerelease skip, sorting, empty
+# _fetch_latest_version_within - filtering, prerelease skip, sorting, empty
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_returns_highest_within_bound(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_returns_highest_within_bound(mock_pypi: MagicMock) -> None:
     """Returns the highest version below the upper bound."""
     mock_pypi.return_value = {
         "releases": {
@@ -292,14 +293,14 @@ def test_fetch_latest_version_below_returns_highest_within_bound(mock_pypi: Magi
         }
     }
 
-    result = _fetch_latest_version_below("pytest", "9")
+    result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
     assert result == "8.5.0"
 
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_skips_prereleases(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_skips_prereleases(mock_pypi: MagicMock) -> None:
     """Prerelease versions (alpha, beta, rc, dev) are excluded."""
     mock_pypi.return_value = {
         "releases": {
@@ -312,36 +313,36 @@ def test_fetch_latest_version_below_skips_prereleases(mock_pypi: MagicMock) -> N
         }
     }
 
-    result = _fetch_latest_version_below("pytest", "9")
+    result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
     assert result == "8.0.0"
 
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_returns_none_when_pypi_fails(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_returns_none_when_pypi_fails(mock_pypi: MagicMock) -> None:
     """Returns None when PyPI data is unavailable."""
     mock_pypi.return_value = None
 
-    result = _fetch_latest_version_below("pytest", "9")
+    result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
     assert result is None
 
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_returns_none_when_no_releases(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_returns_none_when_no_releases(mock_pypi: MagicMock) -> None:
     """Returns None when releases dict is empty."""
     mock_pypi.return_value = {"releases": {}}
 
-    result = _fetch_latest_version_below("pytest", "9")
+    result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
     assert result is None
 
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_returns_none_when_all_above_bound(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_returns_none_when_all_above_bound(mock_pypi: MagicMock) -> None:
     """Returns None when all versions are at or above the upper bound."""
     mock_pypi.return_value = {
         "releases": {
@@ -350,18 +351,18 @@ def test_fetch_latest_version_below_returns_none_when_all_above_bound(mock_pypi:
         }
     }
 
-    result = _fetch_latest_version_below("pytest", "9")
+    result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
     assert result is None
 
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_returns_none_when_releases_not_dict(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_returns_none_when_releases_not_dict(mock_pypi: MagicMock) -> None:
     """Returns None when releases field is not a dict."""
     mock_pypi.return_value = {"releases": "not-a-dict"}
 
-    result = _fetch_latest_version_below("pytest", "9")
+    result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
     assert result is None
 
@@ -404,7 +405,7 @@ def test_extract_dependencies_skips_direct_url_references(mock_latest: MagicMock
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below")
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within")
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version")
 def test_extract_dependencies_detects_pinned_within_range(mock_latest: MagicMock, mock_below: MagicMock) -> None:
     """When min_version equals latest-in-range, status is pinned."""
@@ -419,7 +420,7 @@ def test_extract_dependencies_detects_pinned_within_range(mock_latest: MagicMock
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below")
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within")
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version")
 def test_extract_dependencies_detects_outdated_within_range(mock_latest: MagicMock, mock_below: MagicMock) -> None:
     """When a newer version exists within the allowed range, status is outdated."""
@@ -434,7 +435,7 @@ def test_extract_dependencies_detects_outdated_within_range(mock_latest: MagicMo
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below")
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within")
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version")
 def test_extract_dependencies_pinned_when_below_returns_none(mock_latest: MagicMock, mock_below: MagicMock) -> None:
     """When no version within range is found, status is pinned."""
@@ -454,7 +455,7 @@ def test_extract_dependencies_pinned_when_below_returns_none(mock_latest: MagicM
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_project_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [project].dependencies."""
     config = _make_config(
@@ -475,7 +476,7 @@ def test_extract_all_dependencies_project_dependencies(mock_below: MagicMock, mo
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_optional_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [project.optional-dependencies]."""
     config = _make_config(
@@ -498,7 +499,7 @@ def test_extract_all_dependencies_optional_dependencies(mock_below: MagicMock, m
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_build_system(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [build-system].requires."""
     config = _make_config(
@@ -516,7 +517,7 @@ def test_extract_all_dependencies_build_system(mock_below: MagicMock, mock_lates
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_dependency_groups(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [dependency-groups] (PEP 735)."""
     config = _make_config(
@@ -536,7 +537,7 @@ def test_extract_all_dependencies_dependency_groups(mock_below: MagicMock, mock_
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_pdm_dev_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [tool.pdm.dev-dependencies]."""
     config = _make_config(
@@ -560,7 +561,7 @@ def test_extract_all_dependencies_pdm_dev_dependencies(mock_below: MagicMock, mo
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_poetry_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [tool.poetry.dependencies]."""
     config = _make_config(
@@ -584,7 +585,7 @@ def test_extract_all_dependencies_poetry_dependencies(mock_below: MagicMock, moc
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_poetry_dev_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [tool.poetry.dev-dependencies]."""
     config = _make_config(
@@ -608,7 +609,7 @@ def test_extract_all_dependencies_poetry_dev_dependencies(mock_below: MagicMock,
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_poetry_group_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [tool.poetry.group.*.dependencies]."""
     config = _make_config(
@@ -636,7 +637,7 @@ def test_extract_all_dependencies_poetry_group_dependencies(mock_below: MagicMoc
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_extract_all_dependencies_uv_dev_dependencies(mock_below: MagicMock, mock_latest: MagicMock) -> None:
     """Extracts dependencies from [tool.uv.dev-dependencies]."""
     config = _make_config(
@@ -663,7 +664,7 @@ def test_extract_all_dependencies_uv_dev_dependencies(mock_below: MagicMock, moc
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.fetch_latest_version", return_value="2.0.0")
-@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_below", return_value=None)
+@patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_latest_version_within", return_value=None)
 def test_check_dependencies_reads_pyproject(mock_below: MagicMock, mock_latest: MagicMock, tmp_path: Path) -> None:
     """check_dependencies reads a pyproject.toml and returns DependencyInfo list."""
     pyproject = tmp_path / "pyproject.toml"
@@ -1632,7 +1633,7 @@ def test_fetch_pypi_data_returns_none_on_non_404_http_error(mock_stream: MagicMo
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
-def test_fetch_latest_version_below_skips_unparseable_versions(mock_pypi: MagicMock) -> None:
+def test_fetch_latest_version_within_skips_unparseable_versions(mock_pypi: MagicMock) -> None:
     """Versions that don't parse to numeric tuples are skipped."""
     mock_pypi.return_value = {
         "releases": {
@@ -1641,7 +1642,7 @@ def test_fetch_latest_version_below_skips_unparseable_versions(mock_pypi: MagicM
         }
     }
 
-    result = _fetch_latest_version_below("pkg", "9")
+    result = _fetch_latest_version_within("pkg", SpecifierSet("<9"))
 
     assert result == "2.0.0"
 

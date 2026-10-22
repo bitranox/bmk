@@ -405,6 +405,32 @@ def test_a_cap_or_exclusion_written_before_the_floor_is_not_read_as_the_floor(tm
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ("hypothesis>=6.168.3,<=6.168.4", "hypothesis>=6.168.4,<=6.168.4"),
+        ("hypothesis>=6.168.3,!=6.169.0", "hypothesis>=6.168.5,!=6.169.0"),
+    ],
+    ids=["inclusive-cap", "exclusion"],
+)
+def test_a_project_that_states_no_python_versions_keeps_the_floor_inside_its_own_bounds(
+    tmp_path: Path, pypi: _FakeIndex, declared: str, expected: str
+) -> None:
+    """With no Python to hold the floor to, only the main path judges it, and ``<=`` and ``!=`` bound it too."""
+    releases = {v: _release(">=3.10") for v in ("6.168.3", "6.168.4", "6.168.5", "6.169.0")}
+    pypi.serve("hypothesis", {"info": {"version": "6.169.0"}, "releases": releases})
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        f'[project]\nname = "demo"\nversion = "1.0.0"\ndependencies = ["{declared}"]\n', encoding="utf-8"
+    )
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+    (written,) = rtoml.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+
+    assert written == expected
+
+
+@pytest.mark.os_agnostic
 def test_a_requirement_with_only_an_upper_bound_is_never_reported_outdated(tmp_path: Path, pypi: _FakeIndex) -> None:
     pypi.serve("foo", {"info": {"version": "2.5"}, "releases": {v: _release(">=3.8") for v in ("1.0", "2.0", "2.5")}})
     pyproject = _write_pyproject(tmp_path, dev='"foo<=3"')

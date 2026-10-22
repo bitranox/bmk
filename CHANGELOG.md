@@ -31,6 +31,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   prerelease. So `pkg>=8.0b2` on a package whose `8.0b2` needs a newer Python stayed in place
   where `8.0b1` installs, and a package with only prereleases was reported as `no release
   installs` although uv installs one. Both cases now follow uv.
+- **A floor raised without a Python to hold it to stays inside the requirement's own bounds.** In
+  a project that states no Python versions, only bare `<` was read as a ceiling, so
+  `hypothesis>=6.168.3,<=6.168.4` was rewritten to `hypothesis>=6.169.0,<=6.168.4`, which nothing
+  satisfies, and an `!=` exclusion of the newest release was ignored the same way. The update now
+  judges the whole ceiling (`<`, `<=`, `!=`), as the Python hold already did.
 
 ## [3.22.4] 2026-10-22 19:00:45
 

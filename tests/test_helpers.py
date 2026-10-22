@@ -1063,7 +1063,7 @@ class TestExtractDependenciesFromList:
     def test_upper_bound_pinned(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Pinned when latest exceeds upper bound and no version in range."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "9.0.0")  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(deps_module, "_fetch_latest_version_below", lambda _name, _bound: None)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(deps_module, "_fetch_latest_version_within", lambda _name, _bound: None)  # type: ignore[reportUnknownLambdaType]
 
         results = deps_module._extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
 
@@ -1073,7 +1073,7 @@ class TestExtractDependenciesFromList:
     def test_upper_bound_outdated_within_range(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Outdated when a newer version exists within the allowed range."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "9.0.0")  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(deps_module, "_fetch_latest_version_below", lambda _name, _bound: "8.5.0")  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(deps_module, "_fetch_latest_version_within", lambda _name, _bound: "8.5.0")  # type: ignore[reportUnknownLambdaType]
 
         results = deps_module._extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
 
