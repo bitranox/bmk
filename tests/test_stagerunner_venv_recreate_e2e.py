@@ -108,3 +108,37 @@ def test_a_310_venv_that_uv_sync_recreates_is_rebuilt_whole(
     # The aged line surviving would mean uv never recreated the venv, so this test would pass on the
     # unfixed code too (a uv that stops recreating, or a second matching interpreter on the runner).
     assert aged not in (venv / "pyvenv.cfg").read_text(encoding="utf-8"), "uv sync did not recreate the venv"
+
+
+def test_a_310_venv_without_a_declared_minor_that_uv_sync_recreates_is_rebuilt_whole(
+    offline_project: Path, tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No classifier (``minor=None``): the sync must still ask uv for a minor, never the venv's own interpreter.
+
+    ``UV_PYTHON`` makes uv's default choice a 3.10, so ``uv venv`` with no ``--python`` builds the
+    venv the trap needs; the request bmk then sends ``uv sync`` is what decides whether the recreate
+    survives.
+    """
+    monkeypatch.setenv("UV_PYTHON", _MINOR)
+    venv = offline_project / ".venv"
+    assert ensure_project_venv_at(offline_project, venv, None, install_python=False) == venv
+    python = venv_python(venv)
+    version = _python_says(python, "import platform; print(platform.python_version())")
+    if not version.startswith(f"{_MINOR}."):
+        pytest.skip(f"UV_PYTHON={_MINOR} did not give uv venv a {_MINOR} interpreter (got {version!r})")
+    base = _python_says(python, "import sys; print(sys._base_executable)")
+    if not base or not Path(base).is_relative_to(venv):
+        pytest.skip(
+            f"precondition absent: this CPython {_MINOR} venv reports sys._base_executable {base!r}, "
+            "outside the venv, so uv's recreate never asks for a deleted interpreter here"
+        )
+    aged = _age_version_info(venv, version)
+    shutil.rmtree(tmp_path / "uv-cache")
+    capfd.readouterr()
+
+    assert ensure_project_venv_at(offline_project, venv, None, install_python=False) == venv
+
+    err = capfd.readouterr().err
+    assert "[venv] uv sync from uv.lock failed" not in err, err
+    assert _python_says(venv_python(venv), "import platform; print(platform.python_version())") == version
+    assert aged not in (venv / "pyvenv.cfg").read_text(encoding="utf-8"), "uv sync did not recreate the venv"

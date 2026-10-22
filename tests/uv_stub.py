@@ -95,6 +95,7 @@ class StubUv:
         *,
         venv_rc: int = 0,
         venv_creates: bool = True,
+        venv_reports: str | None = None,
         python_rc: int = 0,
         lock_rc: int = 0,
         lock_aftermath: str = ":",
@@ -110,6 +111,8 @@ class StubUv:
             venv_rc: Exit code of ``uv venv``; a non-zero one prints :data:`VENV_MARKER` on stderr.
             venv_creates: Whether a ``uv venv`` that exits 0 creates the venv-shaped directory; False
                 makes uv report success and leave nothing behind.
+            venv_reports: The version the created venv's ``bin/python`` prints for any command line,
+                as bmk's version probe expects; None leaves an empty, unrunnable file there.
             python_rc: Exit code of every ``uv python ...``; a non-zero ``list`` prints nothing.
             lock_rc: Exit code of ``uv lock``; a non-zero one prints :data:`LOCK_MARKER` on stderr.
             lock_aftermath: Shell run by a ``uv lock`` that succeeds, in the directory uv runs in (the
@@ -128,6 +131,7 @@ class StubUv:
             self._script(
                 venv_rc=venv_rc,
                 venv_creates=venv_creates,
+                venv_reports=venv_reports,
                 python_rc=python_rc,
                 lock_rc=lock_rc,
                 lock_aftermath=lock_aftermath,
@@ -157,6 +161,7 @@ class StubUv:
         *,
         venv_rc: int,
         venv_creates: bool,
+        venv_reports: str | None,
         python_rc: int,
         lock_rc: int,
         lock_aftermath: str,
@@ -169,6 +174,9 @@ class StubUv:
         allowed = shlex.quote(str(self._allowed))
         pip_cases = "".join(f"      {shlex.quote(target)}) rc={rc} ;;\n" for target, rc in pip_install_rc.items())
         create = '    mkdir -p "$last/bin" && echo "home = /usr" > "$last/pyvenv.cfg" && : > "$last/bin/python"\n'
+        if venv_reports is not None:
+            report = shlex.quote(f"#!/bin/sh\necho {venv_reports}\n")
+            create += f'    printf %s {report} > "$last/bin/python" && chmod +x "$last/bin/python"\n'
         # A mutating subcommand refuses a target outside tmp_path, so a `rm -rf` aftermath or a
         # `mkdir` can never reach a real venv if bmk stopped passing its own path.
         return (

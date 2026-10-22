@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -273,6 +274,37 @@ def _run(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | No
         # uv missing from PATH. Degrade to the caller's fallback rather than
         # breaking a run that may not have needed the venv at all.
         return 1
+
+
+@dataclass(frozen=True)
+class _UvRun:
+    """One provisioning uv call, as its failure report needs it.
+
+    Attributes:
+        rc: uv's exit code; 1 when uv could not be started at all.
+        stderr: What goes under a failure header: uv's captured stderr, or why uv could not be run.
+        shown_live: ``stderr`` already reached the terminal as uv ran (text mode), so a report must
+            not repeat it.
+    """
+
+    rc: int
+    stderr: str = ""
+    shown_live: bool = False
+
+
+def _spawn_failure(argv: list[str], exc: OSError) -> _UvRun:
+    """The result of a uv call that never started: uv missing from PATH, or not executable."""
+    return _UvRun(1, f"could not run {argv[0]}: {exc}")
+
+
+def _run_live(argv: list[str], cwd: Path, *, env: Mapping[str, str] | None = None) -> _UvRun:
+    """Run ``argv`` in ``cwd`` with uv's output going straight to the terminal."""
+    try:
+        # argv is built from literals and a resolved path, never from user input, and runs without a shell.
+        done = subprocess.run(argv, cwd=cwd, env=dict(env) if env is not None else _uv_env(), check=False)
+    except OSError as exc:
+        return _spawn_failure(argv, exc)
+    return _UvRun(done.returncode, shown_live=True)
 
 
 def _run_capture(argv: list[str], cwd: Path) -> str | None:
@@ -751,8 +783,9 @@ def ensure_project_venv_at(
     once per declared minor with ``venv = .venv-<minor>``). Every step is a pure function of
     ``(venv, minor)``, so nothing here assumes the default path or the newest version.
 
-    ``minor=None`` means "no declared version": uv's own interpreter choice stands and no
-    ``--python`` pin is passed - the historical default-venv behaviour.
+    ``minor=None`` means "no declared version": uv's own interpreter choice stands and ``uv venv``
+    gets no ``--python`` pin - the historical default-venv behaviour. The sync still asks for a
+    minor, the one that venv's interpreter reports (see :func:`_sync_python_request`).
 
     The venv is synced from ``uv.lock``; only when no lock can be made is it installed from
     ``pyproject.toml`` instead, with ``--exact`` AND ``--upgrade``, each covering a distinct
@@ -800,15 +833,27 @@ def _provision_locked(
     ensure_venv_ignored(cwd, venv)
     ensure_venv_typecheck_excluded(cwd, venv)
 
-    python = venv_python(venv)
-    # Ask uv sync for the MINOR, the request `uv venv` got, never for the interpreter inside the
-    # venv: uv sync may remove the venv and recreate it from that interpreter's
-    # sys._base_executable, which on CPython <= 3.10 is the venv's own bin/python - deleted by
-    # then, so uv failed and left an empty directory (bmk OPEN-WORK [19]).
-    synced = _sync_from_lock(cwd, venv, minor or str(python), quiet=quiet, stream=stream)
+    synced = _sync_from_lock(cwd, venv, _sync_python_request(venv, minor), quiet=quiet, stream=stream)
     if synced is None:
         synced = _install_from_manifest(cwd, venv, quiet=quiet, stream=stream)
     return venv if synced else None
+
+
+def _sync_python_request(venv: Path, minor: str | None) -> str:
+    """The ``--python`` request for ``uv sync``: a minor (``3.10``), never the interpreter inside ``venv``.
+
+    uv sync may remove the venv and recreate it from the requested interpreter's
+    ``sys._base_executable``, which on CPython <= 3.10 is the venv's own ``bin/python`` - deleted by
+    then, so uv failed and left an empty directory (bmk OPEN-WORK [19]). So the request is the
+    declared minor, or with none declared, the minor the venv's interpreter reports. Only when that
+    interpreter cannot report a version is its path the request: uv could not build from it either.
+    """
+    if minor:
+        return minor
+    version = venv_version(venv)
+    if version:
+        return ".".join(version.split(".")[:2])
+    return str(venv_python(venv))
 
 
 def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool, stream: SupportsWrite | None) -> bool:
@@ -818,10 +863,10 @@ def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool, strea
     that is not there, so it is reported with the exit code uv gave.
     """
     create = ["uv", "venv", *(["--python", minor] if minor else []), str(venv)]
-    rc, stderr = _run_for_report(create, cwd, quiet=quiet)
-    if rc == 0 and is_venv(venv):
+    run = _run_for_report(create, cwd, quiet=quiet)
+    if run.rc == 0 and is_venv(venv):
         return True
-    _report_failed_uv("uv venv", venv, rc, stderr, quiet=quiet, stream=stream)
+    _report_failed_uv("uv venv", venv, run, stream=stream)
     return False
 
 
@@ -832,13 +877,15 @@ def _install_from_manifest(cwd: Path, venv: Path, *, quiet: bool, stream: Suppor
     is the expected route to ``.``, so its reason would only bury the one that ended provisioning.
     """
     python = str(venv_python(venv))
-    rc, stderr = 1, ""
+    # Never reported as it stands: _INSTALL_TARGETS is never empty, so the loop always replaces it.
+    # It exists because the type checker cannot know that and would call `run` possibly unbound.
+    run = _UvRun(1)
     for target in _INSTALL_TARGETS:
         argv = ["uv", "pip", "install", "--python", python, "--exact", "--upgrade", "-e", target]
-        rc, stderr = _run_for_report(argv, cwd, quiet=quiet)
-        if rc == 0:
+        run = _run_for_report(argv, cwd, quiet=quiet)
+        if run.rc == 0:
             return True
-    _report_failed_uv("uv pip install (fallback from pyproject.toml)", venv, rc, stderr, quiet=quiet, stream=stream)
+    _report_failed_uv("uv pip install (fallback from pyproject.toml)", venv, run, stream=stream)
     return False
 
 
@@ -852,73 +899,73 @@ def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool, stream: 
 
     ``uv sync`` installs into the PROJECT environment, so the target venv is named through
     ``UV_PROJECT_ENVIRONMENT``; that is how the per-version matrix venvs get their own sync.
-    ``python`` is uv's ``--python`` request: the minor when one is known, else the venv's interpreter.
+    ``python`` is uv's ``--python`` request, from :func:`_sync_python_request`.
 
     Returns:
         True when synced from the lock; False when the lock was made but the sync failed, which
         must surface rather than be covered by a manifest install; None when no lock could be
         made, so the caller may fall back to the manifest.
     """
-    rc, stderr = _lock(cwd, quiet=quiet, upgrade=False)
-    if rc is None:
+    lock = _lock(cwd, quiet=quiet, upgrade=False)
+    if lock is None:
         # No uv ran (another bmk held the project's lock and said so): there is no exit code or
         # reason to add, only where provisioning goes next.
         _emit(f"[venv] uv lock failed in {cwd}; provisioning {venv.name} from pyproject.toml instead\n", stream)
         return None
-    if rc != 0:
-        header = f"[venv] uv lock failed in {cwd} (exit {rc}); provisioning {venv.name} from pyproject.toml instead"
-        _write_failure(header, stderr, quiet=quiet, stream=stream)
+    if lock.rc != 0:
+        _write_failure(
+            f"[venv] uv lock failed in {cwd} (exit {lock.rc}); provisioning {venv.name} from pyproject.toml instead",
+            lock,
+            stream=stream,
+        )
         return None
     argv = ["uv", "sync", "--locked", "--python", python, "--no-default-groups", *_sync_extras(cwd)]
-    rc, stderr = _run_for_report(argv, cwd, quiet=quiet, env={**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)})
-    if rc == 0:
+    run = _run_for_report(argv, cwd, quiet=quiet, env={**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)})
+    if run.rc == 0:
         return True
-    _report_failed_uv("uv sync from uv.lock", venv, rc, stderr, quiet=quiet, stream=stream)
+    _report_failed_uv("uv sync from uv.lock", venv, run, stream=stream)
     return False
 
 
-def _run_for_report(
-    argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
-) -> tuple[int, str]:
+def _run_for_report(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None) -> _UvRun:
     """Run a provisioning uv call so a failure can be reported: stderr kept when quiet, live when not.
 
     Text mode inherits the terminal: a piped stderr would hold back a multi-minute first sync until
     uv exits, and uv drops its progress display when stderr is not a terminal. uv's reason is then
-    already on screen, so there is nothing to hand back.
+    already on screen, so there is nothing to hand back - unless uv never started, which neither
+    mode can show any other way.
     """
     if quiet:
         return _run_keeping_stderr(argv, cwd, quiet=True, env=env)
-    return _run(argv, cwd, quiet=False, env=env), ""
+    return _run_live(argv, cwd, env=env)
 
 
-def _report_failed_uv(
-    what: str, venv: Path, rc: int, stderr: str, *, quiet: bool, stream: SupportsWrite | None
-) -> None:
+def _report_failed_uv(what: str, venv: Path, run: _UvRun, *, stream: SupportsWrite | None) -> None:
     """Say that the provisioning step ``what`` failed, why uv says so, and what it left of ``venv``."""
     _write_failure(
-        f"[venv] {what} failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)})",
-        stderr,
-        quiet=quiet,
+        f"[venv] {what} failed for {venv.name} (exit {run.rc}; venv afterwards: {_venv_state(venv)})",
+        run,
         stream=stream,
     )
 
 
-def _write_failure(header: str, stderr: str, *, quiet: bool, stream: SupportsWrite | None) -> None:
-    """Write ``header`` and, when quiet, all of uv's ``stderr`` under it, as ONE write to ``stream``.
+def _write_failure(header: str, run: _UvRun, *, stream: SupportsWrite | None) -> None:
+    """Write ``header`` and the reason under it, as ONE write to ``stream``.
 
-    Always printed, never gated on ``quiet``: the caller degrades silently to an ERROR, and the
-    failure can be intermittent, so asking for a text-mode re-run would lose the very evidence it
-    asks for. When not quiet, uv's output already streamed above, so only the header is printed.
+    Always printed, never gated on the output mode: the caller degrades silently to an ERROR, and
+    the failure can be intermittent, so asking for a text-mode re-run would lose the very evidence
+    it asks for. When uv's output already streamed above (text mode), only the header is printed.
 
-    When quiet, ALL of uv's stderr follows, uncapped: uv puts its verdict first and the detail
+    Otherwise ALL of ``run.stderr`` follows, uncapped: uv puts its verdict first and the detail
     after it (uv 0.13.0, a failing build: ``error: Failed to build`` on line 6 of 26), so any tail
-    drops the cause. The block goes out as ONE write, because parallel test-all cells share this
-    stderr and only the header names the venv. With nothing from uv to show, the header stands
-    alone rather than ending in a colon with nothing after it.
+    drops the cause. When uv could not be started, that stderr is the reason naming it, in both
+    modes. The block goes out as ONE write, because parallel test-all cells share this stderr and
+    only the header names the venv. With nothing to show, the header stands alone rather than
+    ending in a colon with nothing after it.
 
     ``stream`` None is the process's stderr; a stage that re-provisions passes its own sink.
     """
-    reason = _ANSI_SGR.sub("", stderr).splitlines() if quiet else []
+    reason = [] if run.shown_live else _ANSI_SGR.sub("", run.stderr).splitlines()
     lines = [f"{header}:", *(f"    {line}" for line in reason)] if any(line.strip() for line in reason) else [header]
     _emit("\n".join(lines) + "\n", stream)
 
@@ -976,7 +1023,8 @@ def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> boo
     index with ``max-age=600`` and uv honours it, so without a refresh a release from minutes
     ago stays invisible and the own floor, which rises only to what the lock resolves, stays put.
     """
-    return _lock(cwd, quiet=quiet, upgrade=upgrade)[0] == 0
+    lock = _lock(cwd, quiet=quiet, upgrade=upgrade)
+    return lock is not None and lock.rc == 0
 
 
 def uv_lock_guard_path(cwd: Path) -> Path:
@@ -984,11 +1032,11 @@ def uv_lock_guard_path(cwd: Path) -> Path:
     return _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
 
 
-def _lock(cwd: Path, *, quiet: bool, upgrade: bool) -> tuple[int | None, str]:
-    """:func:`lock_project` with uv's exit code and, when quiet, its stderr, for a failure report.
+def _lock(cwd: Path, *, quiet: bool, upgrade: bool) -> _UvRun | None:
+    """:func:`lock_project` with uv's exit code and the reason for a failure report.
 
-    The exit code is None when uv never ran because another bmk held the project's lock past the
-    timeout; that case has already said so on stderr.
+    None when uv never ran because another bmk held the project's lock past the timeout; that case
+    has already said so on stderr.
     """
     argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
     refresh = _lock_argv(cwd, upgrade=upgrade)[len(argv) :]
@@ -999,7 +1047,7 @@ def _lock(cwd: Path, *, quiet: bool, upgrade: bool) -> tuple[int | None, str]:
             return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
     except Timeout:
         print(f"[venv] another bmk is still locking {cwd}; waited {_lock_timeout():g}s and gave up", file=sys.stderr)
-        return None, ""
+        return None
     except OSError:
         # An unlockable location must not make bmk unusable there; lock unguarded instead.
         return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
@@ -1032,9 +1080,7 @@ def _refresh_refused(rc: int, stderr: str) -> bool:
     return rc == _UV_ERROR_EXIT and any(marker in plain for marker in _REFRESH_REFUSALS)
 
 
-def _run_keeping_stderr(
-    argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
-) -> tuple[int, str]:
+def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None) -> _UvRun:
     """Like :func:`_run`, but hands back stderr (still shown when not quiet) to be classified or reported."""
     try:
         # argv is built from literals and package names from the project's own manifest; no shell.
@@ -1049,14 +1095,14 @@ def _run_keeping_stderr(
             env=dict(env) if env is not None else _uv_env(),
             check=False,
         )
-    except OSError:
-        return 1, ""
+    except OSError as exc:
+        return _spawn_failure(argv, exc)
     if not quiet:
         sys.stderr.write(done.stderr)
-    return done.returncode, done.stderr
+    return _UvRun(done.returncode, done.stderr, shown_live=not quiet)
 
 
-def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> tuple[int, str]:
+def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> _UvRun:
     """Lock with the own-package refresh, and once more without it only if uv refused the refresh.
 
     The plain lock is the old behaviour, so the refresh may only ever add, never break a gate. Any
@@ -1067,9 +1113,9 @@ def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet:
     """
     if not refresh:
         return _run_for_report(argv, cwd, quiet=quiet)
-    rc, stderr = _run_keeping_stderr([*argv, *refresh], cwd, quiet=quiet)
-    if not _refresh_refused(rc, stderr):
-        return rc, stderr
+    run = _run_keeping_stderr([*argv, *refresh], cwd, quiet=quiet)
+    if not _refresh_refused(run.rc, run.stderr):
+        return run
     print(
         "[venv] uv refused --refresh-package (offline is configured, or a package name it rejects); "
         "locking without refreshing our own packages",

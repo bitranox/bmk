@@ -16,10 +16,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `[venv] uv pip install (fallback from pyproject.toml) failed for <venv> (...)`, followed in JSON
   mode by all of uv's stderr; in text mode uv streams live and only the header is added. A `uv venv`
   that exits 0 without leaving a venv is reported too, and a report with nothing from uv to show
-  no longer ends in a colon.
+  no longer ends in a colon. When uv cannot be run at all (missing from `PATH`, not executable),
+  the header is followed by `could not run uv: <error>` in both modes, where it used to stand alone.
 
 ### Fixed
 
+- **A project with no Python classifier no longer loses a 3.10 (or 3.9) venv that `uv sync`
+  recreates.** 3.22.3 asked the sync for the declared minor, but a project declaring none still
+  passed the venv's own `bin/python` as `--python`, the request that leaves an empty directory when
+  uv recreates the venv on CPython 3.10 and older. The sync now asks for the minor that venv's
+  interpreter reports (`--python 3.10`); only an interpreter that cannot report a version is still
+  passed by path.
 - **`bmk test` / `bmk deps update` print a failed venv sync once, and the failed `deps_update` stage
   says why instead of `(no output captured)`.** Provisioning syncs the venv before the pipeline, and
   the `deps_update` stage synced it again after its `uv lock --upgrade`, so a failing sync printed

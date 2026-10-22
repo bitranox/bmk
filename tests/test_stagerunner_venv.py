@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -40,7 +41,6 @@ from bmk.adapters.stagerunner.venv import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from uv_stub import StubUv
 
@@ -495,7 +495,8 @@ def test_a_text_mode_provisioning_failure_streams_uv_live_and_adds_bare_headers(
 
 # uv sync may remove the venv and recreate it from the --python interpreter's sys._base_executable.
 # On CPython <= 3.10 that is the venv's own bin/python, deleted by then, so a --python pointing INTO
-# the venv left an empty directory (bmk OPEN-WORK [19]). A known minor is asked for by name instead.
+# the venv left an empty directory (bmk OPEN-WORK [19]). A minor is asked for by name instead: the
+# declared one, or with none declared, the one the venv's interpreter reports.
 @pytest.mark.os_posix
 @pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
 @pytest.mark.parametrize(
@@ -504,13 +505,27 @@ def test_a_text_mode_provisioning_failure_streams_uv_live_and_adds_bare_headers(
 def test_the_sync_asks_uv_for_the_minor_never_the_interpreter_inside_the_venv(
     stub_uv_project: Path, stub_uv: StubUv, minor: str | None, venv_name: str
 ) -> None:
+    stub_uv.install(venv_reports="3.10.19")
     venv = stub_uv_project / venv_name
 
     assert ensure_project_venv_at(stub_uv_project, venv, minor, quiet=True, install_python=False) == venv
 
     argv = next(c for c in stub_uv.commands() if c[:2] == ["uv", "sync"])
-    expected = minor if minor else str(venv_python(venv))
-    assert argv[argv.index("--python") + 1] == expected
+    assert argv[argv.index("--python") + 1] == "3.10"
+
+
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
+def test_the_sync_asks_for_the_interpreter_path_only_when_it_cannot_report_a_version(
+    stub_uv_project: Path, stub_uv: StubUv
+) -> None:
+    """The last resort: an interpreter that cannot run gives no minor, and uv could not build from it either."""
+    venv = stub_uv_project / ".venv"
+
+    assert ensure_project_venv_at(stub_uv_project, venv, None, quiet=True, install_python=False) == venv
+
+    argv = next(c for c in stub_uv.commands() if c[:2] == ["uv", "sync"])
+    assert argv[argv.index("--python") + 1] == str(venv_python(venv))
 
 
 @pytest.mark.os_posix
@@ -1073,3 +1088,28 @@ def test_offline_upgrade_lock_succeeds_for_real(
     assert lock_project(tmp_path, upgrade=True)
     assert (tmp_path / "uv.lock").is_file()
     assert "refused --refresh-package" in capsys.readouterr().err
+
+
+# uv missing from PATH (or not executable) is a provisioning failure too, and the header alone names
+# no cause: in text mode nothing streamed live, in JSON mode there was no stderr to capture. The
+# reason names the program and the OSError under the header, in both modes.
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("quiet", [True, False], ids=["json", "text"])
+def test_a_uv_that_cannot_be_run_is_named_under_the_header_in_both_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], quiet: bool
+) -> None:
+    if shutil.which("uv", path=str(Path(sys.executable).parent)):
+        pytest.skip("a uv beside the interpreter is found by CreateProcess's application-directory search")
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setenv("BMK_VENV_LOCK_DIR", str(tmp_path / "locks"))
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.0"\n', encoding="utf-8")
+
+    assert ensure_project_venv_at(project, project / ".venv", None, quiet=quiet, install_python=False) is None
+
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == "[venv] uv venv failed for .venv (exit 1; venv afterwards: absent):", lines
+    assert lines[1].startswith("    could not run uv: "), lines
