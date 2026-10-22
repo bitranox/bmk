@@ -1304,8 +1304,10 @@ def smtp_config_from_env() -> EmailConfig:
     config = get_config()
     email_config = load_email_config_from_dict(config.as_dict())
 
-    if not email_config.smtphosts or not email_config.from_address:
-        pytest.skip("Email not configured (no smtp_hosts or from_address in layered config)")
+    # The real-send tests mail [email].recipients, which the shipped 50-mail.toml leaves empty,
+    # so a configured host and sender alone would fail them instead of skipping.
+    if not email_config.smtphosts or not email_config.from_address or not email_config.recipients:
+        pytest.skip("Email not configured (no smtp_hosts, from_address or recipients in layered config)")
 
     return email_config
 
