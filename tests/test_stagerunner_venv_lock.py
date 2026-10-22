@@ -88,10 +88,11 @@ def _venv_on_an_older_patch(venv: Path) -> Path:
 
     The interpreter is a script, since bmk asks the venv's OWN python for its version: a rebuild is
     then decided by the real ``_discard_venv_on_wrong_python``, and its effect is visible on disk.
+    It answers in the probe's shape, ``<implementation> <X.Y.Z> <free-threaded 0|1>``.
     """
     python = venv / "bin" / "python"
     python.parent.mkdir(parents=True)
-    python.write_text("#!/bin/sh\necho 3.12.1\n", encoding="utf-8")
+    python.write_text("#!/bin/sh\necho cpython 3.12.1 0\n", encoding="utf-8")
     python.chmod(0o755)
     (venv / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     marker = venv / "survives-only-without-a-rebuild"
