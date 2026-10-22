@@ -27,7 +27,7 @@ Thanks for helping improve **bmk**. The sections below summarise the day-to-day 
 
 ## 3. Coding Standards
 
-- Apply the repository's Clean Architecture / SOLID rules (see `CLAUDE.md` and the system prompts listed there).
+- Apply the repository's Clean Architecture / SOLID rules: dependencies point inward (composition -> adapters -> application -> domain), and the import-linter contracts in `pyproject.toml` enforce it. `docs/systemdesign/module_reference.md` maps the modules.
 - Prefer small, single-purpose modules and functions; avoid mixing orthogonal concerns.
 - Free functions and modules use `snake_case`; classes are `PascalCase`.
 - Keep runtime dependencies minimal. Use the standard library where practical.
@@ -49,7 +49,7 @@ Before opening a PR, confirm the following:
 - [ ] Relevant documentation (`README.md`, `DEVELOPMENT.md`, `docs/systemdesign/*`) is updated.
 - [ ] No generated artefacts or virtual environments are committed.
 - [ ] Version bumps, when required, are made with `make bump-patch` / `bump-minor` / `bump-major`, which update `pyproject.toml`, `CHANGELOG.md` and `src/bmk/__init__conf__.py` together.
-- [ ] A change under `skills/` ALSO bumps `.claude-plugin/plugin.json`. This repo is its own Claude Code marketplace (`.claude-plugin/marketplace.json`, `source: "."`), and an install only re-fetches when that version changes -- without the bump the skill ships to nobody. It versions independently of the Python package.
+- [ ] A change under `skills/` ALSO bumps `.claude-plugin/plugin.json`. This repo is its own Claude Code marketplace (`.claude-plugin/marketplace.json`, `source: "."`), and an install only re-fetches when that version changes -- without the bump the skill ships to nobody. It never falls behind the Python package: `make bump-*` and the commit pipelines raise it to the package version (never lower it), so a skill-only change is the one case where you raise it yourself.
 - [ ] History stays append-only: `master` is a published marketplace, so never squash or force-push it (an existing install's `/plugin marketplace update` is a `git pull` that cannot fast-forward a rewritten history, so it silently stops updating). Branch protection enforces this.
 
 ## 6. Security & Configuration

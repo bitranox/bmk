@@ -222,8 +222,10 @@ dependencies live in the project's own venv, which bmk provisions and every gate
 
 The venv path comes from `UV_PROJECT_ENVIRONMENT` (absolute, or relative to the project; default
 `.venv`); `BMK_NO_VENV_SYNC=1` skips provisioning. Because the sync is exact and upgrading, packages
-installed into the venv by hand do not survive it. See `CLAUDE.md` for why both flags are needed and
-how the ordering interacts with the frozen `StageContext`.
+installed into the venv by hand do not survive it. The docstring of `ensure_project_venv`
+(`src/bmk/adapters/stagerunner/venv.py`) says why both flags are needed, and `run_command`
+(`src/bmk/adapters/cli/commands/_shared.py`) why provisioning must run before the frozen
+`StageContext` is built.
 
 ### Private Repository Dependencies
 
