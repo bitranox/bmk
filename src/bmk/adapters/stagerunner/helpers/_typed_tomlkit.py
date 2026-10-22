@@ -27,12 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
-from tomlkit.items import Table
+from tomlkit.items import String, StringType, Table
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping
 
-__all__ = ["TOMLKitError", "dumps", "inline_table", "is_standard_table", "parse", "table"]
+__all__ = ["TOMLKitError", "dumps", "inline_table", "is_standard_table", "parse", "string_like", "table"]
 
 
 def parse(text: str) -> MutableMapping[str, Any]:
@@ -57,6 +57,12 @@ def table(*, super_table: bool = False) -> MutableMapping[str, Any]:
 def inline_table() -> MutableMapping[str, Any]:
     """A new ``{ key = value }`` table."""
     return tomlkit.inline_table()
+
+
+def string_like(old: object, value: str) -> object:
+    """``value`` as a TOML string quoted the way ``old`` was: ``'...'`` for a literal one, else ``"..."``."""
+    literal = isinstance(old, String) and old.type in {StringType.SLL, StringType.MLL}
+    return tomlkit.string(value, literal=literal)
 
 
 def is_standard_table(value: object) -> bool:

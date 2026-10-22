@@ -36,6 +36,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `hypothesis>=6.168.3,<=6.168.4` was rewritten to `hypothesis>=6.169.0,<=6.168.4`, which nothing
   satisfies, and an `!=` exclusion of the newest release was ignored the same way. The update now
   judges the whole ceiling (`<`, `<=`, `!=`), as the Python hold already did.
+- **`bump` writes `[project].version` itself, whatever its spelling.** The bump replaced the
+  text `version = "<old>"`, so `version="0.1.0"` was left unchanged while the bump printed
+  `Bumped version: 0.1.0 -> 0.1.1` and exited 0, and a `version` key in a table before `[project]`
+  was rewritten instead of the project's. The version is now set through a tomlkit round-trip,
+  which keeps comments, formatting and the quote style.
 
 ## [3.22.4] 2026-10-22 19:00:45
 

@@ -12,7 +12,7 @@ lands on a plain release: a non-final version (``1.2.3rc1``, ``1.2.3.dev4``) is
 FINALIZED to ``1.2.3`` rather than stepped past it.
 
 Uses _toml_config for TOML parsing to centralize configuration access,
-and native string operations to preserve file formatting when writing.
+and a tomlkit round-trip to preserve file formatting when writing.
 
 Contents:
     * :func:`update_pyproject` - Update version in pyproject.toml.
@@ -27,6 +27,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.venv import lock_project
 from bmk.domain.enums import BumpPart
@@ -36,8 +37,10 @@ from bmk.domain.version import next_version
 def update_pyproject(project_dir: Path, new_version: str) -> str:
     """Update version in pyproject.toml, preserving file formatting.
 
-    Uses toml_config for reading and string replacement for writing to preserve
-    comments, formatting, and ordering in the original file.
+    Uses toml_config for reading and a tomlkit round-trip for writing, which keeps comments,
+    formatting, ordering and the value's quote style. A text match on ``version = "..."`` is what
+    this replaced: it missed ``version="0.1.0"`` (changing nothing while the bump reported success)
+    and could rewrite a ``version`` key in another table that came first.
 
     Args:
         project_dir: Path to project root containing pyproject.toml.
@@ -60,16 +63,10 @@ def update_pyproject(project_dir: Path, new_version: str) -> str:
         msg = "Could not find [project].version in pyproject.toml"
         raise ValueError(msg)
 
-    # Update version in-place by string replacement (preserves formatting)
-    old_line = f'version = "{old_version}"'
-    new_line = f'version = "{new_version}"'
-    if old_line not in content:
-        # Try single quotes
-        old_line = f"version = '{old_version}'"
-        new_line = f"version = '{new_version}'"
-
-    new_content = content.replace(old_line, new_line, 1)
-    pyproject_path.write_text(new_content, encoding="utf-8")
+    document = _typed_tomlkit.parse(content)
+    project = document["project"]
+    project["version"] = _typed_tomlkit.string_like(project["version"], new_version)
+    pyproject_path.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
     return old_version
 
 

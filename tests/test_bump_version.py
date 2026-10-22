@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 import pytest
+import rtoml
 
 from bmk.domain.enums import BumpPart
 from bmk.domain.version import next_version
@@ -180,6 +181,27 @@ class TestUpdatePyproject:
         content = pyproject.read_text()
         assert 'description = "A test"' in content
         assert 'name = "test"' in content
+
+    def test_updates_a_version_written_without_spaces(self, bump_module: Any, tmp_path: Path) -> None:
+        """``version="0.1.0"`` is bumped too: a text match on ``version = "..."`` changed nothing and said it did."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "test"\nversion="0.1.0"\n', encoding="utf-8")
+
+        bump_module.update_pyproject(tmp_path, "0.1.1")
+
+        assert rtoml.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"] == "0.1.1"
+
+    def test_updates_only_the_project_version(self, bump_module: Any, tmp_path: Path) -> None:
+        """A ``version`` key in a table before ``[project]`` is not the project's and stays as it is."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            '[tool.other]\nversion = "1.0.0"\n\n[project]\nname = "test"\nversion = "1.0.0"\n', encoding="utf-8"
+        )
+
+        bump_module.update_pyproject(tmp_path, "2.0.0")
+
+        document = rtoml.loads(pyproject.read_text(encoding="utf-8"))
+        assert (document["tool"]["other"]["version"], document["project"]["version"]) == ("1.0.0", "2.0.0")
 
     def test_raises_when_no_version(self, bump_module: Any, tmp_path: Path) -> None:
         """Raises ValueError when no version field exists."""
