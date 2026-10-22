@@ -566,6 +566,91 @@ def test_a_floor_with_an_epoch_is_rewritten_to_a_valid_requirement(tmp_path: Pat
     assert Requirement(written).name == "pkg"
 
 
+def _written_dev(pyproject: Path) -> str:
+    (written,) = rtoml.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]["dev"]
+    return str(written)
+
+
+# Versions are ordered as PEP 440 orders them. A leading-digits tuple ties every release that
+# differs only in a post, pre or dev part, and reads an epoch as the whole version, so the tie is
+# broken by string order: "1.0.post2" > "1.0.post10", "1!9.0" > "1!10.0".
+
+
+@pytest.mark.os_agnostic
+def test_a_post_release_numbered_past_nine_is_newer_than_one_below_it(tmp_path: Path, pypi: _FakeIndex) -> None:
+    _serve_pkg(pypi, "1.0.post10", {"1.0.post2": _release(">=3.10"), "1.0.post10": _release(">=3.10")})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=1.0.post2"')
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+
+    assert _written_dev(pyproject) == "pkg>=1.0.post10"
+
+
+@pytest.mark.os_agnostic
+def test_a_floor_below_a_newer_release_in_the_same_epoch_is_raised(tmp_path: Path, pypi: _FakeIndex) -> None:
+    _serve_pkg(pypi, "1!9.0", {"1!7.0": _release(">=3.10"), "1!9.0": _release(">=3.10")})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=1!7.0"')
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+
+    assert _written_dev(pyproject) == "pkg>=1!9.0"
+
+
+@pytest.mark.os_agnostic
+def test_an_epoch_floor_the_oldest_python_cannot_install_is_lowered_to_the_newest_one_it_can(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    releases = {"1!9.0": _release(">=3.10"), "1!10.0": _release(">=3.10"), "1!11.0": _release(">=3.11")}
+    _serve_pkg(pypi, "1!11.0", releases)
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=1!11.0"')
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+
+    assert _written_dev(pyproject) == "pkg>=1!10.0"
+
+
+# uv takes a prerelease when the requirement names one, or when the package publishes nothing else.
+
+
+@pytest.mark.os_agnostic
+def test_a_prerelease_floor_on_a_package_with_only_prereleases_is_lowered_to_the_one_that_installs(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    _serve_pkg(pypi, "8.0b2", {"8.0b1": _release(">=3.10"), "8.0b2": _release(">=3.11")})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=8.0b2"')
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+
+    assert _written_dev(pyproject) == "pkg>=8.0b1"
+
+
+@pytest.mark.os_agnostic
+def test_a_prerelease_floor_that_does_not_install_is_lowered_to_the_newest_prerelease_that_does(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    releases = {"7.0": _release(">=3.10"), "8.0b1": _release(">=3.10"), "8.0b2": _release(">=3.11")}
+    _serve_pkg(pypi, "8.0b2", releases)
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=8.0b2"')
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+
+    assert _written_dev(pyproject) == "pkg>=8.0b1", "the floor names a prerelease, so uv takes 8.0b1 over 7.0"
+
+
+@pytest.mark.os_agnostic
+def test_a_final_floor_on_a_package_with_only_prereleases_follows_the_one_uv_would_install(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    _serve_pkg(pypi, "8.0b2", {"8.0b1": _release(">=3.10"), "8.0b2": _release(">=3.11")})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=1.0"')
+
+    (dep,) = check_dependencies(pyproject)
+    update_dependencies([dep], pyproject, quiet=True)
+
+    assert dep.status is not DependencyStatus.ERROR, dep.latest
+    assert _written_dev(pyproject) == "pkg>=8.0b1"
+
+
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize(
     "declared", ['"pkg>=1.0c1"', '"pkg>=1.0RC1"', '"pkg>=1.0.c1"'], ids=["c", "upper-rc", "dotted-c"]

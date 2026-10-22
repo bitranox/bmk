@@ -109,7 +109,6 @@ _VERSION = r"(?:\d+!)?\d+(?:\.\d+)*(?:\.?(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d
 # The lookbehind keeps the "=" of "<=" and "!=" from reading as a floor ("pkg<=7,>=6" has floor 6).
 _RE_MIN_VERSION = re.compile(rf"(?<![<!])[>=~]=?\s*({_VERSION})")
 _RE_UPPER_BOUND = re.compile(rf"<(?!=)\s*({_VERSION})")
-_RE_PRERELEASE = re.compile(r"(a|b|rc|dev|alpha|beta)", re.IGNORECASE)
 _RE_VERSION_NUMERIC = re.compile(r"^([\d.]+)")
 _RE_VERSION_CONSTRAINT = re.compile(rf"([><=!~]+)\s*({_VERSION})")
 _RE_HAS_CONSTRAINT = re.compile(r"[><=!~]")
@@ -292,31 +291,21 @@ def _fetch_latest_version_below(package_name: str, upper_bound: str) -> str | No
 
     typed_releases = cast("dict[str, Any]", releases)
 
-    # Get all version strings and filter to those below upper_bound
-    valid_versions: list[tuple[tuple[int, ...], str]] = []
-    for version_str in typed_releases:
-        # Skip pre-release versions (containing a, b, rc, dev, etc.)
-        if _RE_PRERELEASE.search(version_str):
-            continue
+    finals = [(v, text) for text in typed_releases if (v := _version_or_none(text)) is not None and not v.is_prerelease]
+    below = [(v, text) for v, text in finals if not _version_gte(text, upper_bound)]
+    return max(below)[1] if below else None
 
-        version_tuple = _parse_version_tuple(version_str)
-        if not version_tuple:
-            continue
 
-        # Check if version is below upper_bound
-        if not _version_gte(version_str, upper_bound):
-            valid_versions.append((version_tuple, version_str))
-
-    if not valid_versions:
+def _version_or_none(text: str) -> Version | None:
+    """``text`` as a PEP 440 version, or None when it is not one."""
+    try:
+        return Version(text)
+    except InvalidVersion:
         return None
-
-    # Sort by version tuple (descending) and return the highest
-    valid_versions.sort(reverse=True, key=lambda x: x[0])
-    return valid_versions[0][1]
 
 
 def _parse_version_tuple(v: str) -> tuple[int, ...]:
-    """Parse version string into a tuple of integers for comparison."""
+    """The leading release digits of ``v``: the order of last resort for a string that is not PEP 440."""
     match = _RE_VERSION_NUMERIC.match(v)
     if not match:
         return ()
@@ -325,34 +314,31 @@ def _parse_version_tuple(v: str) -> tuple[int, ...]:
 
 
 def _version_gte(version_a: str, version_b: str) -> bool:
-    """Check if version_a >= version_b."""
-    a_parts = _parse_version_tuple(version_a)
-    b_parts = _parse_version_tuple(version_b)
+    """Whether ``version_a >= version_b`` in PEP 440 order.
 
-    # Pad to same length
-    max_len = max(len(a_parts), len(b_parts))
-    a_padded = a_parts + (0,) * (max_len - len(a_parts))
-    b_padded = b_parts + (0,) * (max_len - len(b_parts))
-
-    return a_padded >= b_padded
+    PEP 440 is what an installer orders by, so a post, pre or dev part and an epoch all count. The
+    leading-digits tuple is used only when either side is not a version at all.
+    """
+    a, b = _version_or_none(version_a), _version_or_none(version_b)
+    if a is not None and b is not None:
+        return a >= b
+    a_parts, b_parts = _parse_version_tuple(version_a), _parse_version_tuple(version_b)
+    width = max(len(a_parts), len(b_parts))
+    return a_parts + (0,) * (width - len(a_parts)) >= b_parts + (0,) * (width - len(b_parts))
 
 
 def compare_versions(current: str, latest: str) -> DependencyStatus:
-    """Compare two version strings and return status."""
+    """UP_TO_DATE when ``current >= latest`` in PEP 440 order, else OUTDATED; UNKNOWN for an empty side.
+
+    Example:
+        >>> compare_versions("1.0.post2", "1.0.post10").value
+        'outdated'
+        >>> compare_versions("1!7.0", "1!9.0").value
+        'outdated'
+    """
     if not current or not latest:
         return DependencyStatus.UNKNOWN
-
-    current_parts = _parse_version_tuple(current)
-    latest_parts = _parse_version_tuple(latest)
-
-    # Pad to same length for comparison
-    max_len = max(len(current_parts), len(latest_parts))
-    current_padded = current_parts + (0,) * (max_len - len(current_parts))
-    latest_padded = latest_parts + (0,) * (max_len - len(latest_parts))
-
-    if current_padded >= latest_padded:
-        return DependencyStatus.UP_TO_DATE
-    return DependencyStatus.OUTDATED
+    return DependencyStatus.UP_TO_DATE if _version_gte(current, latest) else DependencyStatus.OUTDATED
 
 
 def _extract_dependencies_from_list(
@@ -642,17 +628,18 @@ def _admits_installable(
 ) -> bool:
     """Whether anything ``specifier`` admits installs on ``python``, judged as uv would choose.
 
-    A prerelease counts only when the specifier names one, as uv resolves it; ``prereleases`` is
-    passed explicitly because packaging 26's default admits any prerelease the bounds cover. A
+    A prerelease counts as uv resolves it (:func:`_prereleases_allowed`); ``prereleases`` is passed
+    explicitly because packaging 26's default admits any prerelease the bounds cover. A
     yanked release counts only when the specifier pins it exactly: PEP 592 lets an installer take a yanked release
     for ``==`` / ``===``, and uv (which provisions bmk's venvs) takes it in no other case.
     """
     exact = any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
+    prereleases = _prereleases_allowed(releases, named=bool(specifier.prereleases))
     # Newest first: ``accept`` reads PyPI per release, and the newest admitted one usually settles it.
     ordered = sorted(releases.items(), key=lambda item: _sort_key(item[0]), reverse=True)
     return any(
         isinstance(files, list)
-        and specifier.contains(version, prereleases=bool(specifier.prereleases))
+        and specifier.contains(version, prereleases=prereleases)
         and _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
         and (accept is None or accept(version))
         for version, files in ordered
@@ -667,21 +654,36 @@ def _sort_key(text: str) -> tuple[int, Version]:
         return (0, Version("0"))
 
 
-def _newest_installable(
-    releases: dict[str, Any], *, python: str | None, ceiling: SpecifierSet, accept: Callable[[str], bool] | None = None
-) -> str | None:
-    """The newest final release in ``releases`` that installs on ``python`` and ``ceiling`` admits.
+def _prereleases_allowed(releases: dict[str, Any], *, named: bool) -> bool:
+    """Whether uv would take a prerelease from ``releases``: when the requirement names one, or
+    when the package publishes nothing else (uv's default ``if-necessary-or-explicit``)."""
+    return named or not any((v := _version_or_none(text)) is not None and not v.is_prerelease for text in releases)
 
+
+def _newest_installable(
+    releases: dict[str, Any],
+    *,
+    python: str | None,
+    ceiling: SpecifierSet,
+    prereleases_named: bool = False,
+    accept: Callable[[str], bool] | None = None,
+) -> str | None:
+    """The newest release in ``releases``, in PEP 440 order, that installs on ``python`` and ``ceiling`` admits.
+
+    A prerelease is a candidate only where uv would take one (:func:`_prereleases_allowed`), so
+    ``prereleases_named`` says whether the whole requirement names one - its ceiling alone cannot.
     ``accept`` is asked last and newest first, so a costly judgement runs on as few releases as it can.
     """
-    candidates: list[tuple[tuple[int, ...], str]] = []
-    for version, files in releases.items():
-        if _RE_PRERELEASE.search(version) or not _parse_version_tuple(version):
+    prereleases = _prereleases_allowed(releases, named=prereleases_named)
+    candidates: list[tuple[Version, str]] = []
+    for text, files in releases.items():
+        version = _version_or_none(text)
+        if version is None or (version.is_prerelease and not prereleases):
             continue
-        if not ceiling.contains(version):
+        if not ceiling.contains(version, prereleases=prereleases):
             continue
         if isinstance(files, list) and _installs_on(cast("list[Any]", files), python):
-            candidates.append((_parse_version_tuple(version), version))
+            candidates.append((version, text))
     return next((v for _, v in sorted(candidates, reverse=True) if accept is None or accept(v)), None)
 
 
@@ -979,11 +981,13 @@ def _judge_floor(
         return _keep_outdated_floor(dep, why="release list unreadable")
     admitted = admitted_releases(releases, cutoff)
     ceiling = _ceiling_of(specifier)
-    installable = _newest_installable(admitted, python=python, ceiling=ceiling, accept=lockable)
+    named = bool(specifier.prereleases)
+    installable = _newest_installable(
+        admitted, python=python, ceiling=ceiling, prereleases_named=named, accept=lockable
+    )
     if installable is None:
-        return _unsatisfiable_floor(
-            dep, why=_no_release_why(releases, python=python, ceiling=ceiling, lockable=lockable)
-        )
+        why = _no_release_why(releases, python=python, ceiling=ceiling, prereleases_named=named, lockable=lockable)
+        return _unsatisfiable_floor(dep, why=why)
     # Judged on the whole specifier, so ">", "==" and "~=" floors count exactly as written.
     if not _admits_installable(admitted, python=python, specifier=specifier, accept=lockable):
         why = _floor_why(admitted, releases, python=python, specifier=specifier, lockable=lockable is not None)
@@ -992,7 +996,7 @@ def _judge_floor(
             # raised for; `deps --update` pins the release instead (reconcile_floor_pins).
             return _unsatisfiable_floor(dep, why=f"floor {dep.constraint} {why}; not pinned")
         return replace(dep, status=DependencyStatus.OUTDATED, latest=f"{installable} (floor {dep.constraint} {why})")
-    newest = _newest_installable(releases, python=python, ceiling=ceiling)
+    newest = _newest_installable(releases, python=python, ceiling=ceiling, prereleases_named=named)
     held_back = newest if newest is not None and newest != installable else None
     limit = _LOCK_LIMIT if lockable is not None else f"inside the {_COOLDOWN} cooldown"
     return _hold_suggestion(dep, installable=installable, python=python, held_back=held_back, limit=limit)
@@ -1017,9 +1021,15 @@ _LOCK_LIMIT = f"not lockable yet: it needs releases younger than the {_COOLDOWN}
 
 
 def _no_release_why(
-    releases: dict[str, Any], *, python: str | None, ceiling: SpecifierSet, lockable: Callable[[str], bool] | None
+    releases: dict[str, Any],
+    *,
+    python: str | None,
+    ceiling: SpecifierSet,
+    prereleases_named: bool,
+    lockable: Callable[[str], bool] | None,
 ) -> str:
-    if python is not None and _newest_installable(releases, python=python, ceiling=ceiling) is None:
+    newest = _newest_installable(releases, python=python, ceiling=ceiling, prereleases_named=prereleases_named)
+    if python is not None and newest is None:
         return f"no release installs on Python {_shown(python)}"
     if lockable is not None:
         return f"no release uv can lock under the {_COOLDOWN} cooldown"

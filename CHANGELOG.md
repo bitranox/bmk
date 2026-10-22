@@ -21,6 +21,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   skips, but an edge `503 Backend is unhealthy` failed the gate with nothing wrong in the tree.
   The stage now passes `--skip-editable`: the project's own package is skipped before any query,
   and its dependencies, which are not editable, are still audited.
+- **Dependency floors are judged in PEP 440 order.** The floor check compared only a version's
+  leading digits, so every release differing in a post, pre or dev part tied and was ordered as
+  a string, and an epoch was read as the whole version: `pkg>=1.0.post2` was reported up to date
+  beside `1.0.post10`, `pkg>=1!7.0` beside `1!9.0`, and a floor held to the oldest Python went to
+  `1!9.0` where `1!10.0` installs. Versions are now ordered by `packaging.version.Version`.
+- **A prerelease is a candidate where uv would take one.** uv installs a prerelease when the
+  requirement names one or when the package publishes nothing else; the floor check skipped every
+  prerelease. So `pkg>=8.0b2` on a package whose `8.0b2` needs a newer Python stayed in place
+  where `8.0b1` installs, and a package with only prereleases was reported as `no release
+  installs` although uv installs one. Both cases now follow uv.
 
 ## [3.22.4] 2026-10-22 19:00:45
 
