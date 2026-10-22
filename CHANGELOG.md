@@ -33,6 +33,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `... failed after the floor update` line now land in the stage's captured output (text mode keeps
   them on stderr). `BMK_NO_VENV_SYNC=1` now also skips that re-sync, as it already skipped
   provisioning.
+- **The devops-bmk skill describes the lock-first venv.** It said bmk syncs the project venv to
+  `pyproject.toml` with an exact, upgrading install and gave
+  `uv pip install --exact --upgrade -e ".[dev]"` as the hand resync. bmk syncs from `uv.lock`
+  (`uv lock`, then `uv sync --locked`) and installs from the manifest only when no lock can be made.
+  The skill now gives the lock-first resync, keeps the manifest install for a `[venv] uv lock
+  failed` line only, lists every `[venv]` provisioning failure header, says when `make test`'s
+  `deps_update` stage stops the run after a failed provisioning, and no longer says every
+  in-process stage fails with only `(no output captured)` (`deps_update` now says why).
 
 ## [3.22.3] 2026-10-21 20:59:38
 
