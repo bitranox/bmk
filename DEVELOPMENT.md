@@ -212,7 +212,8 @@ bmk's own environment holds bmk's toolchain and nothing of the target project - 
 dependencies live in the project's own venv, which bmk provisions and every gate resolves:
 
 - Before any pipeline that touches the Python environment, bmk creates the project's venv if it is
-  missing and syncs it to `pyproject.toml`, then points `VIRTUAL_ENV` at it.
+  missing and syncs it from `uv.lock` (`uv lock`, then `uv sync --locked`), then points
+  `VIRTUAL_ENV` at it. It installs from `pyproject.toml` only when no lock can be made.
 - pytest, pyright and pip-audit all resolve that same venv, so the tested, type-checked and audited
   environment are one and the same.
 - Broken venvs (stale mounts, missing `pyvenv.cfg`) are detected and ignored.

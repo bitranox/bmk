@@ -40,7 +40,8 @@ uv tool install --reinstall bmk
 ```
 
 `make` builds ONE directory in the project: `.venv`, the project's own venv, which bmk
-syncs to `pyproject.toml`. It is gitignored and disposable. bmk itself lives outside the
+syncs from `uv.lock` (`uv lock`, then `uv sync --locked`). Only when no lock can be made
+does it install from `pyproject.toml` instead. It is gitignored and disposable. bmk itself lives outside the
 project, in uv's tool dir (`uv tool dir`), shared by every repo - it can be shared
 precisely because it holds none of your packages.
 
