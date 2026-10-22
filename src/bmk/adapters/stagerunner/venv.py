@@ -38,11 +38,6 @@ if TYPE_CHECKING:
 
     from bmk.adapters.stagerunner.output import SupportsWrite
 
-# Install targets of the no-lock fallback, tried in order: a project with no ``[dev]``
-# extra (bmk itself is one - all its tooling is a runtime dependency by design) must
-# still install.
-_INSTALL_TARGETS: tuple[str, ...] = (".[dev]", ".")
-
 #: How long a bmk waits for another bmk to finish mutating the same venv. Generous,
 #: because the thing being waited on is a full resolve-and-install on a cold start,
 #: which is minutes on a heavy dependency tree. Overridable for tests and for a
@@ -925,20 +920,18 @@ def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool, strea
 
 
 def _install_from_manifest(cwd: Path, venv: Path, *, quiet: bool, stream: SupportsWrite | None) -> bool:
-    """The no-lock fallback: install the project from ``pyproject.toml``, ``.[dev]`` first, then ``.``.
+    """The no-lock fallback: install the project from ``pyproject.toml``, with ``[dev]`` when it declares one.
 
-    Only the LAST target's failure is reported: ``.[dev]`` failing on a project without that extra
-    is the expected route to ``.``, so its reason would only bury the one that ended provisioning.
+    The target comes from the manifest, never from trying ``.[dev]`` and then ``.``: that order
+    also caught a DECLARED extra failing to install, and the bare project then counted as
+    provisioned without its test tooling, so the gate died later with ``No module named pytest``
+    instead of naming the install that failed.
     """
-    python = str(venv_python(venv))
-    # Never reported as it stands: _INSTALL_TARGETS is never empty, so the loop always replaces it.
-    # It exists because the type checker cannot know that and would call `run` possibly unbound.
-    run = _UvRun(1)
-    for target in _INSTALL_TARGETS:
-        argv = ["uv", "pip", "install", "--python", python, "--exact", "--upgrade", "-e", target]
-        run = _run_for_report(argv, cwd, quiet=quiet)
-        if run.rc == 0:
-            return True
+    target = ".[dev]" if _declares_dev_extra(cwd) else "."
+    argv = ["uv", "pip", "install", "--python", str(venv_python(venv)), "--exact", "--upgrade", "-e", target]
+    run = _run_for_report(argv, cwd, quiet=quiet)
+    if run.rc == 0:
+        return True
     _report_failed_uv("uv pip install (fallback from pyproject.toml)", venv, run, stream=stream)
     return False
 
@@ -1052,11 +1045,20 @@ def _venv_state(venv: Path) -> str:
 
 def _sync_extras(cwd: Path) -> list[str]:
     """``--extra dev`` when the project declares it: uv refuses an undeclared extra (exit 2)."""
+    return ["--extra", "dev"] if _declares_dev_extra(cwd) else []
+
+
+def _declares_dev_extra(cwd: Path) -> bool:
+    """Whether ``pyproject.toml`` declares a ``[dev]`` extra; False when it cannot be read.
+
+    An unreadable manifest is uv's to report, never a reason to skip the sync or the install:
+    either one then fails and says why.
+    """
     try:
         extras = load_pyproject_config(cwd / "pyproject.toml").project.optional_dependencies
-    except Exception:  # an unreadable manifest is uv's to report, never a reason to skip the sync
-        return []
-    return ["--extra", "dev"] if "dev" in extras else []
+    except Exception:
+        return False
+    return "dev" in extras
 
 
 def _exempt_packages(cwd: Path) -> list[str]:

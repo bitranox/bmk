@@ -395,15 +395,16 @@ def test_a_successful_quiet_sync_prints_nothing(stub_uv_project: Path, capfd: py
 
 _VENV_RC = 3
 _LOCK_RC = 3
-_PIP_DEV_RC = 4
-_PIP_LAST_RC = 5
+_PIP_RC = 5
 
 
 def _lock_failure_line(project: Path) -> str:
     return f"[venv] uv lock failed in {project} (exit {_LOCK_RC}); provisioning .venv from pyproject.toml instead"
 
 
-_PIP_FAILURE_HEADER = f"[venv] uv pip install (fallback from pyproject.toml) failed for .venv (exit {_PIP_LAST_RC}; venv afterwards: venv)"
+_PIP_FAILURE_HEADER = (
+    f"[venv] uv pip install (fallback from pyproject.toml) failed for .venv (exit {_PIP_RC}; venv afterwards: venv)"
+)
 
 
 def _venv_failure_header(rc: int) -> str:
@@ -417,7 +418,7 @@ _FAILURES: dict[str, tuple[Callable[[StubUv], None], bool]] = {
     "uv-venv-exit-0-but-no-venv": (lambda stub: stub.install(venv_creates=False), False),
     "uv-lock": (lambda stub: stub.install(lock_rc=_LOCK_RC), True),
     "fallback-install": (
-        lambda stub: stub.install(lock_rc=_LOCK_RC, pip_install_rc={".[dev]": _PIP_DEV_RC, ".": _PIP_LAST_RC}),
+        lambda stub: stub.install(lock_rc=_LOCK_RC, pip_install_rc={".": _PIP_RC}),
         False,
     ),
 }
@@ -431,7 +432,6 @@ def _expected_reports(scenario: str, project: Path) -> list[tuple[str, list[str]
         "uv-venv": [(_venv_failure_header(_VENV_RC), [f"error: {VENV_MARKER}"])],
         "uv-venv-exit-0-but-no-venv": [(_venv_failure_header(0), no_reason)],
         "uv-lock": [lock],
-        # Only the LAST target's reason: ".[dev]" failing first is the expected route to ".".
         "fallback-install": [lock, (_PIP_FAILURE_HEADER, [f"error: {PIP_MARKER} ."])],
     }
     return reports[scenario]
@@ -651,20 +651,40 @@ def test_run_passes_uv_env_without_virtual_env(
 
 
 @pytest.mark.os_posix
-def test_ensure_project_venv_falls_back_when_no_dev_extra(tmp_path: Path, stub_uv: StubUv) -> None:
-    """Falls back to `.` when the project has no [dev] extra.
+def test_ensure_project_venv_installs_the_bare_project_when_no_dev_extra(tmp_path: Path, stub_uv: StubUv) -> None:
+    """Installs `.` from the manifest when the project has no [dev] extra, without trying `.[dev]` first.
 
     bmk itself has none: its tooling is declared as runtime dependencies.
     """
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
-    stub_uv.install(lock_rc=1, pip_install_rc={".[dev]": 1})  # no lock can be made, ".[dev]" fails, "." succeeds
+    stub_uv.install(lock_rc=1, pip_install_rc={".[dev]": 1})  # no lock can be made; "." succeeds
 
     result = ensure_project_venv(tmp_path, {})
 
     assert result == tmp_path / ".venv"
     targets = [c[-1] for c in stub_uv.commands() if c[:3] == ["uv", "pip", "install"]]
-    assert targets == [".[dev]", "."]
+    assert targets == ["."]
+
+
+@pytest.mark.os_posix
+def test_a_declared_dev_extra_that_fails_to_install_is_never_replaced_by_the_bare_project(
+    tmp_path: Path, stub_uv: StubUv
+) -> None:
+    """A project that declares [dev] gets `.[dev]` or nothing from the manifest fallback.
+
+    Falling back to `.` there left a venv with no pytest that counted as provisioned, so the
+    gate died later with `No module named pytest` instead of naming the failed install.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n[project.optional-dependencies]\ndev = ["pytest"]\n'
+    )
+    _make_venv(tmp_path / ".venv")
+    stub_uv.install(lock_rc=1, pip_install_rc={".[dev]": 1})  # no lock can be made, ".[dev]" fails, "." would succeed
+
+    assert ensure_project_venv(tmp_path, {}) is None
+    targets = [c[-1] for c in stub_uv.commands() if c[:3] == ["uv", "pip", "install"]]
+    assert targets == [".[dev]"]
 
 
 @pytest.mark.os_posix
@@ -676,7 +696,7 @@ def test_ensure_project_venv_returns_none_when_sync_fails(tmp_path: Path, stub_u
 
     assert ensure_project_venv(tmp_path, {}) is None
     targets = [c[-1] for c in stub_uv.commands() if c[:3] == ["uv", "pip", "install"]]
-    assert targets == [".[dev]", "."], "None comes from every install target failing, not an early exit"
+    assert targets == ["."], "None comes from the install failing, not an early exit"
 
 
 @pytest.mark.os_posix

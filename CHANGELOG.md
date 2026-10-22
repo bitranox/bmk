@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A project that declares a `[dev]` extra no longer gets a venv without it.** When no lock could
+  be made, the fallback install tried `-e ".[dev]"` and, on ANY failure, `-e "."`. That second
+  step was meant for a project with no dev extra, but it also caught a declared extra failing to
+  install: the bare project then counted as provisioned, and the gate died later with
+  `No module named pytest` instead of naming the install that failed. The target now comes from
+  `pyproject.toml` - `.[dev]` when the extra is declared, `.` otherwise - and a failed install is
+  reported as one.
+
 ## [3.22.4] 2026-10-22 19:00:45
 
 ### Changed
