@@ -41,6 +41,10 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `Bumped version: 0.1.0 -> 0.1.1` and exited 0, and a `version` key in a table before `[project]`
   was rewritten instead of the project's. The version is now set through a tomlkit round-trip,
   which keeps comments, formatting and the quote style.
+- **A pre-release Python classifier no longer rebuilds its venv on every run.** The newest
+  installed patch was taken as uv's version text, which for a beta reads `3.16.0b1`, and compared
+  for equality with what the venv's interpreter reports, `3.16.0`. The two never matched, so the
+  venv was deleted and re-resolved each time. The patch is now compared as `X.Y.Z` on both sides.
 
 ## [3.22.4] 2026-10-22 19:00:45
 

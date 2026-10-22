@@ -183,24 +183,22 @@ def _valid_uv_python_entry(raw_entry: object) -> _UvPythonEntry | None:
 
 
 def _highest_installed_patch(listing: str | None, minor: str) -> str | None:
-    """Newest CPython patch of ``minor`` in an installed-only listing, or None.
+    """Newest CPython patch of ``minor`` in an installed-only listing, as ``X.Y.Z``, or None.
 
     Compared on the numeric patch, never the version text: as strings ``"3.13.5"`` beats
-    ``"3.13.13"``.
+    ``"3.13.13"``. Returned as ``X.Y.Z`` from the parts, never uv's text, because the caller
+    compares it with what a venv's interpreter reports (``sys.version_info[:3]``): uv lists a
+    beta as ``3.16.0b1``, which would never equal the venv's ``3.16.0``.
     """
     entries = _uv_python_entries(listing)
     if entries is None:
         return None
-    best: tuple[int, str] | None = None
-    for entry in entries:
-        if entry.implementation != "cpython":
-            continue
-        if f"{entry.version_parts.major}.{entry.version_parts.minor}" != minor:
-            continue
-        patch = entry.version_parts.patch
-        if best is None or patch > best[0]:
-            best = (patch, entry.version)
-    return best[1] if best else None
+    patches = [
+        entry.version_parts.patch
+        for entry in entries
+        if entry.implementation == "cpython" and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
+    ]
+    return f"{minor}.{max(patches)}" if patches else None
 
 
 # One line from a venv's own interpreter: its implementation, X.Y.Z, and whether its GIL is disabled

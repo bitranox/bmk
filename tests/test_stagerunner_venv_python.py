@@ -214,6 +214,17 @@ def test_highest_installed_patch_compares_numerically() -> None:
 
 
 @pytest.mark.os_agnostic
+def test_highest_installed_patch_of_a_prerelease_is_in_the_form_the_venv_reports() -> None:
+    """uv lists a beta as ``3.16.0b1``; a venv on it reports ``sys.version_info[:3]``, ``3.16.0``.
+
+    ``_discard_venv_on_wrong_python`` compares the two for equality, so returning uv's text would
+    never match and the venv would be deleted and rebuilt on every run for a pre-release classifier.
+    """
+    listing = json.dumps([{**_entry("3.16.0", installed=True), "version": "3.16.0b1"}])
+    assert venv_mod._highest_installed_patch(listing, "3.16") == "3.16.0"
+
+
+@pytest.mark.os_agnostic
 def test_highest_installed_patch_none_for_absent_minor() -> None:
     assert venv_mod._highest_installed_patch(_UV_JSON, "3.11") is None
 
