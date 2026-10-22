@@ -7,28 +7,24 @@ local venv and the CI matrix agreeing about "the newest supported Python" instea
 apart, which is the same class of defect as a gate resolving the wrong interpreter.
 """
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import json
 import os
+import sys
+import venv as stdlib_venv
 from typing import TYPE_CHECKING
+
+import pytest
 
 from bmk.adapters.stagerunner import venv as venv_mod
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    import pytest
-
-
-def _uv_returns(payload: str | None) -> Callable[..., str | None]:
-    """Typed stand-in for `_run_capture` (a bare lambda is not strict-clean)."""
-
-    def _fake(*_args: object, **_kwargs: object) -> str | None:
-        return payload
-
-    return _fake
+    from uv_stub import StubUv
 
 
 def _pyproject(tmp_path: Path, classifiers: list[str]) -> Path:
@@ -170,6 +166,9 @@ def test_none_on_unparseable_pyproject(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # latest_installed_patch: the newest patch uv has for that minor
+#
+# The decision is the pure _highest_installed_patch, tested on every OS with the listing uv
+# prints; only the wiring (which command asks uv) needs the stub uv on PATH.
 # ---------------------------------------------------------------------------
 
 
@@ -197,38 +196,40 @@ _UV_JSON = json.dumps(
 )
 
 
-def test_latest_installed_patch_picks_the_highest_for_the_minor(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(_UV_JSON))
-    assert venv_mod.latest_installed_patch("3.14", tmp_path) == "3.14.5"
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_picks_the_highest_for_the_minor() -> None:
+    assert venv_mod._highest_installed_patch(_UV_JSON, "3.14") == "3.14.5"
 
 
-def test_latest_installed_patch_compares_numerically(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """patch 13 must beat patch 5 - a lexical compare would invert it."""
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(_UV_JSON))
-    assert venv_mod.latest_installed_patch("3.13", tmp_path) == "3.13.13"
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_compares_numerically() -> None:
+    """patch 13 must beat patch 5 - a lexical compare would invert it.
+
+    Both patches of ONE minor, 13 listed second: the shared listing's minors each hold patches
+    that sort the same either way, so it could not tell a numeric compare from a lexical one.
+    """
+    listing = json.dumps([_entry("3.13.5", installed=True), _entry("3.13.13", installed=True)])
+    assert venv_mod._highest_installed_patch(listing, "3.13") == "3.13.13"
 
 
-def test_latest_installed_patch_none_for_absent_minor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(_UV_JSON))
-    assert venv_mod.latest_installed_patch("3.11", tmp_path) is None
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_none_for_absent_minor() -> None:
+    assert venv_mod._highest_installed_patch(_UV_JSON, "3.11") is None
 
 
-def test_latest_installed_patch_none_when_uv_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_none_when_uv_gave_no_listing() -> None:
     """uv missing or erroring must not raise - the caller degrades to uv's own choice."""
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(None))
-    assert venv_mod.latest_installed_patch("3.14", tmp_path) is None
+    assert venv_mod._highest_installed_patch(None, "3.14") is None
 
 
-def test_latest_installed_patch_none_on_garbage_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns("not json at all"))
-    assert venv_mod.latest_installed_patch("3.14", tmp_path) is None
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_none_on_garbage_json() -> None:
+    assert venv_mod._highest_installed_patch("not json at all", "3.14") is None
 
 
-def test_latest_installed_patch_ignores_non_cpython_even_with_higher_patch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_ignores_non_cpython_even_with_higher_patch() -> None:
     """Only CPython counts: uv provisions CPython, so a higher-patch PyPy must not win.
 
     Otherwise the reported "newest" never matches the CPython venv and it rebuilds every run.
@@ -249,11 +250,11 @@ def test_latest_installed_patch_ignores_non_cpython_even_with_higher_patch(
             },
         ]
     )
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(mixed))
-    assert venv_mod.latest_installed_patch("3.11", tmp_path) == "3.11.15"
+    assert venv_mod._highest_installed_patch(mixed, "3.11") == "3.11.15"
 
 
-def test_latest_installed_patch_skips_malformed_entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_agnostic
+def test_highest_installed_patch_skips_malformed_entry() -> None:
     """An entry missing version_parts (or typed oddly) is skipped, not fatal."""
     partial = json.dumps(
         [
@@ -266,8 +267,16 @@ def test_latest_installed_patch_skips_malformed_entry(monkeypatch: pytest.Monkey
             },
         ]
     )
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(partial))
-    assert venv_mod.latest_installed_patch("3.12", tmp_path) == "3.12.7"
+    assert venv_mod._highest_installed_patch(partial, "3.12") == "3.12.7"
+
+
+@pytest.mark.os_posix
+def test_latest_installed_patch_asks_uv_for_the_installed_pythons(tmp_path: Path, stub_uv: StubUv) -> None:
+    """The listing must be the installed one: a download on offer is not an interpreter yet."""
+    stub_uv.install(installed_json=_UV_JSON)
+
+    assert venv_mod.latest_installed_patch("3.14", tmp_path) == "3.14.5"
+    assert stub_uv.commands() == [["uv", "python", "list", "--only-installed", "--output-format", "json"]]
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +292,27 @@ def test_latest_installed_patch_skips_malformed_entry(monkeypatch: pytest.Monkey
 # patch release. These pin that the text is NOT the source of truth.
 # ---------------------------------------------------------------------------
 
+# What venv_version's probe prints. Not platform.python_version(): that keeps a pre-release
+# suffix ("3.15.0rc1") the probe's sys.version_info[:3] drops.
+_RUNNING_VERSION = ".".join(map(str, sys.version_info[:3]))
+# No interpreter this suite runs on can report it, so a match can only come from the cfg text.
+_STALE_CFG_VERSION = "3.0.0"
+
+
+def _real_venv_with_stale_cfg(tmp_path: Path) -> Path:
+    """A real venv on the running interpreter whose pyvenv.cfg names another version.
+
+    That is the post-``uv python upgrade`` state: the interpreter moved on, the text did not.
+    """
+    v = tmp_path / ".venv"
+    # symlinks on POSIX as `python -m venv` does: a copied standalone build can lose its libpython
+    stdlib_venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(v)
+    cfg = v / "pyvenv.cfg"
+    kept = [line for line in cfg.read_text(encoding="utf-8").splitlines() if not line.startswith("version")]
+    stale = [f"version = {_STALE_CFG_VERSION}", f"version_info = {_STALE_CFG_VERSION}"]
+    cfg.write_text("\n".join([*kept, *stale]) + "\n", encoding="utf-8")
+    return v
+
 
 def _fake_venv(tmp_path: Path, *, cfg_says: str) -> Path:
     v = tmp_path / ".venv"
@@ -292,32 +322,37 @@ def _fake_venv(tmp_path: Path, *, cfg_says: str) -> Path:
     return v
 
 
-def test_venv_version_asks_the_interpreter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    v = _fake_venv(tmp_path, cfg_says="3.12.12")
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns("3.12.13\n"))
+@pytest.mark.os_agnostic
+def test_venv_version_asks_the_interpreter(tmp_path: Path) -> None:
+    v = _real_venv_with_stale_cfg(tmp_path)
 
-    assert venv_mod.venv_version(v) == "3.12.13"
+    assert venv_mod.venv_version(v) == _RUNNING_VERSION
 
 
-def test_venv_version_ignores_a_stale_pyvenv_cfg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The exact post-upgrade state: cfg says 3.12.12, the interpreter is 3.12.13.
+@pytest.mark.os_agnostic
+def test_venv_version_ignores_a_stale_pyvenv_cfg(tmp_path: Path) -> None:
+    """The exact post-upgrade state: the cfg names one version, the interpreter is another.
 
     Returning the cfg text here is what would trigger a needless full rebuild.
     """
-    v = _fake_venv(tmp_path, cfg_says="3.12.12")
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns("3.12.13\n"))
+    v = _real_venv_with_stale_cfg(tmp_path)
 
-    assert venv_mod.venv_version(v) != "3.12.12"
+    assert venv_mod.venv_version(v) != _STALE_CFG_VERSION
 
 
-def test_venv_version_none_when_the_interpreter_will_not_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A broken venv reports nothing, so the caller leaves it alone rather than guessing."""
+@pytest.mark.os_agnostic
+def test_venv_version_none_when_the_interpreter_will_not_run(tmp_path: Path) -> None:
+    """A broken venv reports nothing, so the caller leaves it alone rather than guessing.
+
+    The interpreter is an empty file: POSIX refuses to exec it (EACCES, not executable) and
+    Windows refuses to load it (WinError 193, not a valid Win32 application), both an OSError.
+    """
     v = _fake_venv(tmp_path, cfg_says="3.14.0")
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(None))
 
     assert venv_mod.venv_version(v) is None
 
 
+@pytest.mark.os_agnostic
 def test_venv_version_none_when_absent(tmp_path: Path) -> None:
     assert venv_mod.venv_version(tmp_path / "nope") is None
 
@@ -331,6 +366,8 @@ def test_venv_version_none_when_absent(tmp_path: Path) -> None:
 # interpreter through such an alias, so each no-op call briefly removes the interpreter of
 # every venv on the machine: test-all's 3.10 cell, syncing while a later cell ran its
 # install, failed "No interpreter found at path .venv-3.10/bin/python" (bmk OPEN-WORK [102]).
+#
+# The decision is the pure _listing_needs_install; the stub uv covers only what reaches uv.
 
 
 def _entry(version: str, *, installed: bool, implementation: str = "cpython") -> dict[str, object]:
@@ -343,91 +380,54 @@ def _entry(version: str, *, installed: bool, implementation: str = "cpython") ->
     }
 
 
-def _record_runs(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    # hermetic: a developer's own python-downloads setting must not decide these tests
-    monkeypatch.delenv("UV_PYTHON_DOWNLOADS", raising=False)
-    seen: list[list[str]] = []
-
-    def _fake_run(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
-        _ = quiet, env
-        seen.append(argv)
-        return 0
-
-    monkeypatch.setattr(venv_mod, "_run", _fake_run)
-    return seen
+_LIST_OFFERED = ["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"]
 
 
-def test_a_current_minor_runs_neither_install_nor_upgrade(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_agnostic
+def test_a_current_minor_needs_no_install() -> None:
     listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.12", installed=True)])
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
-    runs = _record_runs(monkeypatch)
 
-    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
-
-    assert runs == []
+    assert venv_mod._listing_needs_install(listing, "3.12") is False
 
 
-def test_a_newer_patch_on_offer_runs_install_and_upgrade(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_agnostic
+def test_a_newer_patch_on_offer_needs_an_install() -> None:
     listing = json.dumps([_entry("3.12.16", installed=False), _entry("3.12.15", installed=True)])
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
-    runs = _record_runs(monkeypatch)
 
-    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
-
-    assert ["uv", "python", "install", "3.12"] in runs
-    assert ["uv", "python", "upgrade", "3.12"] in runs
+    assert venv_mod._listing_needs_install(listing, "3.12") is True
 
 
-def test_an_absent_minor_is_installed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_agnostic
+def test_an_absent_minor_needs_an_install() -> None:
     listing = json.dumps([_entry("3.15.0", installed=False), _entry("3.14.8", installed=True)])
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
-    runs = _record_runs(monkeypatch)
 
-    venv_mod.ensure_minors_installed(tmp_path, ["3.15"])
-
-    assert ["uv", "python", "install", "3.15"] in runs
+    assert venv_mod._listing_needs_install(listing, "3.15") is True
 
 
-def test_when_uv_cannot_list_both_commands_still_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_agnostic
+def test_no_listing_still_needs_an_install() -> None:
     """No answer is not 'current': fall back to the old always-run behaviour."""
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(None))
-    runs = _record_runs(monkeypatch)
-
-    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
-
-    assert ["uv", "python", "install", "3.12"] in runs
-    assert ["uv", "python", "upgrade", "3.12"] in runs
+    assert venv_mod._listing_needs_install(None, "3.12") is True
 
 
-def test_a_newer_pypy_download_does_not_trigger_a_cpython_upgrade(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+@pytest.mark.os_agnostic
+def test_a_newer_pypy_download_does_not_make_a_cpython_minor_need_an_install() -> None:
     listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.99", installed=False, implementation="pypy")])
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
-    runs = _record_runs(monkeypatch)
 
-    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
-
-    assert runs == []
+    assert venv_mod._listing_needs_install(listing, "3.12") is False
 
 
-def test_a_freethreaded_download_without_a_variant_field_is_still_not_the_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+@pytest.mark.os_agnostic
+def test_a_freethreaded_download_without_a_variant_field_is_still_not_the_default() -> None:
     """A uv that predates the ``variant`` field still names the build in its ``key``."""
     freethreaded = {**_entry("3.14.8", installed=False), "key": "cpython-3.14.8+freethreaded-linux-x86_64-gnu"}
     current = {**_entry("3.14.8", installed=True), "key": "cpython-3.14.8-linux-x86_64-gnu"}
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(json.dumps([current, freethreaded])))
-    runs = _record_runs(monkeypatch)
 
-    venv_mod.ensure_minors_installed(tmp_path, ["3.14"])
-
-    assert runs == []
+    assert venv_mod._listing_needs_install(json.dumps([current, freethreaded]), "3.14") is False
 
 
-def test_a_freethreaded_download_does_not_make_a_current_minor_look_stale(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+@pytest.mark.os_agnostic
+def test_a_freethreaded_download_does_not_make_a_current_minor_look_stale() -> None:
     """The real listing: uv shows a not-installed +freethreaded build beside every 3.13+ minor.
 
     `uv python install 3.14` never installs that variant, so counting it reads every 3.13+
@@ -435,16 +435,56 @@ def test_a_freethreaded_download_does_not_make_a_current_minor_look_stale(
     """
     freethreaded = {**_entry("3.14.8", installed=False), "variant": "freethreaded"}
     listing = json.dumps([{**_entry("3.14.8", installed=True), "variant": "default"}, freethreaded])
-    monkeypatch.setattr(venv_mod, "_run_capture", _uv_returns(listing))
-    runs = _record_runs(monkeypatch)
 
-    venv_mod.ensure_minors_installed(tmp_path, ["3.14"])
-
-    assert runs == []
+    assert venv_mod._listing_needs_install(listing, "3.14") is False
 
 
+@pytest.mark.os_posix
+def test_a_current_minor_reaches_uv_only_to_list(tmp_path: Path, stub_uv: StubUv) -> None:
+    """Nothing newer -> neither alias-rewriting command may reach uv."""
+    stub_uv.install(offered_json=json.dumps([_entry("3.12.15", installed=True)]))
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert stub_uv.commands() == [_LIST_OFFERED]
+
+
+@pytest.mark.os_posix
+def test_a_needed_install_runs_install_before_upgrade(tmp_path: Path, stub_uv: StubUv) -> None:
+    """``install`` fetches an absent minor, ``upgrade`` then moves it to the newest patch."""
+    listing = json.dumps([_entry("3.12.16", installed=False), _entry("3.12.15", installed=True)])
+    stub_uv.install(offered_json=listing)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert stub_uv.commands() == [
+        _LIST_OFFERED,
+        ["uv", "python", "install", "3.12"],
+        ["uv", "python", "upgrade", "3.12"],
+    ]
+
+
+@pytest.mark.os_posix
+def test_when_uv_cannot_list_both_commands_still_run(tmp_path: Path, stub_uv: StubUv) -> None:
+    """No answer is not 'current': fall back to the old always-run behaviour.
+
+    Every ``uv python`` call fails here, install and upgrade included: their exit code is
+    ignored, so a failing install must not stop the upgrade either.
+    """
+    stub_uv.install(python_rc=1)
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
+
+    assert stub_uv.commands() == [
+        _LIST_OFFERED,
+        ["uv", "python", "install", "3.12"],
+        ["uv", "python", "upgrade", "3.12"],
+    ]
+
+
+@pytest.mark.os_posix
 def test_the_listing_asks_for_downloads_whatever_python_downloads_says(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_uv: StubUv
 ) -> None:
     """uv hides every download entry under python-downloads manual/never - set in env OR config.
 
@@ -452,15 +492,9 @@ def test_the_listing_asks_for_downloads_whatever_python_downloads_says(
     `--allow-python-downloads` makes the listing show what is on offer regardless (measured, uv
     0.13.0: 13 download entries again under a pyproject `manual` and under UV_PYTHON_DOWNLOADS=never).
     """
-    asked: list[list[str]] = []
-
-    def _fake_capture(argv: list[str], *_args: object, **_kwargs: object) -> str | None:
-        asked.append(argv)
-        return None
-
-    monkeypatch.setattr(venv_mod, "_run_capture", _fake_capture)
-    _record_runs(monkeypatch)
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
 
     venv_mod.ensure_minors_installed(tmp_path, ["3.12"])
 
-    assert asked == [["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"]]
+    listings = [cmd for cmd in stub_uv.commands() if cmd[:3] == ["uv", "python", "list"]]
+    assert listings == [_LIST_OFFERED]

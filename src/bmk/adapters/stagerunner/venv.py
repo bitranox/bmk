@@ -153,22 +153,48 @@ def latest_installed_patch(minor: str, cwd: Path) -> str | None:
     this: it answers with the interpreter for the current CONTEXT (an active venv, or the
     cwd's own ``.venv``), not the one uv would provision.
     """
-    raw = _run_capture(["uv", "python", "list", "--only-installed", "--output-format", "json"], cwd)
-    if not raw:
+    listing = _run_capture(["uv", "python", "list", "--only-installed", "--output-format", "json"], cwd)
+    return _highest_installed_patch(listing, minor)
+
+
+def _uv_python_entries(listing: str | None) -> list[_UvPythonEntry] | None:
+    """The valid entries of a ``uv python list --output-format json`` listing.
+
+    None when there is no usable listing at all (uv could not run, or printed something that is
+    not a JSON list); each caller decides what "uv could not answer" means for it. A single
+    entry that fails validation is skipped, never fatal.
+    """
+    if not listing:
         return None
     try:
-        entries = json.loads(raw)
+        raw_entries = json.loads(listing)
     except (json.JSONDecodeError, ValueError):
         return None
-    if not isinstance(entries, list):
+    if not isinstance(raw_entries, list):
+        return None
+    validated = (_valid_uv_python_entry(raw_entry) for raw_entry in cast("list[Any]", raw_entries))
+    return [entry for entry in validated if entry is not None]
+
+
+def _valid_uv_python_entry(raw_entry: object) -> _UvPythonEntry | None:
+    """One listing entry as a model, or None when it lacks a field or types one oddly."""
+    try:
+        return _UvPythonEntry.model_validate(raw_entry)
+    except ValidationError:
         return None
 
+
+def _highest_installed_patch(listing: str | None, minor: str) -> str | None:
+    """Newest CPython patch of ``minor`` in an installed-only listing, or None.
+
+    Compared on the numeric patch, never the version text: as strings ``"3.13.5"`` beats
+    ``"3.13.13"``.
+    """
+    entries = _uv_python_entries(listing)
+    if entries is None:
+        return None
     best: tuple[int, str] | None = None
-    for raw_entry in cast("list[Any]", entries):
-        try:
-            entry = _UvPythonEntry.model_validate(raw_entry)
-        except ValidationError:
-            continue
+    for entry in entries:
         if entry.implementation != "cpython":
             continue
         if f"{entry.version_parts.major}.{entry.version_parts.minor}" != minor:
@@ -482,24 +508,26 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
     ``--allow-python-downloads``: with ``python-downloads`` set to manual or never (env OR any uv
     config file) uv hides every download entry, and "nothing listed" would read as "current".
     """
-    raw = _run_capture(["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"], cwd)
-    if not raw:
+    listing = _run_capture(["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"], cwd)
+    return _listing_needs_install(listing, minor)
+
+
+def _listing_needs_install(listing: str | None, minor: str) -> bool:
+    """Whether a ``uv python list --allow-python-downloads`` listing has work for ``minor``.
+
+    True when the default CPython build of ``minor`` is absent or a download of it is on offer
+    (an entry with no ``path``), and when there is no usable listing: no answer is not "current".
+    """
+    entries = _uv_python_entries(listing)
+    if entries is None:
         return True
-    try:
-        entries = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        return True
-    if not isinstance(entries, list):
-        return True
-    relevant: list[_UvPythonEntry] = []
-    for raw_entry in cast("list[Any]", entries):
-        try:
-            entry = _UvPythonEntry.model_validate(raw_entry)
-        except ValidationError:
-            continue
-        same_minor = f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
-        if entry.implementation == "cpython" and entry.is_default_build and same_minor:
-            relevant.append(entry)
+    relevant = [
+        entry
+        for entry in entries
+        if entry.implementation == "cpython"
+        and entry.is_default_build
+        and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
+    ]
     return not relevant or any(entry.path is None for entry in relevant)
 
 
