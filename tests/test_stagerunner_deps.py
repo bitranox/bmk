@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -359,3 +360,74 @@ def test_bmk_no_venv_sync_also_skips_the_deps_update_resync(deps_project: Path, 
     assert rc == 0
     assert ["uv", "lock", "--upgrade"] in stub_uv.commands(), "the lock is still upgraded"
     assert _sync_calls(stub_uv) == 0, "BMK_NO_VENV_SYNC=1 opts out of every sync, this one too"
+
+
+# --- what `make test` users see: its first stage `update_deps` runs the `deps_update` PIPELINE, so the
+# failed stage block nests inside the outer stage's capture (PipelineAction), never on stderr. ---
+
+
+class _CountingSink(CapturingSink):
+    """A capture that also counts its writes, so a line written in two calls shows up."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes = 0
+
+    def write(self, text: str) -> None:
+        self.writes += 1
+        super().write(text)
+
+
+@pytest.mark.os_posix
+def test_make_tests_update_deps_stage_nests_the_skip_line_in_its_capture(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from bmk.adapters.stagerunner.actions import PipelineAction
+
+    _make_venv(deps_project / ".venv")
+    stub_uv.install(lock_aftermath=_LOCK_WRITE)
+    ctx = _ctx(deps_project, venv_provisioning=VenvProvisioning.FAILED)
+    outer = CapturingSink()
+
+    rc = PipelineAction("deps_update")(ctx, outer)
+
+    out, err = capfd.readouterr()
+    assert rc == 1
+    assert f"[deps_update] (exit code: 1)\n{_skip_line(deps_project)}\n" in outer.getvalue(), outer.getvalue()
+    assert out == "", "the nested block goes into the outer stage's capture, not straight to stdout"
+    assert err == "", "nothing of it bypasses the capture"
+
+
+@pytest.mark.os_posix
+def test_the_skip_line_is_one_write(deps_project: Path, stub_uv: StubUv) -> None:
+    """One write per line, like the venv reports: a line written in two calls can be split by a parallel writer."""
+    _make_venv(deps_project / ".venv")
+    stub_uv.install(lock_aftermath=_LOCK_WRITE)
+    sink = _CountingSink()
+
+    rc = PIPELINES["deps_update"][0].action(_ctx(deps_project, venv_provisioning=VenvProvisioning.FAILED), sink)
+
+    assert rc == 1
+    assert sink.getvalue() == f"{_skip_line(deps_project)}\n"
+    assert sink.writes == 1
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed")
+def test_a_cooldown_uv_refuses_is_reported_inside_the_deps_update_capture(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Real uv judges `[tool.uv] exclude-newer`; its refusal must land in the stage's JSON-mode capture."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\nname = "demo"\nversion = "0.1.0"\n\n[tool.uv]\nexclude-newer = "not-a-date"\n', encoding="utf-8"
+    )
+    sink = CapturingSink()
+
+    rc = PIPELINES["deps_update"][0].action(_ctx(tmp_path), sink)
+
+    err = capfd.readouterr().err
+    assert rc == 1
+    assert sink.getvalue().startswith(f"{pyproject}: "), sink.getvalue()
+    assert "cooldown" in sink.getvalue()
+    assert str(pyproject) not in err, err

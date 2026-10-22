@@ -1650,8 +1650,13 @@ def _read_bytes(path: Path) -> bytes | None:
 
 
 def _say(line: str, out: SupportsWrite | None) -> None:
-    """Write one line to ``out``, or to the process's stderr (looked up now) when None."""
-    print(line, file=sys.stderr if out is None else out)
+    """Write one line to ``out``, or to the process's stderr (looked up now) when None.
+
+    ONE write, newline included, like the venv reports: stderr is shared with whatever runs in
+    parallel (``push`` runs ``test`` beside ``build``), and a line written as text and newline in
+    two calls can be split by theirs.
+    """
+    (sys.stderr if out is None else out).write(line + "\n")
 
 
 def _requires_of_newest(package_name: str) -> list[str] | None:
@@ -1889,7 +1894,9 @@ def main(
                 _complete_block(pyproject, supply_chain, quiet=quiet)
             deps = check_dependencies(pyproject)
     except SupplyChainConfigError as exc:
-        print(f"{pyproject}: {exc}", file=sys.stderr)
+        # Into the stage's capture when deps_update runs as a JSON-mode stage, so its failed block
+        # says why instead of reading '(no output captured)'.
+        _say(f"{pyproject}: {exc}", locked.out if locked is not None else None)
         return 1
     exit_code = int(_check_fails(deps)) if quiet else print_report(deps, verbose=verbose)
 
