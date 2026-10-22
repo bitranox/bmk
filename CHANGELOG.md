@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.5] 2026-10-22 22:01:10
+
 ### Fixed
 
 - **A project that declares a `[dev]` extra no longer gets a venv without it.** When no lock could
