@@ -142,3 +142,30 @@ def test_a_310_venv_without_a_declared_minor_that_uv_sync_recreates_is_rebuilt_w
     assert "[venv] uv sync from uv.lock failed" not in err, err
     assert _python_says(venv_python(venv), "import platform; print(platform.python_version())") == version
     assert aged not in (venv / "pyvenv.cfg").read_text(encoding="utf-8"), "uv sync did not recreate the venv"
+
+
+def test_a_pypy_venv_without_a_declared_minor_that_uv_sync_recreates_stays_pypy(
+    offline_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No classifier: a PyPy venv uv recreates must come back as PyPy, not as uv's default CPython.
+
+    A bare ``X.Y`` request is implementation-agnostic, so a recreate builds from uv's preferred
+    interpreter for it - CPython. The request has to name the implementation the venv runs.
+    """
+    found = subprocess.run(["uv", "python", "find", "pypy"], capture_output=True, check=False)
+    if found.returncode != 0:
+        pytest.skip(f"uv finds no PyPy offline (`uv python find pypy` exit {found.returncode})")
+    monkeypatch.setenv("UV_PYTHON", "pypy")
+    venv = offline_project / ".venv"
+    assert ensure_project_venv_at(offline_project, venv, None, install_python=False) == venv
+    python = venv_python(venv)
+    if _python_says(python, "import sys; print(sys.implementation.name)") != "pypy":
+        pytest.skip("UV_PYTHON=pypy did not give uv venv a PyPy interpreter")
+    version = _python_says(python, "import platform; print(platform.python_version())")
+    aged = _age_version_info(venv, version)
+    shutil.rmtree(tmp_path / "uv-cache")
+
+    assert ensure_project_venv_at(offline_project, venv, None, install_python=False) == venv
+
+    assert aged not in (venv / "pyvenv.cfg").read_text(encoding="utf-8"), "uv sync did not recreate the venv"
+    assert _python_says(venv_python(venv), "import sys; print(sys.implementation.name)") == "pypy"

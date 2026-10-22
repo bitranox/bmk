@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import sysconfig
 import venv as stdlib_venv
 from typing import TYPE_CHECKING
 
@@ -355,6 +356,47 @@ def test_venv_version_none_when_the_interpreter_will_not_run(tmp_path: Path) -> 
 @pytest.mark.os_agnostic
 def test_venv_version_none_when_absent(tmp_path: Path) -> None:
     assert venv_mod.venv_version(tmp_path / "nope") is None
+
+
+# ---------------------------------------------------------------------------
+# _python_request: with no classifier, the uv sync request names the venv's kind of interpreter.
+# A bare X.Y lets a recreate fall back to uv's default CPython (measured, uv 0.13.0: a PyPy venv
+# came back as CPython), so PyPy is asked for as pypy@X.Y and a free-threaded build as X.Yt.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("probe", "uv_request"),
+    [
+        ("cpython 3.10.19 0", "3.10"),
+        ("pypy 3.11.13 0", "pypy@3.11"),
+        ("cpython 3.13.5 1", "3.13t"),
+    ],
+    ids=["cpython", "pypy", "free-threaded"],
+)
+def test_the_request_names_the_venvs_kind_of_interpreter(probe: str, uv_request: str) -> None:
+    assert venv_mod._python_request(venv_mod._parse_interpreter_probe(probe)) == uv_request
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("probe", [None, "", "3.10.19", "cpython 3.10.19", "cpython 3.10.19 yes"])
+def test_no_request_when_the_probe_could_not_answer(probe: str | None) -> None:
+    assert venv_mod._parse_interpreter_probe(probe) is None
+    assert venv_mod._python_request(None) is None
+
+
+@pytest.mark.os_agnostic
+def test_the_probe_on_the_running_interpreter_gives_its_own_request(tmp_path: Path) -> None:
+    """The real probe through a real venv: one subprocess answers both the version and the request."""
+    v = _real_venv_with_stale_cfg(tmp_path)
+    minor = f"{sys.version_info[0]}.{sys.version_info[1]}"
+    expected = {
+        "pypy": f"pypy@{minor}",
+        "cpython": f"{minor}t" if sysconfig.get_config_var("Py_GIL_DISABLED") else minor,
+    }.get(sys.implementation.name, minor)
+
+    assert venv_mod._python_request(venv_mod._probe_interpreter(v)) == expected
 
 
 # ---------------------------------------------------------------------------

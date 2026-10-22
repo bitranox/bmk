@@ -24,9 +24,10 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **A project with no Python classifier no longer loses a 3.10 (or 3.9) venv that `uv sync`
   recreates.** 3.22.3 asked the sync for the declared minor, but a project declaring none still
   passed the venv's own `bin/python` as `--python`, the request that leaves an empty directory when
-  uv recreates the venv on CPython 3.10 and older. The sync now asks for the minor that venv's
-  interpreter reports (`--python 3.10`); only an interpreter that cannot report a version is still
-  passed by path.
+  uv recreates the venv on CPython 3.10 and older. The sync now asks for what that venv's
+  interpreter reports: `pypy@X.Y` for PyPy, `X.Yt` for a free-threaded build, otherwise the bare
+  minor (`--python 3.10`), so a recreate keeps the implementation instead of falling back to uv's
+  default CPython. Only an interpreter that cannot answer is still passed by path.
 - **`bmk test` / `bmk deps update` print a failed venv sync once, and a `deps_update` stage that
   fails on that sync says why instead of `(no output captured)`.** Provisioning syncs the venv
   before the pipeline, and the `deps_update` stage synced it again after its `uv lock --upgrade`, so

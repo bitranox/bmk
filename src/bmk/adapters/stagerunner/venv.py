@@ -208,7 +208,48 @@ def _highest_installed_patch(listing: str | None, minor: str) -> str | None:
     return best[1] if best else None
 
 
-_VERSION_PROBE = "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+# One line from a venv's own interpreter: its implementation, X.Y.Z, and whether its GIL is disabled
+# (1 or 0), so the version and the uv request for it come from a single subprocess.
+_INTERPRETER_PROBE = (
+    "import sys, sysconfig; "
+    "print(sys.implementation.name, '.'.join(map(str, sys.version_info[:3])), "
+    "int(bool(sysconfig.get_config_var('Py_GIL_DISABLED'))))"
+)
+
+
+# The probe prints exactly these fields, in this order.
+_PROBE_FIELDS = 3
+
+
+@dataclass(frozen=True)
+class _VenvInterpreter:
+    """What a venv's interpreter says about itself.
+
+    Attributes:
+        implementation: ``sys.implementation.name`` (``cpython``, ``pypy``, ...).
+        version: ``X.Y.Z`` from ``sys.version_info``.
+        gil_disabled: A free-threaded build (``Py_GIL_DISABLED``).
+    """
+
+    implementation: str
+    version: str
+    gil_disabled: bool
+
+
+def _parse_interpreter_probe(raw: str | None) -> _VenvInterpreter | None:
+    """The probe's one line as a :class:`_VenvInterpreter`; None for no answer or one of another shape."""
+    fields = raw.split() if raw else []
+    if len(fields) != _PROBE_FIELDS or fields[2] not in ("0", "1"):
+        return None
+    return _VenvInterpreter(implementation=fields[0], version=fields[1], gil_disabled=fields[2] == "1")
+
+
+def _probe_interpreter(venv: Path) -> _VenvInterpreter | None:
+    """Ask the venv's own interpreter what it is; None when it is absent or will not answer."""
+    python = venv_python(venv)
+    if not python.is_file():
+        return None
+    return _parse_interpreter_probe(_run_capture([str(python), "-c", _INTERPRETER_PROBE], venv.parent))
 
 
 def venv_version(venv: Path) -> str | None:
@@ -230,11 +271,8 @@ def venv_version(venv: Path) -> str | None:
     and only a MINOR change does. Asking the interpreter costs one subprocess and is true in
     both directions.
     """
-    python = venv_python(venv)
-    if not python.is_file():
-        return None
-    raw = _run_capture([str(python), "-c", _VERSION_PROBE], venv.parent)
-    return raw.strip() or None if raw else None
+    interpreter = _probe_interpreter(venv)
+    return interpreter.version if interpreter else None
 
 
 def is_venv(venv: Path) -> bool:
@@ -840,20 +878,36 @@ def _provision_locked(
 
 
 def _sync_python_request(venv: Path, minor: str | None) -> str:
-    """The ``--python`` request for ``uv sync``: a minor (``3.10``), never the interpreter inside ``venv``.
+    """The ``--python`` request for ``uv sync``: a version request, never the interpreter inside ``venv``.
 
     uv sync may remove the venv and recreate it from the requested interpreter's
     ``sys._base_executable``, which on CPython <= 3.10 is the venv's own ``bin/python`` - deleted by
     then, so uv failed and left an empty directory (bmk OPEN-WORK [19]). So the request is the
-    declared minor, or with none declared, the minor the venv's interpreter reports. Only when that
-    interpreter cannot report a version is its path the request: uv could not build from it either.
+    declared minor, or with none declared, what the venv's interpreter reports
+    (:func:`_python_request`). Only when that interpreter cannot answer is its path the request: uv
+    could not build from it either.
     """
     if minor:
         return minor
-    version = venv_version(venv)
-    if version:
-        return ".".join(version.split(".")[:2])
-    return str(venv_python(venv))
+    return _python_request(_probe_interpreter(venv)) or str(venv_python(venv))
+
+
+def _python_request(interpreter: _VenvInterpreter | None) -> str | None:
+    """The uv request that rebuilds ``interpreter``'s kind: ``pypy@X.Y``, ``X.Yt`` or ``X.Y``; None without one.
+
+    A bare ``X.Y`` is enough for uv to accept an existing venv of any implementation, but when uv
+    has to recreate the venv it builds from its preferred interpreter for the request - default
+    CPython (measured, uv 0.13.0: a PyPy venv came back as CPython). Naming the implementation, or
+    the free-threaded variant, keeps the venv what the project chose.
+    """
+    if interpreter is None:
+        return None
+    minor = ".".join(interpreter.version.split(".")[:2])
+    if interpreter.implementation == "pypy":
+        return f"pypy@{minor}"
+    if interpreter.gil_disabled:
+        return f"{minor}t"
+    return minor
 
 
 def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool, stream: SupportsWrite | None) -> bool:

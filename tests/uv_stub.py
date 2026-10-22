@@ -111,8 +111,9 @@ class StubUv:
             venv_rc: Exit code of ``uv venv``; a non-zero one prints :data:`VENV_MARKER` on stderr.
             venv_creates: Whether a ``uv venv`` that exits 0 creates the venv-shaped directory; False
                 makes uv report success and leave nothing behind.
-            venv_reports: The version the created venv's ``bin/python`` prints for any command line,
-                as bmk's version probe expects; None leaves an empty, unrunnable file there.
+            venv_reports: What the created venv's ``bin/python`` prints for any command line, in the
+                shape bmk's interpreter probe reads (``<implementation> <X.Y.Z> <0|1>``, the last
+                field the free-threaded flag); None leaves an empty, unrunnable file there.
             python_rc: Exit code of every ``uv python ...``; a non-zero ``list`` prints nothing.
             lock_rc: Exit code of ``uv lock``; a non-zero one prints :data:`LOCK_MARKER` on stderr.
             lock_aftermath: Shell run by a ``uv lock`` that succeeds, in the directory uv runs in (the

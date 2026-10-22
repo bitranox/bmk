@@ -505,7 +505,7 @@ def test_a_text_mode_provisioning_failure_streams_uv_live_and_adds_bare_headers(
 def test_the_sync_asks_uv_for_the_minor_never_the_interpreter_inside_the_venv(
     stub_uv_project: Path, stub_uv: StubUv, minor: str | None, venv_name: str
 ) -> None:
-    stub_uv.install(venv_reports="3.10.19")
+    stub_uv.install(venv_reports="cpython 3.10.19 0")
     venv = stub_uv_project / venv_name
 
     assert ensure_project_venv_at(stub_uv_project, venv, minor, quiet=True, install_python=False) == venv
