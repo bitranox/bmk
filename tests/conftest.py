@@ -25,6 +25,7 @@ import pytest
 import rich_click.rich_click
 from click.testing import CliRunner, Result
 from lib_layered_config import Config
+from uv_stub import StubUv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
@@ -866,3 +867,21 @@ def cli_pipeline_probe(
         return cli_runner.invoke(cli_mod.cli, cli_args, obj=production_factory)
 
     return run
+
+
+@pytest.fixture
+def stub_uv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> StubUv:
+    """A stub ``uv`` first on PATH, recording every call, with the venv locks kept under tmp_path.
+
+    Installed with all-succeeding answers before the test body runs, so a test that forgets to
+    configure it still never reaches the real uv. Reconfigure with ``stub_uv.install(...)``.
+    Skips on Windows: the stub is a POSIX shell script, and ``subprocess`` there only finds an
+    ``uv.exe``.
+    """
+    if sys.platform == "win32":
+        pytest.skip("the stub uv is a POSIX shell script")
+    stub = StubUv(tmp_path / "stub-uv", allowed=tmp_path)
+    stub.install()
+    monkeypatch.setenv("PATH", f"{stub.bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("BMK_VENV_LOCK_DIR", str(tmp_path / "locks"))
+    return stub

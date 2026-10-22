@@ -19,56 +19,21 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from bmk.adapters.stagerunner.venv import ensure_project_venv_at, sync_lock_path
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, Mapping
+    from collections.abc import Iterator
+    from pathlib import Path
+
+    from uv_stub import StubUv
 
 #: Long enough that a slow machine does not fail the control, short enough that the
 #: contended case does not stall the suite.
 _SHORT_WAIT = "1"
-
-
-def _make_venv(path: Path) -> None:
-    """Materialize the minimum that makes ``is_venv`` true."""
-    bindir = path / ("Scripts" if sys.platform == "win32" else "bin")
-    bindir.mkdir(parents=True, exist_ok=True)
-    exe = bindir / ("python.exe" if sys.platform == "win32" else "python")
-    exe.write_text("", encoding="utf-8")
-    (path / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
-
-
-def _run_that_creates_venv_on_uv_venv() -> MagicMock:
-    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
-        _ = quiet, env
-        if argv[:2] == ["uv", "venv"]:
-            _make_venv(Path(argv[-1]))
-        return 0
-
-    return MagicMock(side_effect=side_effect)
-
-
-@contextmanager
-def _faked_uv(run: MagicMock) -> Generator[MagicMock, None, None]:
-    """Patch both of venv.py's uv runners with ``run``: a quiet ``uv sync`` goes through the stderr-keeping one."""
-
-    def keeping_stderr(
-        argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
-    ) -> tuple[int, str]:
-        return run(argv, cwd, quiet=quiet, env=env), ""
-
-    with (
-        patch("bmk.adapters.stagerunner.venv._run", run),
-        patch("bmk.adapters.stagerunner.venv._run_keeping_stderr", keeping_stderr),
-    ):
-        yield run
 
 
 def _project(tmp_path: Path) -> Path:
@@ -106,27 +71,55 @@ def lock_holder() -> Iterator[object]:
         proc.wait(timeout=10)
 
 
-@pytest.mark.os_agnostic
+# The installed CPython 3.12 the rebuild check is told about, one patch ahead of the venv's.
+_NEWER_3_12_INSTALLED = (
+    '[{"version": "3.12.9", "version_parts": {"major": 3, "minor": 12, "patch": 9}, '
+    '"implementation": "cpython", "path": "/stub/python3.12"}]'
+)
+
+
+def _venv_on_an_older_patch(venv: Path) -> Path:
+    """A venv whose interpreter answers 3.12.1, with a marker file that only a rebuild removes.
+
+    The interpreter is a script, since bmk asks the venv's OWN python for its version: a rebuild is
+    then decided by the real ``_discard_venv_on_wrong_python``, and its effect is visible on disk.
+    """
+    python = venv / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\necho 3.12.1\n", encoding="utf-8")
+    python.chmod(0o755)
+    (venv / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+    marker = venv / "survives-only-without-a-rebuild"
+    marker.write_text("", encoding="utf-8")
+    return marker
+
+
+@pytest.mark.os_posix
 def test_a_sync_refuses_loudly_rather_than_running_under_another_bmk(
-    tmp_path: Path, lock_holder: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    stub_uv: StubUv,
+    lock_holder: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """With the lock held elsewhere, provisioning must not mutate the venv."""
     project = _project(tmp_path)
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
     lock_holder(sync_lock_path(venv))  # type: ignore[operator]
-    mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with _faked_uv(mock_run):
-        result = ensure_project_venv_at(project, venv, None, quiet=False)
+    result = ensure_project_venv_at(project, venv, None, quiet=False)
 
     assert result is None, "must not report success while another bmk holds the venv"
-    assert mock_run.call_count == 0, "must not touch the venv while another bmk holds it"
+    assert stub_uv.calls() == [], "must not touch the venv while another bmk holds it"
+    assert not venv.exists()
     assert "lock" in capsys.readouterr().err.lower(), "a refusal must say why, not fail silently"
 
 
-@pytest.mark.os_agnostic
-def test_a_sync_proceeds_when_nobody_holds_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.os_posix
+def test_a_sync_proceeds_when_nobody_holds_the_lock(
+    tmp_path: Path, stub_uv: StubUv, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The control: with no contention the lock is invisible and provisioning works.
 
     Without this, the test above passes for any reason that makes provisioning fail.
@@ -134,18 +127,16 @@ def test_a_sync_proceeds_when_nobody_holds_the_lock(tmp_path: Path, monkeypatch:
     project = _project(tmp_path)
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
-    mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with _faked_uv(mock_run):
-        result = ensure_project_venv_at(project, venv, None, quiet=True)
+    result = ensure_project_venv_at(project, venv, None, quiet=True)
 
     assert result == venv
-    assert mock_run.call_count > 0
+    assert any(c[:2] == ["uv", "sync"] for c in stub_uv.commands())
 
 
-@pytest.mark.os_agnostic
+@pytest.mark.os_posix
 def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
-    tmp_path: Path, lock_holder: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, stub_uv: StubUv, lock_holder: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An interpreter change ``rmtree``s the whole venv - the widest window there is.
 
@@ -156,32 +147,36 @@ def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
     project = _project(tmp_path)
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
-    discard = MagicMock()
-    monkeypatch.setattr("bmk.adapters.stagerunner.venv._discard_venv_on_wrong_python", discard)
+    marker = _venv_on_an_older_patch(venv)
+    stub_uv.install(installed_json=_NEWER_3_12_INSTALLED)
     lock_holder(sync_lock_path(venv))  # type: ignore[operator]
 
-    with _faked_uv(_run_that_creates_venv_on_uv_venv()):
-        ensure_project_venv_at(project, venv, None, quiet=True)
+    ensure_project_venv_at(project, venv, "3.12", quiet=True, install_python=False)
 
-    assert discard.call_count == 0, "the rebuild must not run while another bmk holds the venv"
+    assert marker.exists(), "the rebuild must not run while another bmk holds the venv"
+    assert stub_uv.calls() == [], "not even the rebuild's own question to uv may run under the held lock"
 
 
-@pytest.mark.os_agnostic
-def test_the_rebuild_does_run_when_the_lock_is_free(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Control for the test above: uncontended, the rebuild check still happens.
+@pytest.mark.os_posix
+def test_the_rebuild_does_run_when_the_lock_is_free(
+    tmp_path: Path, stub_uv: StubUv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control for the test above: uncontended, the same venv IS rebuilt.
 
     Without it, that test would pass if the rebuild were simply deleted.
     """
     project = _project(tmp_path)
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
-    discard = MagicMock()
-    monkeypatch.setattr("bmk.adapters.stagerunner.venv._discard_venv_on_wrong_python", discard)
+    marker = _venv_on_an_older_patch(venv)
+    stub_uv.install(installed_json=_NEWER_3_12_INSTALLED)
 
-    with _faked_uv(_run_that_creates_venv_on_uv_venv()):
-        ensure_project_venv_at(project, venv, None, quiet=True)
+    ensure_project_venv_at(project, venv, "3.12", quiet=True, install_python=False)
 
-    assert discard.call_count == 1
+    assert not marker.exists(), "a venv on the wrong patch is removed"
+    cmds = stub_uv.commands()
+    asked = cmds.index(["uv", "python", "list", "--only-installed", "--output-format", "json"])
+    assert cmds.index(["uv", "venv", "--python", "3.12", str(venv)]) > asked, "and recreated on the minor"
 
 
 @pytest.mark.os_agnostic

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
@@ -12,7 +14,7 @@ from bmk.domain.enums import ToolOutputFormat
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
+    from uv_stub import StubUv
 
 
 def _ctx(
@@ -159,32 +161,24 @@ def test_deps_update_passes_no_target_without_a_venv(tmp_path: Path, monkeypatch
     assert captured["python"] is None
 
 
+@pytest.mark.os_posix
 def test_deps_update_locks_the_project_and_syncs_its_own_venv_from_the_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stub_uv: StubUv
 ) -> None:
-    """After the floors are judged the stage re-locks, then syncs the project's own venv from the lock."""
+    """After the floors are judged the stage re-locks, then syncs the project's own venv from the lock.
+
+    ``_dependencies.main`` is replaced only to receive the ``LockedProject`` it is handed (the real
+    one asks PyPI for every floor); the lock and the sync then run for real against the stub ``uv``.
+    """
     from bmk.adapters.stagerunner.helpers import _dependencies
 
     captured: dict[str, Any] = {}
-    ran: list[tuple[list[str], Path, dict[str, str] | None]] = []
 
     def _fake_main(**kw: Any) -> int:
         captured.update(kw)
         return 0
 
-    def _fake_run(argv: list[str], cwd: Path, *, quiet: bool = True, env: dict[str, str] | None = None) -> int:
-        _ = quiet
-        ran.append((argv, cwd, env))
-        return 0
-
-    def _fake_run_keeping_stderr(
-        argv: list[str], cwd: Path, *, quiet: bool = True, env: dict[str, str] | None = None
-    ) -> tuple[int, str]:
-        return _fake_run(argv, cwd, quiet=quiet, env=env), ""
-
     monkeypatch.setattr(_dependencies, "main", _fake_main)
-    monkeypatch.setattr("bmk.adapters.stagerunner.venv._run", _fake_run)
-    monkeypatch.setattr("bmk.adapters.stagerunner.venv._run_keeping_stderr", _fake_run_keeping_stderr)
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     venv = _make_venv(tmp_path / ".venv-win")
 
@@ -192,11 +186,12 @@ def test_deps_update_locks_the_project_and_syncs_its_own_venv_from_the_lock(
     locked = captured["locked"]
 
     assert locked.upgrade() is True
-    assert ran[-1][:2] == (["uv", "lock", "--upgrade"], tmp_path)
+    last = stub_uv.calls()[-1]
+    assert (list(last.argv), last.cwd) == (["uv", "lock", "--upgrade"], tmp_path.resolve())
     assert locked.sync() is True
-    sync_argv, _, sync_env = next(r for r in reversed(ran) if r[0][:2] == ["uv", "sync"])
-    assert "--locked" in sync_argv
-    assert sync_env is not None and sync_env["UV_PROJECT_ENVIRONMENT"] == str(venv)
+    sync = next(c for c in reversed(stub_uv.calls()) if c.argv[:2] == ("uv", "sync"))
+    assert "--locked" in sync.argv
+    assert sync.project_environment == str(venv)
 
 
 def test_deps_update_has_nothing_to_sync_without_a_project_venv(

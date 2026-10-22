@@ -10,12 +10,10 @@ import os
 import shutil
 import subprocess
 import sys
-from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
 
 import pytest
+from uv_stub import ESC, SYNC_COLOURED, SYNC_FILLER_LINES, SYNC_LAST_FILLER, SYNC_MARKER
 
 from bmk.adapters.stagerunner.helpers import _matrix
 from bmk.adapters.stagerunner.helpers._matrix import CellStatus
@@ -32,7 +30,9 @@ from bmk.adapters.stagerunner.venv import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from pathlib import Path
+
+    from uv_stub import StubUv
 
 
 def _uv(*args: str) -> int:
@@ -122,73 +122,29 @@ def test_is_venv_false_when_absent(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_that_creates_venv_on_uv_venv(*, lock_rc: int = 0, sync_rc: int = 0) -> MagicMock:
-    """A `_run` mock that materializes the venv when it sees `uv venv <path>`.
+# Every provisioning test drives the REAL module through a stub `uv` first on PATH (the `stub_uv`
+# fixture, tests/conftest.py + tests/uv_stub.py) and asserts on what reached the process boundary.
+# Patching venv.py's own runners proved only that bmk called its own function, and stopped covering
+# a runner the moment a change routed around it (OPEN-WORK [210]).
 
-    Without this the create path returns None (is_venv stays False under a pure mock),
-    so the install/sync argv is never reached. The side effect makes the flow realistic.
-    ``lock_rc`` / ``sync_rc`` are what ``uv lock`` / ``uv sync`` answer.
-    """
-
-    def side_effect(argv: list[str], _cwd: Path, *, quiet: bool = True, env: object = None) -> int:
-        _ = quiet, env  # matches _run's real signature
-        if argv[:2] == ["uv", "venv"]:
-            _make_venv(Path(argv[-1]))
-        if argv[:2] == ["uv", "lock"]:
-            return lock_rc
-        if argv[:2] == ["uv", "sync"]:
-            return sync_rc
-        return 0
-
-    mock = MagicMock(side_effect=side_effect)
-    return mock
+# uv offers a newer 3.12 patch, so install/upgrade have work to do; when it offers none they are
+# skipped (see test_stagerunner_venv_python.py, bmk OPEN-WORK [102]).
+_NEWER_3_12_ON_OFFER = (
+    '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
+    '"implementation": "cpython", "path": null}]'
+)
 
 
-def _commands(mock_run: MagicMock) -> list[list[str]]:
-    return [c.args[0] for c in mock_run.call_args_list]
-
-
-@contextmanager
-def _faked_uv(run: MagicMock) -> Generator[MagicMock, None, None]:
-    """Patch both of venv.py's uv runners with ``run``, the one fake a test inspects.
-
-    A quiet ``uv sync`` goes through ``_run_keeping_stderr`` (its stderr is reported on failure),
-    a text-mode one and every other provisioning call through ``_run``; routing both into ``run``
-    keeps a single command list, and keeps a mock-based test from reaching the real uv for the sync.
-    """
-
-    def keeping_stderr(
-        argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
-    ) -> tuple[int, str]:
-        return run(argv, cwd, quiet=quiet, env=env), ""
-
-    with (
-        patch("bmk.adapters.stagerunner.venv._run", run),
-        patch("bmk.adapters.stagerunner.venv._run_keeping_stderr", keeping_stderr),
-    ):
-        yield run
-
-
-@pytest.mark.os_agnostic
-def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path, stub_uv: StubUv) -> None:
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     target = tmp_path / ".venv-3.12"
-    mock_run = _run_that_creates_venv_on_uv_venv()
+    stub_uv.install(offered_json=_NEWER_3_12_ON_OFFER)
 
-    # uv offers a newer 3.12 patch, so install/upgrade have work to do; when it offers none
-    # they are skipped (see test_stagerunner_venv_python.py, bmk OPEN-WORK [102]).
-    newer_on_offer = (
-        '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
-        '"implementation": "cpython", "path": null}]'
-    )
-    with (
-        _faked_uv(mock_run),
-        patch("bmk.adapters.stagerunner.venv._run_capture", return_value=newer_on_offer),
-    ):
-        result = ensure_project_venv_at(tmp_path, target, "3.12")
+    result = ensure_project_venv_at(tmp_path, target, "3.12")
 
     assert result == target
-    cmds = [c.args[0] for c in mock_run.call_args_list]
+    cmds = stub_uv.commands()
     create = next(c for c in cmds if c[:2] == ["uv", "venv"])
     assert "--python" in create and "3.12" in create and str(target) in create
     assert ["uv", "python", "install", "3.12"] in cmds
@@ -197,8 +153,8 @@ def test_ensure_at_creates_the_named_venv_on_the_named_minor(tmp_path: Path) -> 
     assert sync[sync.index("--python") + 1] == "3.12", "the sync asks for the same minor the create did"
 
 
-@pytest.mark.os_agnostic
-def test_ensure_at_can_leave_uv_s_python_store_alone(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_at_can_leave_uv_s_python_store_alone(tmp_path: Path, stub_uv: StubUv) -> None:
     """test-all prepares every minor serially, then its cells must not install again.
 
     A cell whose prep did not converge (offline, python-downloads = never) would otherwise run
@@ -206,42 +162,35 @@ def test_ensure_at_can_leave_uv_s_python_store_alone(tmp_path: Path) -> None:
     """
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     target = tmp_path / ".venv-3.12"
-    mock_run = _run_that_creates_venv_on_uv_venv()
-    newer_on_offer = (
-        '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
-        '"implementation": "cpython", "path": null}]'
-    )
-    with (
-        _faked_uv(mock_run),
-        patch("bmk.adapters.stagerunner.venv._run_capture", return_value=newer_on_offer),
-    ):
-        result = ensure_project_venv_at(tmp_path, target, "3.12", install_python=False)
+    stub_uv.install(offered_json=_NEWER_3_12_ON_OFFER)
+
+    result = ensure_project_venv_at(tmp_path, target, "3.12", install_python=False)
 
     assert result == target
-    cmds = [c.args[0] for c in mock_run.call_args_list]
+    cmds = stub_uv.commands()
     assert not any(c[:2] == ["uv", "python"] and c[2] in ("install", "upgrade") for c in cmds)
     create = next(c for c in cmds if c[:2] == ["uv", "venv"])
     assert "3.12" in create, "the cell still pins its own minor"
 
 
-@pytest.mark.os_agnostic
-def test_a_test_all_cell_never_installs_a_python(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_a_test_all_cell_never_installs_a_python(tmp_path: Path, stub_uv: StubUv) -> None:
     """The cell itself must pass install_python=False; main() already prepared every minor."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
-    newer_on_offer = (
-        '[{"version": "3.12.16", "version_parts": {"major": 3, "minor": 12, "patch": 16}, '
-        '"implementation": "cpython", "path": null}]'
-    )
     # every uv call fails, so the cell stops at ERROR before it would run pytest in a venv
-    mock_run = MagicMock(return_value=1)
-    with (
-        _faked_uv(mock_run),
-        patch("bmk.adapters.stagerunner.venv._run_capture", return_value=newer_on_offer),
-    ):
-        result = _matrix._run_cell(tmp_path, "3.12", quiet=True)
+    stub_uv.install(
+        venv_rc=1,
+        python_rc=1,
+        lock_rc=1,
+        sync_rc=1,
+        pip_install_rc={".[dev]": 1, ".": 1},
+        offered_json=_NEWER_3_12_ON_OFFER,
+    )
+
+    result = _matrix._run_cell(tmp_path, "3.12", quiet=True)
 
     assert result.status is CellStatus.ERROR
-    cmds = [c.args[0] for c in mock_run.call_args_list]
+    cmds = stub_uv.commands()
     assert any(c[:2] == ["uv", "venv"] for c in cmds), "the cell must have reached provisioning"
     assert not any(c[:2] == ["uv", "python"] for c in cmds)
 
@@ -251,91 +200,74 @@ def test_a_test_all_cell_never_installs_a_python(tmp_path: Path) -> None:
 # ruff 0.17.0 stayed), so make test checked a different tree from the one uv.lock pins and CI installs.
 
 
-@pytest.mark.os_agnostic
-def test_the_project_is_locked_and_the_venv_synced_from_the_lock(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_the_project_is_locked_and_the_venv_synced_from_the_lock(
+    tmp_path: Path, stub_uv: StubUv, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     target = tmp_path / ".venv-3.12"
-    mock_run = _run_that_creates_venv_on_uv_venv()
+    # An IDE's venv in the caller's shell: it must not reach the sync, or uv warns and may prefer it.
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "ide-venv"))
 
-    with _faked_uv(mock_run):
-        assert ensure_project_venv_at(tmp_path, target, "3.12") == target
+    assert ensure_project_venv_at(tmp_path, target, "3.12") == target
 
-    cmds = _commands(mock_run)
+    cmds = stub_uv.commands()
     assert cmds.index(["uv", "lock"]) < next(i for i, c in enumerate(cmds) if c[:2] == ["uv", "sync"])
     assert not any(c[:3] == ["uv", "pip", "install"] for c in cmds)
-    [sync_call] = [c for c in mock_run.call_args_list if c.args[0][:2] == ["uv", "sync"]]
-    assert "--locked" in sync_call.args[0]
+    [sync_call] = [c for c in stub_uv.calls() if c.argv[:2] == ("uv", "sync")]
+    assert "--locked" in sync_call.argv
     # uv sync targets the project environment, so the matrix venv is named through the env.
-    assert sync_call.kwargs["env"]["UV_PROJECT_ENVIRONMENT"] == str(target)
-    assert "VIRTUAL_ENV" not in sync_call.kwargs["env"]
+    assert sync_call.project_environment == str(target)
+    assert not sync_call.virtual_env_set
 
 
-@pytest.mark.os_agnostic
+@pytest.mark.os_posix
 @pytest.mark.parametrize(
     ("extras", "expected"), [("", []), ('[project.optional-dependencies]\ndev = ["pytest"]\n', ["--extra", "dev"])]
 )
 def test_the_dev_extra_is_synced_only_when_the_project_declares_it(
-    tmp_path: Path, extras: str, expected: list[str]
+    tmp_path: Path, stub_uv: StubUv, extras: str, expected: list[str]
 ) -> None:
     # uv refuses an undeclared extra outright (exit 2), unlike pip's warning.
     (tmp_path / "pyproject.toml").write_text(f'[project]\nname = "demo"\n{extras}')
-    mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with _faked_uv(mock_run):
-        ensure_project_venv_at(tmp_path, tmp_path / ".venv", None)
+    ensure_project_venv_at(tmp_path, tmp_path / ".venv", None)
 
-    sync = next(c for c in _commands(mock_run) if c[:2] == ["uv", "sync"])
+    sync = next(c for c in stub_uv.commands() if c[:2] == ["uv", "sync"])
     assert [a for a in sync if a in ("--extra", "dev")] == expected
 
 
-@pytest.mark.os_agnostic
+@pytest.mark.os_posix
 def test_without_a_lock_the_venv_falls_back_to_the_manifest_and_says_so(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, stub_uv: StubUv, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
-    mock_run = _run_that_creates_venv_on_uv_venv(lock_rc=1)
+    stub_uv.install(lock_rc=1)
 
-    with _faked_uv(mock_run):
-        assert ensure_project_venv_at(tmp_path, tmp_path / ".venv", None) == tmp_path / ".venv"
+    assert ensure_project_venv_at(tmp_path, tmp_path / ".venv", None) == tmp_path / ".venv"
 
-    cmds = _commands(mock_run)
+    cmds = stub_uv.commands()
     assert any(c[:3] == ["uv", "pip", "install"] for c in cmds)
     assert not any(c[:2] == ["uv", "sync"] for c in cmds)
     assert "uv lock" in capsys.readouterr().err
 
 
-@pytest.mark.os_agnostic
+@pytest.mark.os_posix
 def test_a_failed_sync_from_a_good_lock_is_not_papered_over_by_the_manifest_install(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, stub_uv: StubUv, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
-    mock_run = _run_that_creates_venv_on_uv_venv(sync_rc=1)
+    stub_uv.install(sync_rc=1)
 
-    with _faked_uv(mock_run):
-        assert ensure_project_venv_at(tmp_path, tmp_path / ".venv", None) is None
+    assert ensure_project_venv_at(tmp_path, tmp_path / ".venv", None) is None
 
-    assert not any(c[:3] == ["uv", "pip", "install"] for c in _commands(mock_run))
+    assert not any(c[:3] == ["uv", "pip", "install"] for c in stub_uv.commands())
     assert "uv sync" in capsys.readouterr().err
 
 
 # --- a failed `uv sync` keeps uv's own reason (bmk OPEN-WORK [19]) ------------------------------------
 # The sync used to run with stderr discarded in JSON mode and only hinted at a text-mode re-run, which
-# then passed: the intermittent 3.10 test-all failure never left its cause behind. The seam is the
-# external edge, a stub `uv` executable first on PATH, so the real module runs the real subprocess.
-
-_SYNC_MARKER = "stub-uv-sync-error-7f3a"
-# uv puts its verdict FIRST and the detail after it (measured, uv 0.13.0: a failing build printed
-# 26 lines with `error: Failed to build` on line 6), so the stub follows its error with more lines
-# than any tail a reader might be tempted to cap the report at.
-_SYNC_FILLER_LINES = 25
-_SYNC_LAST_FILLER = f"filler-{_SYNC_FILLER_LINES}"
-_SYNC_COLOURED = "stub-uv-coloured-line-5b1d"
-# Built with chr() so no escape sequence has to survive the source text: FORCE_COLOR makes uv colour
-# its error lines even into a pipe.
-_ESC = chr(0x1B)
-
-# Where the stub's `uv sync` records its argv, one word per line, beside the stub's bin directory.
-_SYNC_ARGV_FILE = "uv-sync-argv"
+# then passed: the intermittent 3.10 test-all failure never left its cause behind.
 
 # What the stub's `uv sync` leaves behind before it exits 1, and the state the failure line must name.
 _SYNC_AFTERMATH = {
@@ -346,53 +278,13 @@ _SYNC_AFTERMATH = {
 }
 
 
-def _install_stub_uv(bin_dir: Path, *, sync_rc: int, aftermath: str = ":") -> None:
-    """Write a POSIX ``uv`` that answers every subcommand provisioning reaches.
-
-    ``uv venv <path>`` makes a venv-shaped directory, ``uv lock`` and ``uv python ...`` succeed
-    (``list`` answers an empty JSON list), and ``uv sync`` runs ``aftermath`` against
-    ``UV_PROJECT_ENVIRONMENT``, prints ``error: <_SYNC_MARKER>`` on stderr, then one line in SGR
-    colour and :data:`_SYNC_FILLER_LINES` filler lines, and exits ``sync_rc``. Its argv is written one
-    word per line to :data:`_SYNC_ARGV_FILE` beside ``bin_dir``.
-    The sync refuses (exit 97) a target outside ``bin_dir``'s parent, so a ``rm -rf`` aftermath
-    can never reach an inherited ``UV_PROJECT_ENVIRONMENT`` if bmk stopped passing its own.
-    """
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    stub = bin_dir / "uv"
-    stub.write_text(
-        "#!/bin/sh\n"
-        'case "$1" in\n'
-        "  venv)\n"
-        "    for last; do :; done\n"
-        '    mkdir -p "$last/bin" && echo "home = /usr" > "$last/pyvenv.cfg" && : > "$last/bin/python"\n'
-        "    exit 0 ;;\n"
-        "  python)\n"
-        '    [ "$2" = list ] && echo "[]"\n'
-        "    exit 0 ;;\n"
-        "  lock) exit 0 ;;\n"
-        "  sync)\n"
-        f'    case "$UV_PROJECT_ENVIRONMENT" in "{bin_dir.parent}"/*) ;; *) exit 97 ;; esac\n'
-        f'    printf "%s\\n" "$@" > "{bin_dir.parent / _SYNC_ARGV_FILE}"\n'
-        f"    {aftermath}\n"
-        f'    echo "error: {_SYNC_MARKER}" >&2\n'
-        f"    echo '{_ESC}[31m{_SYNC_COLOURED}{_ESC}[0m' >&2\n"
-        f'    i=1; while [ "$i" -le {_SYNC_FILLER_LINES} ]; do echo "filler-$i" >&2; i=$((i + 1)); done\n'
-        f"    exit {sync_rc} ;;\n"
-        "esac\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    stub.chmod(0o755)
-
-
 @pytest.fixture
-def stub_uv_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A project dir with the stub ``uv`` first on PATH and the venv locks kept under tmp_path."""
+def stub_uv_project(tmp_path: Path, stub_uv: StubUv) -> Path:
+    """A project dir beside the stub ``uv``, so the stub's own files are never inside the project."""
+    _ = stub_uv  # requested for its PATH and lock-dir setup
     project = tmp_path / "project"
     project.mkdir()
     (project / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
-    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setenv("BMK_VENV_LOCK_DIR", str(tmp_path / "locks"))
     return project
 
 
@@ -401,15 +293,15 @@ def stub_uv_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.mark.parametrize("state", list(_SYNC_AFTERMATH))
 @pytest.mark.parametrize("quiet", [True, False], ids=["json-mode", "text-mode"])
 def test_a_failed_sync_prints_uv_s_own_error_and_the_venv_it_left(
-    stub_uv_project: Path, capfd: pytest.CaptureFixture[str], state: str, quiet: bool
+    stub_uv_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str], state: str, quiet: bool
 ) -> None:
-    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=1, aftermath=_SYNC_AFTERMATH[state])
+    stub_uv.install(sync_rc=1, sync_aftermath=_SYNC_AFTERMATH[state])
     venv = stub_uv_project / ".venv-3.10"
 
     assert ensure_project_venv_at(stub_uv_project, venv, None, quiet=quiet) is None
 
     err = capfd.readouterr().err
-    assert err.count(_SYNC_MARKER) == 1, "uv's reason is shown exactly once, in either output mode"
+    assert err.count(SYNC_MARKER) == 1, "uv's reason is shown exactly once, in either output mode"
     assert f"uv sync from uv.lock failed for .venv-3.10 (exit 1; venv afterwards: {state})" in err
     assert "BMK_OUTPUT_FORMAT=text" not in err, "a re-run is what loses the evidence"
 
@@ -437,9 +329,9 @@ def _failure_header(state: str) -> str:
 @pytest.mark.os_posix
 @pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
 def test_a_quiet_failed_sync_writes_all_of_uv_s_stderr_as_one_plain_block(
-    stub_uv_project: Path, monkeypatch: pytest.MonkeyPatch
+    stub_uv_project: Path, stub_uv: StubUv, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=1)
+    stub_uv.install(sync_rc=1)
     recorder = _WriteRecorder()
     monkeypatch.setattr(sys, "stderr", recorder)
 
@@ -449,19 +341,19 @@ def test_a_quiet_failed_sync_writes_all_of_uv_s_stderr_as_one_plain_block(
     assert len(blocks) == 1, f"the failure is reported once, as one write: {recorder.writes!r}"
     lines = blocks[0].splitlines()
     assert lines[0] == _failure_header("venv") + ":", "in JSON mode uv's stderr follows the header"
-    assert f"    error: {_SYNC_MARKER}" in lines, "uv's FIRST line, its error, rides in the header's write: no tail cap"
-    assert f"    {_SYNC_LAST_FILLER}" in lines, "uv's last line arrives in the same write as the header"
-    assert len(lines) == 1 + 2 + _SYNC_FILLER_LINES, "every line uv wrote, each on its own line"
-    assert _ESC not in recorder.getvalue(), "no escape byte reaches a CI log"
-    assert f"    {_SYNC_COLOURED}" in lines, "a coloured line is kept, its colour codes removed"
+    assert f"    error: {SYNC_MARKER}" in lines, "uv's FIRST line, its error, rides in the header's write: no tail cap"
+    assert f"    {SYNC_LAST_FILLER}" in lines, "uv's last line arrives in the same write as the header"
+    assert len(lines) == 1 + 2 + SYNC_FILLER_LINES, "every line uv wrote, each on its own line"
+    assert ESC not in recorder.getvalue(), "no escape byte reaches a CI log"
+    assert f"    {SYNC_COLOURED}" in lines, "a coloured line is kept, its colour codes removed"
 
 
 @pytest.mark.os_posix
 @pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
 def test_a_text_mode_failed_sync_streams_uv_live_and_adds_a_bare_header(
-    stub_uv_project: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    stub_uv_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=1)
+    stub_uv.install(sync_rc=1)
     recorder = _WriteRecorder()
     monkeypatch.setattr(sys, "stderr", recorder)
 
@@ -470,17 +362,16 @@ def test_a_text_mode_failed_sync_streams_uv_live_and_adds_a_bare_header(
     # uv inherits the terminal's stderr, so its lines reach fd 2 directly while it runs; anything
     # bmk prints goes through sys.stderr, the recorder.
     live = capfd.readouterr().err
-    assert live.count(f"error: {_SYNC_MARKER}") == 1, "uv's output streams live, straight from uv"
-    assert _SYNC_LAST_FILLER in live
+    assert live.count(f"error: {SYNC_MARKER}") == 1, "uv's output streams live, straight from uv"
+    assert SYNC_LAST_FILLER in live
     echoed = recorder.getvalue()
-    assert _SYNC_MARKER not in echoed, "bmk does not print uv's lines a second time"
+    assert SYNC_MARKER not in echoed, "bmk does not print uv's lines a second time"
     assert _failure_header("venv") in echoed.splitlines(), "no trailing colon: uv's output is above it"
 
 
 @pytest.mark.os_posix
 @pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
 def test_a_successful_quiet_sync_prints_nothing(stub_uv_project: Path, capfd: pytest.CaptureFixture[str]) -> None:
-    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=0)
     venv = stub_uv_project / ".venv"
 
     assert ensure_project_venv_at(stub_uv_project, venv, None, quiet=True) == venv
@@ -497,48 +388,42 @@ def test_a_successful_quiet_sync_prints_nothing(stub_uv_project: Path, capfd: py
     ("minor", "venv_name"), [("3.10", ".venv-3.10"), (None, ".venv")], ids=["minor-known", "no-minor"]
 )
 def test_the_sync_asks_uv_for_the_minor_never_the_interpreter_inside_the_venv(
-    stub_uv_project: Path, minor: str | None, venv_name: str
+    stub_uv_project: Path, stub_uv: StubUv, minor: str | None, venv_name: str
 ) -> None:
-    _install_stub_uv(stub_uv_project.parent / "bin", sync_rc=0)
     venv = stub_uv_project / venv_name
 
     assert ensure_project_venv_at(stub_uv_project, venv, minor, quiet=True, install_python=False) == venv
 
-    argv = (stub_uv_project.parent / _SYNC_ARGV_FILE).read_text(encoding="utf-8").splitlines()
+    argv = next(c for c in stub_uv.commands() if c[:2] == ["uv", "sync"])
     expected = minor if minor else str(venv_python(venv))
     assert argv[argv.index("--python") + 1] == expected
 
 
-@pytest.mark.os_agnostic
-def test_ensure_at_without_a_minor_omits_the_python_pin(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_at_without_a_minor_omits_the_python_pin(tmp_path: Path, stub_uv: StubUv) -> None:
     """minor=None (no classifiers) -> uv picks the interpreter; the default-venv path."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     target = tmp_path / ".venv"
-    mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with _faked_uv(mock_run):
-        ensure_project_venv_at(tmp_path, target, None)
+    ensure_project_venv_at(tmp_path, target, None)
 
-    cmds = [c.args[0] for c in mock_run.call_args_list]
+    cmds = stub_uv.commands()
     create = next(c for c in cmds if c[:2] == ["uv", "venv"])
     assert "--python" not in create
     assert not any(c[:3] == ["uv", "python", "install"] for c in cmds), "no minor -> nothing to install"
 
 
-@pytest.mark.os_agnostic
-def test_ensure_project_venv_delegates_to_ensure_at(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_delegates_to_ensure_at(tmp_path: Path, stub_uv: StubUv) -> None:
     """ensure_project_venv is now a thin caller: default path, desired (highest) minor."""
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "demo"\nclassifiers = ["Programming Language :: Python :: 3.13"]\n'
     )
-    mock_run = _run_that_creates_venv_on_uv_venv()
 
-    with _faked_uv(mock_run):
-        result = ensure_project_venv(tmp_path, {})
+    result = ensure_project_venv(tmp_path, {})
 
     assert result == tmp_path / ".venv"
-    cmds = [c.args[0] for c in mock_run.call_args_list]
-    create = next(c for c in cmds if c[:2] == ["uv", "venv"])
+    create = next(c for c in stub_uv.commands() if c[:2] == ["uv", "venv"])
     assert "3.13" in create and str(tmp_path / ".venv") in create
 
 
@@ -553,8 +438,8 @@ def test_ensure_project_venv_skips_without_pyproject(tmp_path: Path) -> None:
     assert ensure_project_venv(tmp_path, {}) is None
 
 
-@pytest.mark.os_agnostic
-def test_ensure_project_venv_syncs_an_existing_venv_without_recreating(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_syncs_an_existing_venv_without_recreating(tmp_path: Path, stub_uv: StubUv) -> None:
     """An existing venv is updated in place, never recreated.
 
     Recreating would change nothing about the path but would discard the env and,
@@ -563,16 +448,16 @@ def test_ensure_project_venv_syncs_an_existing_venv_without_recreating(tmp_path:
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
 
-    with _faked_uv(MagicMock(return_value=0)) as mock_run:
-        result = ensure_project_venv(tmp_path, {})
+    result = ensure_project_venv(tmp_path, {})
 
     assert result == tmp_path / ".venv"
-    commands = [call.args[0] for call in mock_run.call_args_list]
+    commands = stub_uv.commands()
+    assert any(cmd[:2] == ["uv", "sync"] for cmd in commands), "the existing venv is still synced"
     assert not any(cmd[:2] == ["uv", "venv"] for cmd in commands), "must not recreate an existing venv"
 
 
-@pytest.mark.os_agnostic
-def test_ensure_project_venv_sync_is_exact_and_upgrading(tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_sync_is_exact_and_upgrading(tmp_path: Path, stub_uv: StubUv) -> None:
     """Without a lock, the manifest install passes both --exact and --upgrade.
 
     Neither flag alone makes the venv honest, and each covers a distinct way it
@@ -590,12 +475,11 @@ def test_ensure_project_venv_sync_is_exact_and_upgrading(tmp_path: Path) -> None
     """
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
-    mock_run = _run_that_creates_venv_on_uv_venv(lock_rc=1)
+    stub_uv.install(lock_rc=1)
 
-    with _faked_uv(mock_run):
-        ensure_project_venv(tmp_path, {})
+    ensure_project_venv(tmp_path, {})
 
-    install = next(c for c in _commands(mock_run) if c[:3] == ["uv", "pip", "install"])
+    install = next(c for c in stub_uv.commands() if c[:3] == ["uv", "pip", "install"])
     assert "--exact" in install
     assert "--upgrade" in install
     assert install[install.index("--python") + 1] == str(venv_python(tmp_path / ".venv"))
@@ -619,73 +503,74 @@ def test_uv_env_drops_virtual_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert env["BMK_PROBE_MARKER"] == "keep-me"
 
 
-@pytest.mark.os_agnostic
-def test_run_passes_uv_env_without_virtual_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_run_passes_uv_env_without_virtual_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_uv: StubUv
+) -> None:
     """_run hands uv an explicit environment with VIRTUAL_ENV stripped."""
     from bmk.adapters.stagerunner import venv as venv_mod
 
     monkeypatch.setenv("VIRTUAL_ENV", "/home/user/ide-venv")
-    captured: dict[str, object] = {}
-
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        captured["env"] = kwargs.get("env")
-        return subprocess.CompletedProcess(argv, 0)
-
-    monkeypatch.setattr(venv_mod.subprocess, "run", fake_run)
     venv_mod._run(["uv", "venv", str(tmp_path / ".venv")], tmp_path, quiet=True)
+    # The control: an explicit env that keeps VIRTUAL_ENV must show up as set, or the stub
+    # could not see the variable at all and the assertion below would hold for any _run.
+    venv_mod._run(["uv", "venv", str(tmp_path / ".venv-control")], tmp_path, quiet=True, env=dict(os.environ))
 
-    env = captured["env"]
-    assert isinstance(env, dict)
-    assert "VIRTUAL_ENV" not in env
+    stripped, control = stub_uv.calls()
+    assert not stripped.virtual_env_set
+    assert control.virtual_env_set
 
 
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.venv._run")
-def test_ensure_project_venv_falls_back_when_no_dev_extra(mock_run: MagicMock, tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_falls_back_when_no_dev_extra(tmp_path: Path, stub_uv: StubUv) -> None:
     """Falls back to `.` when the project has no [dev] extra.
 
     bmk itself has none: its tooling is declared as runtime dependencies.
     """
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
-    mock_run.side_effect = [1, 1, 0]  # no lock can be made, ".[dev]" fails, "." succeeds
+    stub_uv.install(lock_rc=1, pip_install_rc={".[dev]": 1})  # no lock can be made, ".[dev]" fails, "." succeeds
 
     result = ensure_project_venv(tmp_path, {})
 
     assert result == tmp_path / ".venv"
-    targets = [call.args[0][-1] for call in mock_run.call_args_list if call.args[0][:3] == ["uv", "pip", "install"]]
+    targets = [c[-1] for c in stub_uv.commands() if c[:3] == ["uv", "pip", "install"]]
     assert targets == [".[dev]", "."]
 
 
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.venv._run", return_value=1)
-def test_ensure_project_venv_returns_none_when_sync_fails(_mock_run: MagicMock, tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_returns_none_when_sync_fails(tmp_path: Path, stub_uv: StubUv) -> None:
     """A failed sync degrades to None rather than raising."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     _make_venv(tmp_path / ".venv")
+    stub_uv.install(lock_rc=1, sync_rc=1, pip_install_rc={".[dev]": 1, ".": 1})
 
     assert ensure_project_venv(tmp_path, {}) is None
+    targets = [c[-1] for c in stub_uv.commands() if c[:3] == ["uv", "pip", "install"]]
+    assert targets == [".[dev]", "."], "None comes from every install target failing, not an early exit"
 
 
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.venv._run", return_value=1)
-def test_ensure_project_venv_returns_none_when_creation_fails(_mock_run: MagicMock, tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_returns_none_when_creation_fails(tmp_path: Path, stub_uv: StubUv) -> None:
     """A failed `uv venv` degrades to None rather than raising."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    stub_uv.install(venv_rc=1, lock_rc=1, sync_rc=1, pip_install_rc={".[dev]": 1, ".": 1})
 
     assert ensure_project_venv(tmp_path, {}) is None
+    cmds = stub_uv.commands()
+    assert any(c[:2] == ["uv", "venv"] for c in cmds), "None comes from the failed create"
+    assert not any(c[:2] in (["uv", "lock"], ["uv", "sync"]) for c in cmds), "nothing runs after a failed create"
 
 
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.venv._run", return_value=0)
-def test_ensure_project_venv_creates_at_the_override_path(mock_run: MagicMock, tmp_path: Path) -> None:
+@pytest.mark.os_posix
+def test_ensure_project_venv_creates_at_the_override_path(tmp_path: Path, stub_uv: StubUv) -> None:
     """Creation targets the resolved path, not a hardcoded .venv."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n')
     env = {"UV_PROJECT_ENVIRONMENT": ".venv-win"}
 
     ensure_project_venv(tmp_path, env)
 
-    create = mock_run.call_args_list[0].args[0]
+    create = stub_uv.commands()[0]
     assert create[:2] == ["uv", "venv"]
     assert create[2] == str(tmp_path / ".venv-win")
 
