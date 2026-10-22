@@ -51,8 +51,9 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   first stage, `update_deps` (it runs the `deps_update` pipeline), stops the run after a failed
   provisioning, and no longer says every in-process stage fails with only `(no output captured)`:
   `deps_update` names its failure, with uv's reason for a failed re-sync and by its step only for a
-  failed lock upgrade. Its hand resync for a project without a Python classifier passes the venv's
-  minor (`--python 3.10`), never the interpreter's path.
+  failed lock upgrade. Its hand resync for a project without a Python classifier asks for what the
+  venv's interpreter reports (`pypy@X.Y` for PyPy, `X.Yt` for a free-threaded build, otherwise the
+  bare minor such as `--python 3.10`), never the interpreter's path.
 
 ## [3.22.3] 2026-10-21 20:59:38
 
