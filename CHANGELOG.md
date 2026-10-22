@@ -47,8 +47,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   (`uv lock`, then `uv sync --locked`) and installs from the manifest only when no lock can be made.
   The skill now gives the lock-first resync, keeps the manifest install for a `[venv] uv lock
   failed` line only, lists every `[venv]` provisioning failure header, says when `make test`'s
-  `deps_update` stage stops the run after a failed provisioning, and no longer says every
-  in-process stage fails with only `(no output captured)` (`deps_update` now says why).
+  first stage, `update_deps` (it runs the `deps_update` pipeline), stops the run after a failed
+  provisioning, and no longer says every in-process stage fails with only `(no output captured)`:
+  `deps_update` names its failure, with uv's reason for a failed re-sync and by its step only for a
+  failed lock upgrade. Its hand resync for a project without a Python classifier passes the venv's
+  minor (`--python 3.10`), never the interpreter's path.
 
 ## [3.22.3] 2026-10-21 20:59:38
 
