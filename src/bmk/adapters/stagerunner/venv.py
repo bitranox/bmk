@@ -38,6 +38,25 @@ if TYPE_CHECKING:
 
     from bmk.adapters.stagerunner.output import SupportsWrite
 
+__all__ = [
+    "all_python_minors",
+    "desired_python_minor",
+    "ensure_minors_installed",
+    "ensure_project_venv",
+    "ensure_project_venv_at",
+    "ensure_venv_ignored",
+    "ensure_venv_typecheck_excluded",
+    "is_venv",
+    "latest_installed_patch",
+    "lock_project",
+    "resolve_project_venv",
+    "sync_lock_path",
+    "uv_lock_guard_path",
+    "venv_python",
+    "venv_sync_disabled",
+    "venv_version",
+]
+
 #: How long a bmk waits for another bmk to finish mutating the same venv. Generous,
 #: because the thing being waited on is a full resolve-and-install on a cold start,
 #: which is minutes on a heavy dependency tree. Overridable for tests and for a
