@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
 from bmk.adapters.stagerunner.registry import PIPELINES, PORTED_PREFIXES
-from bmk.domain.enums import ToolOutputFormat
+from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -21,6 +22,7 @@ def _ctx(
     tmp_path: Path,
     output_format: ToolOutputFormat = ToolOutputFormat.JSON,
     env: dict[str, str] | None = None,
+    venv_provisioning: VenvProvisioning = VenvProvisioning.NOT_ATTEMPTED,
 ) -> StageContext:
     return StageContext(
         project_dir=tmp_path,
@@ -30,6 +32,7 @@ def _ctx(
         package_name="x",
         env=env if env is not None else {},
         show_warnings=True,
+        venv_provisioning=venv_provisioning,
     )
 
 
@@ -210,3 +213,131 @@ def test_deps_update_has_nothing_to_sync_without_a_project_venv(
     PIPELINES["deps_update"][0].action(_ctx(tmp_path), CapturingSink())
 
     assert captured["locked"].sync() is None
+
+
+# --- deps_update after a failed provisioning: one report per run, inside the stage (OPEN-WORK [230]) ---
+# `run_command` provisions the venv before the pipeline; `deps_update` then re-locks and re-syncs. When the
+# provisioning sync already failed and the re-lock changed nothing, a second sync can only fail the same
+# way, so its block would print twice. When it does re-sync, its report must land in the stage's capture,
+# or JSON mode shows the failed stage as '(no output captured)'.
+
+_SYNC_HEADER = "[venv] uv sync from uv.lock failed for .venv (exit 1; venv afterwards: venv)"
+# The real `_dependencies.main` runs: a project with no dependencies and its own cooldown asks PyPI nothing.
+_PYPROJECT = '[project]\nname = "demo"\nversion = "0.1.0"\n\n[tool.uv]\nexclude-newer = "14 days"\n'
+# What uv 0.13.0 writes for that project; `main` reads the cutoff back from it before the re-lock.
+_UV_LOCK = (
+    'version = 1\nrevision = 5\nrequires-python = ">=3.10"\n\n[options]\n'
+    'exclude-newer = "0001-01-01T00:00:00Z"\nexclude-newer-span = "P14D"\n\n'
+    '[[package]]\nname = "demo"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
+)
+# Every succeeding stub `uv lock` writes that lock, as uv does - including the one `main` runs in a scratch
+# project to read the cutoff back. Written whole each time, its bytes do not change between runs.
+_LOCK_WRITE = "printf '%s\\n' " + " ".join(shlex.quote(line) for line in _UV_LOCK.splitlines()) + " > uv.lock"
+# ...unless every run also stamps it with the stub's pid, like an upgrade that moved a pin.
+_LOCK_MOVES = _LOCK_WRITE + ' && echo "# lock written by stub pid $$" >> uv.lock'
+
+
+def _skip_line(project: Path) -> str:
+    return f"{project}: venv sync already failed above; uv.lock unchanged by the update, not retrying"
+
+
+@pytest.fixture
+def deps_project(tmp_path: Path, stub_uv: StubUv, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A dependency-free project beside the stub ``uv``, its venv at the default ``.venv``."""
+    _ = stub_uv  # requested for its PATH and lock-dir setup
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("BMK_NO_VENV_SYNC", raising=False)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    (project / "uv.lock").write_text(_UV_LOCK, encoding="utf-8")
+    return project
+
+
+def _sync_calls(stub_uv: StubUv) -> int:
+    return sum(1 for argv in stub_uv.commands() if argv[:2] == ["uv", "sync"])
+
+
+@pytest.mark.os_posix
+def test_a_failed_provisioning_is_reported_once_when_the_update_leaves_the_lock_unchanged(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from bmk.adapters.cli.commands._shared import run_command
+
+    stub_uv.install(sync_rc=1, lock_aftermath=_LOCK_WRITE)
+
+    rc = run_command(deps_project, (), command_prefix="deps_update", output_format=ToolOutputFormat.JSON)
+
+    out, err = capfd.readouterr()
+    assert rc == 1, "the venv is still not what the lock pins"
+    assert (out + err).count(_SYNC_HEADER) == 1, f"one failure block per run:\n{out}\n{err}"
+    assert _sync_calls(stub_uv) == 1, "an unchanged lock is not synced a second time"
+    assert f"[deps_update] (exit code: 1)\n{_skip_line(deps_project)}\n" in out
+    assert "(no output captured)" not in out
+
+
+@pytest.mark.os_posix
+@pytest.mark.parametrize("provisioning", ["NOT_ATTEMPTED", "FAILED", "PROVISIONED"])
+def test_a_resync_after_the_update_reports_into_the_stage_capture(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str], provisioning: str
+) -> None:
+    _make_venv(deps_project / ".venv")
+    stub_uv.install(sync_rc=1, lock_aftermath=_LOCK_MOVES)
+    ctx = _ctx(deps_project, venv_provisioning=VenvProvisioning[provisioning])
+    sink = CapturingSink()
+
+    rc = PIPELINES["deps_update"][0].action(ctx, sink)
+
+    captured = sink.getvalue()
+    lines = captured.splitlines()
+    assert rc == 1
+    assert _sync_calls(stub_uv) == 1, "a lock the update changed is synced, whatever provisioning did"
+    assert lines[0] == _SYNC_HEADER + ":", "the JSON-mode report, header first, lands in the capture"
+    assert lines[-1] == f"{deps_project}: uv sync from uv.lock failed after the floor update"
+    assert _SYNC_HEADER not in "".join(capfd.readouterr()), "nothing of it bypasses the stage capture"
+
+
+@pytest.mark.os_posix
+@pytest.mark.parametrize("provisioning", ["NOT_ATTEMPTED", "PROVISIONED"])
+def test_an_unchanged_lock_is_still_synced_unless_this_run_saw_the_sync_fail(
+    deps_project: Path, stub_uv: StubUv, provisioning: str
+) -> None:
+    _make_venv(deps_project / ".venv")
+    stub_uv.install(lock_aftermath=_LOCK_WRITE)
+    ctx = _ctx(deps_project, venv_provisioning=VenvProvisioning[provisioning])
+
+    rc = PIPELINES["deps_update"][0].action(ctx, CapturingSink())
+
+    assert rc == 0
+    assert _sync_calls(stub_uv) == 1, "only a sync already seen failing is skipped"
+
+
+@pytest.mark.os_posix
+def test_a_text_mode_resync_still_reports_on_stderr(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Text mode streams live; the stage's passthrough sink is stdout, so the report stays on stderr."""
+    _make_venv(deps_project / ".venv")
+    stub_uv.install(sync_rc=1, lock_aftermath=_LOCK_MOVES)
+    sink = CapturingSink()
+
+    rc = PIPELINES["deps_update"][0].action(_ctx(deps_project, ToolOutputFormat.TEXT), sink)
+
+    err = capfd.readouterr().err
+    assert rc == 1
+    assert sink.getvalue() == ""
+    assert f"{_SYNC_HEADER}\n" in err, "text mode: the bare header, uv's own output streamed above it"
+    assert f"{deps_project}: uv sync from uv.lock failed after the floor update\n" in err
+
+
+@pytest.mark.os_posix
+def test_bmk_no_venv_sync_also_skips_the_deps_update_resync(deps_project: Path, stub_uv: StubUv) -> None:
+    _make_venv(deps_project / ".venv")
+    stub_uv.install(lock_aftermath=_LOCK_MOVES)
+    ctx = _ctx(deps_project, env={"BMK_NO_VENV_SYNC": "1"})
+
+    rc = PIPELINES["deps_update"][0].action(ctx, CapturingSink())
+
+    assert rc == 0
+    assert ["uv", "lock", "--upgrade"] in stub_uv.commands(), "the lock is still upgraded"
+    assert _sync_calls(stub_uv) == 0, "BMK_NO_VENV_SYNC=1 opts out of every sync, this one too"

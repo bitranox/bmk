@@ -97,6 +97,7 @@ class StubUv:
         venv_creates: bool = True,
         python_rc: int = 0,
         lock_rc: int = 0,
+        lock_aftermath: str = ":",
         sync_rc: int = 0,
         sync_aftermath: str = ":",
         pip_install_rc: Mapping[str, int] | None = None,
@@ -111,6 +112,8 @@ class StubUv:
                 makes uv report success and leave nothing behind.
             python_rc: Exit code of every ``uv python ...``; a non-zero ``list`` prints nothing.
             lock_rc: Exit code of ``uv lock``; a non-zero one prints :data:`LOCK_MARKER` on stderr.
+            lock_aftermath: Shell run by a ``uv lock`` that succeeds, in the directory uv runs in (the
+                project), e.g. to rewrite ``uv.lock`` the way a real upgrade that moved a pin does.
             sync_rc: Exit code of ``uv sync``, which always prints :data:`SYNC_MARKER`, one
                 SGR-coloured line and :data:`SYNC_FILLER_LINES` filler lines on stderr.
             sync_aftermath: Shell run by ``uv sync`` against ``$UV_PROJECT_ENVIRONMENT`` first.
@@ -127,6 +130,7 @@ class StubUv:
                 venv_creates=venv_creates,
                 python_rc=python_rc,
                 lock_rc=lock_rc,
+                lock_aftermath=lock_aftermath,
                 sync_rc=sync_rc,
                 sync_aftermath=sync_aftermath,
                 pip_install_rc=pip_install_rc or {},
@@ -155,6 +159,7 @@ class StubUv:
         venv_creates: bool,
         python_rc: int,
         lock_rc: int,
+        lock_aftermath: str,
         sync_rc: int,
         sync_aftermath: str,
         pip_install_rc: Mapping[str, int],
@@ -197,7 +202,9 @@ class StubUv:
             "      esac\n"
             "    fi\n"
             "    exit 0 ;;\n"
-            f'  lock) [ {lock_rc} -eq 0 ] || {{ echo "error: {LOCK_MARKER}" >&2; exit {lock_rc}; }}; exit 0 ;;\n'
+            f'  lock) [ {lock_rc} -eq 0 ] || {{ echo "error: {LOCK_MARKER}" >&2; exit {lock_rc}; }}\n'
+            f"    {lock_aftermath}\n"
+            "    exit 0 ;;\n"
             "  pip)\n"
             "    for last; do :; done\n"
             "    rc=0\n"

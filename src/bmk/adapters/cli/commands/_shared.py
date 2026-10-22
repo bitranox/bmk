@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 import rich_click as click
 
 from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
-from bmk.domain.enums import ToolOutputFormat
+from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
 from bmk.domain.stages import normalize_returncode
 
 from .. import safe_console
@@ -69,7 +69,6 @@ def run_command(
     from bmk.adapters.stagerunner.context import build_context  # noqa: PLC0415
     from bmk.adapters.stagerunner.engine import run_pipeline  # noqa: PLC0415
     from bmk.adapters.stagerunner.registry import resolve_python_pipeline  # noqa: PLC0415
-    from bmk.adapters.stagerunner.venv import ensure_project_venv  # noqa: PLC0415
 
     if output_format is None:
         output_format = resolve_output_format(human=False)
@@ -91,8 +90,7 @@ def run_command(
     # Provision before build_context: it pins VIRTUAL_ENV / PIPAPI_PYTHON_LOCATION
     # once and StageContext is frozen, so a venv created later could not repair the
     # pins for the stages that follow.
-    if command_prefix in VENV_PIPELINES and os.environ.get("BMK_NO_VENV_SYNC") != "1":
-        ensure_project_venv(cwd, os.environ, quiet=output_format is not ToolOutputFormat.TEXT)
+    provisioning = _provision_venv(cwd, command_prefix, quiet=output_format is not ToolOutputFormat.TEXT)
 
     ctx = build_context(
         cwd,
@@ -102,8 +100,25 @@ def run_command(
         show_warnings=show_warnings,
         package_name=package_name,
         supply_chain=supply_chain,
+        venv_provisioning=provisioning,
     )
     return run_pipeline(stages, ctx)
+
+
+def _provision_venv(cwd: Path, command_prefix: str, *, quiet: bool) -> VenvProvisioning:
+    """Provision the project venv for a pipeline that uses it, and say what happened.
+
+    The answer travels to the stages in the StageContext: ``deps_update`` re-syncs the venv, and must
+    not repeat a sync this run already saw fail when its re-lock changed nothing.
+    """
+    from bmk.adapters.stagerunner.venv import ensure_project_venv, venv_sync_disabled  # noqa: PLC0415 - see run_command
+
+    if command_prefix not in VENV_PIPELINES:
+        return VenvProvisioning.NOT_ATTEMPTED
+    if venv_sync_disabled(os.environ):
+        return VenvProvisioning.SKIPPED
+    venv = ensure_project_venv(cwd, os.environ, quiet=quiet)
+    return VenvProvisioning.FAILED if venv is None else VenvProvisioning.PROVISIONED
 
 
 def _configured_bmk_section() -> dict[str, Any]:

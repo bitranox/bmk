@@ -35,6 +35,8 @@ from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
 
+    from bmk.adapters.stagerunner.output import SupportsWrite
+
 # Install targets of the no-lock fallback, tried in order: a project with no ``[dev]``
 # extra (bmk itself is one - all its tooling is a runtime dependency by design) must
 # still install.
@@ -590,6 +592,15 @@ def _discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, q
     shutil.rmtree(venv, ignore_errors=True)
 
 
+def venv_sync_disabled(env: Mapping[str, str]) -> bool:
+    """Whether ``BMK_NO_VENV_SYNC=1`` in ``env`` opts out of every sync of the project venv.
+
+    The one reading of that variable, for the provisioning before a pipeline and for the re-sync
+    ``deps_update`` runs inside one, so the opt-out cannot cover one and miss the other.
+    """
+    return env.get("BMK_NO_VENV_SYNC") == "1"
+
+
 def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True) -> Path | None:
     """Create the project venv if absent, lock the project, then sync the venv from ``uv.lock``.
 
@@ -677,7 +688,7 @@ def _lock_timeout() -> float:
 
 
 @contextmanager
-def _venv_sync_lock(venv: Path, *, quiet: bool) -> Generator[bool, None, None]:
+def _venv_sync_lock(venv: Path, *, quiet: bool, stream: SupportsWrite | None = None) -> Generator[bool, None, None]:
     """Hold the exclusive lock for ``venv``; yield False if another bmk holds it.
 
     Scope is deliberately the SYNC ONLY, never the caller's whole gate. A lock held for
@@ -701,13 +712,13 @@ def _venv_sync_lock(venv: Path, *, quiet: bool) -> Generator[bool, None, None]:
     try:
         lock.acquire()
     except Timeout:
-        # stderr, always: the caller degrades silently to another interpreter, so this
-        # message is the only thing that tells anyone the gate is about to be weaker.
-        print(
+        # Always shown (stderr, or the stage's stream): the caller degrades silently to another
+        # interpreter, so this message is the only thing that tells anyone the gate is about to be weaker.
+        _emit(
             f"[venv] another bmk is still provisioning {venv.name}; "
             f"waited {_lock_timeout():g}s for {path} and gave up. "
-            "Nothing was changed. Re-run once the other command finishes.",
-            file=sys.stderr,
+            "Nothing was changed. Re-run once the other command finishes.\n",
+            stream,
         )
         yield False
         return
@@ -725,7 +736,13 @@ def _venv_sync_lock(venv: Path, *, quiet: bool) -> Generator[bool, None, None]:
 
 
 def ensure_project_venv_at(
-    cwd: Path, venv: Path, minor: str | None, *, quiet: bool = True, install_python: bool = True
+    cwd: Path,
+    venv: Path,
+    minor: str | None,
+    *,
+    quiet: bool = True,
+    install_python: bool = True,
+    stream: SupportsWrite | None = None,
 ) -> Path | None:
     """Provision a venv at an EXPLICIT path on an EXPLICIT Python minor, then sync it.
 
@@ -747,6 +764,12 @@ def ensure_project_venv_at(
     serially before its parallel cells, and a cell that installed again could rewrite the minor
     aliases under a sibling's sync whenever that prep did not converge (bmk OPEN-WORK [102]).
 
+    ``stream`` receives this provisioning's failure reports instead of stderr: a stage that
+    re-provisions passes its own output sink, so in JSON mode the reason is part of that stage's
+    captured output rather than printed outside it. None is the process's stderr, looked up when a
+    report is written. The lock-contention notice of :func:`lock_project` stays on stderr: that
+    function is shared with callers that have no stream.
+
     Returns the venv path, or ``None`` if it could not be provisioned. Never raises: a
     failure degrades rather than aborting the command.
     """
@@ -755,13 +778,15 @@ def ensure_project_venv_at(
     if minor and install_python:
         _ensure_minor_installed(minor, cwd, quiet=quiet)
 
-    with _venv_sync_lock(venv, quiet=quiet) as acquired:
+    with _venv_sync_lock(venv, quiet=quiet, stream=stream) as acquired:
         if not acquired:
             return None
-        return _provision_locked(cwd, venv, minor, quiet=quiet)
+        return _provision_locked(cwd, venv, minor, quiet=quiet, stream=stream)
 
 
-def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) -> Path | None:
+def _provision_locked(
+    cwd: Path, venv: Path, minor: str | None, *, quiet: bool, stream: SupportsWrite | None
+) -> Path | None:
     """Everything that MUTATES the venv, run under :func:`_venv_sync_lock`.
 
     The rebuild belongs in here as much as the sync does: an interpreter change
@@ -769,7 +794,7 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     """
     _discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
 
-    if not is_venv(venv) and not _create_venv(cwd, venv, minor, quiet=quiet):
+    if not is_venv(venv) and not _create_venv(cwd, venv, minor, quiet=quiet, stream=stream):
         return None
 
     ensure_venv_ignored(cwd, venv)
@@ -780,13 +805,13 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     # venv: uv sync may remove the venv and recreate it from that interpreter's
     # sys._base_executable, which on CPython <= 3.10 is the venv's own bin/python - deleted by
     # then, so uv failed and left an empty directory (bmk OPEN-WORK [19]).
-    synced = _sync_from_lock(cwd, venv, minor or str(python), quiet=quiet)
+    synced = _sync_from_lock(cwd, venv, minor or str(python), quiet=quiet, stream=stream)
     if synced is None:
-        synced = _install_from_manifest(cwd, venv, quiet=quiet)
+        synced = _install_from_manifest(cwd, venv, quiet=quiet, stream=stream)
     return venv if synced else None
 
 
-def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) -> bool:
+def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool, stream: SupportsWrite | None) -> bool:
     """``uv venv`` at ``venv``; on failure say why and return False.
 
     uv exiting 0 without leaving a ``pyvenv.cfg`` is a failure too: every later step pins at a venv
@@ -796,11 +821,11 @@ def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) -> bo
     rc, stderr = _run_for_report(create, cwd, quiet=quiet)
     if rc == 0 and is_venv(venv):
         return True
-    _report_failed_uv("uv venv", venv, rc, stderr, quiet=quiet)
+    _report_failed_uv("uv venv", venv, rc, stderr, quiet=quiet, stream=stream)
     return False
 
 
-def _install_from_manifest(cwd: Path, venv: Path, *, quiet: bool) -> bool:
+def _install_from_manifest(cwd: Path, venv: Path, *, quiet: bool, stream: SupportsWrite | None) -> bool:
     """The no-lock fallback: install the project from ``pyproject.toml``, ``.[dev]`` first, then ``.``.
 
     Only the LAST target's failure is reported: ``.[dev]`` failing on a project without that extra
@@ -813,11 +838,11 @@ def _install_from_manifest(cwd: Path, venv: Path, *, quiet: bool) -> bool:
         rc, stderr = _run_for_report(argv, cwd, quiet=quiet)
         if rc == 0:
             return True
-    _report_failed_uv("uv pip install (fallback from pyproject.toml)", venv, rc, stderr, quiet=quiet)
+    _report_failed_uv("uv pip install (fallback from pyproject.toml)", venv, rc, stderr, quiet=quiet, stream=stream)
     return False
 
 
-def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool) -> bool | None:
+def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool, stream: SupportsWrite | None) -> bool | None:
     """Lock the project, then make ``venv`` exactly what ``uv.lock`` pins.
 
     The lock is the source because ``uv pip install --upgrade`` keeps an installed release that
@@ -838,17 +863,17 @@ def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool) -> bool 
     if rc is None:
         # No uv ran (another bmk held the project's lock and said so): there is no exit code or
         # reason to add, only where provisioning goes next.
-        print(f"[venv] uv lock failed in {cwd}; provisioning {venv.name} from pyproject.toml instead", file=sys.stderr)
+        _emit(f"[venv] uv lock failed in {cwd}; provisioning {venv.name} from pyproject.toml instead\n", stream)
         return None
     if rc != 0:
         header = f"[venv] uv lock failed in {cwd} (exit {rc}); provisioning {venv.name} from pyproject.toml instead"
-        _write_failure(header, stderr, quiet=quiet)
+        _write_failure(header, stderr, quiet=quiet, stream=stream)
         return None
     argv = ["uv", "sync", "--locked", "--python", python, "--no-default-groups", *_sync_extras(cwd)]
     rc, stderr = _run_for_report(argv, cwd, quiet=quiet, env={**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)})
     if rc == 0:
         return True
-    _report_failed_uv("uv sync from uv.lock", venv, rc, stderr, quiet=quiet)
+    _report_failed_uv("uv sync from uv.lock", venv, rc, stderr, quiet=quiet, stream=stream)
     return False
 
 
@@ -866,15 +891,20 @@ def _run_for_report(
     return _run(argv, cwd, quiet=False, env=env), ""
 
 
-def _report_failed_uv(what: str, venv: Path, rc: int, stderr: str, *, quiet: bool) -> None:
-    """Say on stderr that the provisioning step ``what`` failed, why uv says so, and what it left of ``venv``."""
+def _report_failed_uv(
+    what: str, venv: Path, rc: int, stderr: str, *, quiet: bool, stream: SupportsWrite | None
+) -> None:
+    """Say that the provisioning step ``what`` failed, why uv says so, and what it left of ``venv``."""
     _write_failure(
-        f"[venv] {what} failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)})", stderr, quiet=quiet
+        f"[venv] {what} failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)})",
+        stderr,
+        quiet=quiet,
+        stream=stream,
     )
 
 
-def _write_failure(header: str, stderr: str, *, quiet: bool) -> None:
-    """Write ``header`` and, when quiet, all of uv's ``stderr`` under it, as ONE write to stderr.
+def _write_failure(header: str, stderr: str, *, quiet: bool, stream: SupportsWrite | None) -> None:
+    """Write ``header`` and, when quiet, all of uv's ``stderr`` under it, as ONE write to ``stream``.
 
     Always printed, never gated on ``quiet``: the caller degrades silently to an ERROR, and the
     failure can be intermittent, so asking for a text-mode re-run would lose the very evidence it
@@ -885,10 +915,24 @@ def _write_failure(header: str, stderr: str, *, quiet: bool) -> None:
     drops the cause. The block goes out as ONE write, because parallel test-all cells share this
     stderr and only the header names the venv. With nothing from uv to show, the header stands
     alone rather than ending in a colon with nothing after it.
+
+    ``stream`` None is the process's stderr; a stage that re-provisions passes its own sink.
     """
     reason = _ANSI_SGR.sub("", stderr).splitlines() if quiet else []
     lines = [f"{header}:", *(f"    {line}" for line in reason)] if any(line.strip() for line in reason) else [header]
-    sys.stderr.write("\n".join(lines) + "\n")
+    _emit("\n".join(lines) + "\n", stream)
+
+
+def _emit(text: str, stream: SupportsWrite | None) -> None:
+    """Write ``text`` to ``stream`` in one call; None means the process's stderr, looked up now.
+
+    Looked up at call time, never bound at import: a caller that swaps ``sys.stderr`` (a test, a
+    redirect) must see the report.
+    """
+    if stream is not None:
+        stream.write(text)
+        return
+    sys.stderr.write(text)
     sys.stderr.flush()
 
 

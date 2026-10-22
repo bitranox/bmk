@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from bmk.domain.enums import VenvProvisioning
+
 from .helpers._supply_chain import SupplyChainSettings
 from .model import StageContext
 from .venv import is_venv, resolve_project_venv, venv_python
@@ -153,6 +155,7 @@ def build_context(
     show_warnings: bool,
     package_name: str = "",
     supply_chain: SupplyChainSettings | None = None,
+    venv_provisioning: VenvProvisioning = VenvProvisioning.NOT_ATTEMPTED,
 ) -> StageContext:
     """Assemble the StageContext (including the child-process environment)."""
     env = os.environ.copy()
@@ -176,4 +179,5 @@ def build_context(
         env=env,
         show_warnings=show_warnings,
         supply_chain=supply_chain if supply_chain is not None else SupplyChainSettings(),
+        venv_provisioning=venv_provisioning,
     )

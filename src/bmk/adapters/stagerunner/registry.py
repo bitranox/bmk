@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from bmk.domain.enums import ToolOutputFormat
+from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
 
 from . import git_ops, tools
 from .actions import HelperAction, PipAuditAction, PipelineAction, ToolAction
@@ -25,10 +25,13 @@ from .venv import (
     lock_project,
     resolve_project_venv,
     venv_python,
+    venv_sync_disabled,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from .output import OutputSink
 
 
 def clean_action(ctx: StageContext) -> int:
@@ -92,39 +95,47 @@ def deps_action(ctx: StageContext) -> int:
     )
 
 
-def _locked_project(ctx: StageContext) -> _dependencies.LockedProject:
+def _locked_project(ctx: StageContext, sink: OutputSink) -> _dependencies.LockedProject:
     """``uv lock --upgrade`` for the project, and a sync of the project's OWN venv from that lock.
 
     The sync re-runs the same lock-based provisioning ``run_command`` used before the pipeline,
-    at the same path, so the pins ``build_context`` froze stay valid. No project venv means
-    nothing to sync (None), never a retarget at bmk's own interpreter.
+    at the same path, so the pins ``build_context`` froze stay valid. No project venv, or
+    ``BMK_NO_VENV_SYNC=1``, means nothing to sync (None), never a retarget at bmk's own interpreter.
+
+    In JSON mode every failure line, the venv report included, goes into ``sink``: the stage's
+    capture is what JSON mode shows for a failed stage, and a report written past it left that
+    block reading '(no output captured)'. Text mode keeps stderr; its sink streams to stdout.
     """
     quiet = ctx.output_format is not ToolOutputFormat.TEXT
+    out = sink if quiet else None
     venv = resolve_project_venv(ctx.project_dir, ctx.env)
 
     def sync() -> bool | None:
-        if not is_venv(venv):
+        if venv_sync_disabled(ctx.env) or not is_venv(venv):
             return None
-        return (
-            ensure_project_venv_at(ctx.project_dir, venv, desired_python_minor(ctx.project_dir), quiet=quiet)
-            is not None
-        )
+        minor = desired_python_minor(ctx.project_dir)
+        return ensure_project_venv_at(ctx.project_dir, venv, minor, quiet=quiet, stream=out) is not None
 
     return _dependencies.LockedProject(
         upgrade=lambda: lock_project(ctx.project_dir, quiet=quiet, upgrade=True),
         sync=sync,
+        sync_already_failed=ctx.venv_provisioning is VenvProvisioning.FAILED,
+        out=out,
     )
 
 
-def deps_update_action(ctx: StageContext) -> int:
-    """Update outdated dependencies to their latest versions."""
+def deps_update_action(ctx: StageContext, sink: OutputSink) -> int:
+    """Update outdated dependencies to their latest versions.
+
+    A stage action in its own right, not a ``HelperAction``: it needs the stage's sink.
+    """
     return _dependencies.main(
         update=True,
         pyproject=ctx.project_dir / "pyproject.toml",
         quiet=ctx.output_format is not ToolOutputFormat.TEXT,
         python=_project_python(ctx),
         supply_chain=ctx.supply_chain,
-        locked=_locked_project(ctx),
+        locked=_locked_project(ctx, sink),
     )
 
 
@@ -194,7 +205,7 @@ _PUSH_PIPELINE: tuple[Stage, ...] = (
 PIPELINES: dict[str, tuple[Stage, ...]] = {
     "clean": (Stage("clean", 10, HelperAction(clean_action)),),
     "deps": (Stage("deps", 10, HelperAction(deps_action)),),
-    "deps_update": (Stage("deps_update", 10, HelperAction(deps_update_action)),),
+    "deps_update": (Stage("deps_update", 10, deps_update_action),),
     "test": _TEST_PIPELINE,
     "test_all": (Stage("test_all", 10, HelperAction(matrix_action)),),
     "clean_all": (Stage("clean_all", 10, HelperAction(purge_action)),),

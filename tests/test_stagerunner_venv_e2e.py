@@ -22,7 +22,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from bmk.adapters.cli.commands._shared import run_command
 from bmk.adapters.stagerunner.venv import ensure_project_venv_at
+from bmk.domain.enums import ToolOutputFormat
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -189,3 +191,44 @@ def test_a_json_mode_failed_lock_reports_real_uv_s_resolver_error_under_its_head
     block = _indented_block(lines, found[0])
     _index_of(block, "error: No solution found", prefix=True)
     _index_of(block, _MISSING_PACKAGE)
+
+
+# --- `deps_update` after the provisioning sync failed (OPEN-WORK [230]) ------------------------------
+# The whole command as `bmk deps update` runs it: provisioning syncs (and fails) before the pipeline, then
+# the stage re-locks. The project has no dependencies, so the real dependency check asks PyPI nothing.
+
+
+def test_an_update_that_leaves_the_lock_unchanged_reports_the_failed_sync_once(
+    failing_project: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # The project already states its cooldown, so the update writes nothing and the re-lock is a no-op.
+    pyproject = failing_project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + '\n[tool.uv]\nexclude-newer = "14 days"\n', encoding="utf-8"
+    )
+
+    rc = run_command(failing_project, (), command_prefix="deps_update", output_format=ToolOutputFormat.JSON)
+
+    out, err = capfd.readouterr()
+    headers = [line for line in (out + err).splitlines() if _HEADER.fullmatch(line.removesuffix(":"))]
+    assert rc == 1
+    assert len(headers) == 1, f"one failure block per run: {headers!r}"
+    skip = f"{failing_project}: venv sync already failed above; uv.lock unchanged by the update, not retrying"
+    assert f"[deps_update] (exit code: 1)\n{skip}\n" in out
+    assert err.count(_MARKER) == 1, "uv's reason, from the one sync that ran"
+
+
+def test_an_update_that_changes_the_lock_reports_its_resync_inside_the_stage(
+    failing_project: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # No cooldown yet: the update writes bmk's default into [tool.uv], so the re-lock records it.
+    rc = run_command(failing_project, (), command_prefix="deps_update", output_format=ToolOutputFormat.JSON)
+
+    out, err = capfd.readouterr()
+    assert rc == 1
+    assert "(no output captured)" not in out
+    stage = out[out.index("[deps_update] (exit code: 1)\n") :].rstrip("\n").splitlines()
+    block = _indented_block(stage, _header_index(stage, colon=True))
+    _index_of(block, "error: Failed to build", prefix=True)
+    assert stage[-1] == f"{failing_project}: uv sync from uv.lock failed after the floor update"
+    assert err.count(_MARKER) == 1, "the provisioning sync's report, on stderr as before"

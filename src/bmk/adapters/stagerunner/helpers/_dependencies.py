@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable
 
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
+    from bmk.adapters.stagerunner.output import SupportsWrite
 
 
 __all__ = [
@@ -1384,11 +1385,19 @@ class LockedProject:
 
     Attributes:
         upgrade: Runs ``uv lock --upgrade``: every package at its newest admitted release.
-        sync: Brings the project venv to the lock; True synced, False failed, None no venv.
+        sync: Brings the project venv to the lock; True synced, False failed, None nothing to sync
+            (no project venv, or ``BMK_NO_VENV_SYNC=1``).
+        sync_already_failed: This run's provisioning sync already failed and said why. A lock the
+            upgrade left byte-for-byte unchanged is then not synced again: it could only fail the
+            same way and print the same report a second time.
+        out: Where the update's failure lines go; None is the process's stderr, looked up when
+            written. A JSON-mode stage passes its sink, so the reason lands in its captured output.
     """
 
     upgrade: Callable[[], bool]
     sync: Callable[[], bool | None]
+    sync_already_failed: bool = False
+    out: SupportsWrite | None = None
 
 
 def _complete_block(pyproject: Path, supply_chain: SupplyChainSettings, *, quiet: bool) -> bool:
@@ -1610,15 +1619,38 @@ def _upgrade_and_sync(locked: LockedProject, pyproject: Path) -> int:
     """Re-lock at the newest admitted releases, then bring the venv to that lock.
 
     Runs whether or not a floor moved: a transitive package can move inside an unchanged manifest,
-    and the gates after this stage must test exactly what the lock pins.
+    and the gates after this stage must test exactly what the lock pins. The one exception is a
+    sync this run already saw fail on a lock the upgrade did not change: retrying it repeats the
+    same failure and its report, so one line points back at the first report instead.
     """
+    lock_file = pyproject.parent / "uv.lock"
+    before = _read_bytes(lock_file)
     if not locked.upgrade():
-        print(f"{pyproject.parent}: uv lock --upgrade failed after the floor update", file=sys.stderr)
+        _say(f"{pyproject.parent}: uv lock --upgrade failed after the floor update", locked.out)
+        return 1
+    if locked.sync_already_failed and _read_bytes(lock_file) == before:
+        _say(
+            f"{pyproject.parent}: venv sync already failed above; uv.lock unchanged by the update, not retrying",
+            locked.out,
+        )
         return 1
     if locked.sync() is False:
-        print(f"{pyproject.parent}: uv sync from uv.lock failed after the floor update", file=sys.stderr)
+        _say(f"{pyproject.parent}: uv sync from uv.lock failed after the floor update", locked.out)
         return 1
     return 0
+
+
+def _read_bytes(path: Path) -> bytes | None:
+    """``path``'s bytes; None when it cannot be read (absent counts as unchanged if it stays absent)."""
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _say(line: str, out: SupportsWrite | None) -> None:
+    """Write one line to ``out``, or to the process's stderr (looked up now) when None."""
+    print(line, file=sys.stderr if out is None else out)
 
 
 def _requires_of_newest(package_name: str) -> list[str] | None:
@@ -1905,6 +1937,7 @@ if __name__ == "__main__":  # pragma: no cover
         lock_project,
         resolve_project_venv,
         venv_python,
+        venv_sync_disabled,
     )
 
     args, _unknown = parser.parse_known_args()
@@ -1916,7 +1949,7 @@ if __name__ == "__main__":  # pragma: no cover
     target = str(venv_python(project_venv)) if is_venv(project_venv) else None
 
     def _sync() -> bool | None:
-        if not is_venv(project_venv):
+        if venv_sync_disabled(os.environ) or not is_venv(project_venv):
             return None
         minor = desired_python_minor(args.project_dir)
         return ensure_project_venv_at(args.project_dir, project_venv, minor, quiet=quiet) is not None

@@ -128,9 +128,33 @@ class DeployTarget(str, Enum):
     USER = "user"
 
 
+class VenvProvisioning(Enum):
+    """What provisioning the project venv did before a pipeline ran.
+
+    Stages read it from the ``StageContext``: ``deps_update`` does not repeat a sync this run already
+    saw fail when its re-lock changed nothing, since that sync could only fail the same way again.
+
+    Attributes:
+        PROVISIONED: The venv was created or updated and synced.
+        FAILED: Provisioning ran and could not produce a venv; it already said why on stderr.
+        SKIPPED: ``BMK_NO_VENV_SYNC=1`` opted out of it.
+        NOT_ATTEMPTED: The pipeline does not use the project venv, or no provisioning ran at all.
+
+    Example:
+        >>> VenvProvisioning.FAILED.value
+        'failed'
+    """
+
+    PROVISIONED = "provisioned"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    NOT_ATTEMPTED = "not_attempted"
+
+
 __all__ = [
     "BumpPart",
     "DeployTarget",
     "OutputFormat",
     "ToolOutputFormat",
+    "VenvProvisioning",
 ]

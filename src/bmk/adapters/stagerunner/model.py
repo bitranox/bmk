@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from bmk.domain.enums import VenvProvisioning
+
 from .helpers._supply_chain import SupplyChainSettings
 
 if TYPE_CHECKING:
@@ -21,7 +23,8 @@ class StageContext:
     """Everything a stage action needs to run, resolved once per pipeline.
 
     ``env`` is the fully-built environment mapping (project dir, venv pinning,
-    output format) passed to any subprocess a stage spawns.
+    output format) passed to any subprocess a stage spawns. ``venv_provisioning`` is what
+    provisioning the project venv did before the pipeline started.
     """
 
     project_dir: Path
@@ -32,6 +35,7 @@ class StageContext:
     env: Mapping[str, str]
     show_warnings: bool
     supply_chain: SupplyChainSettings = field(default_factory=SupplyChainSettings)
+    venv_provisioning: VenvProvisioning = VenvProvisioning.NOT_ATTEMPTED
 
 
 class StageAction(Protocol):
