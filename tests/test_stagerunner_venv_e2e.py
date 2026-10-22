@@ -9,6 +9,9 @@ any tail a report might be capped at.
 
 Nothing is downloaded: the project has no dependencies and the backend requires nothing, so the
 whole run works with ``UV_OFFLINE=1`` and a cold, test-owned uv cache.
+
+A failed ``uv lock`` is pinned the same way: a project depending on a package that exists nowhere,
+locked offline against a cold cache, so uv's resolver error must appear under bmk's lock header.
 """
 
 from __future__ import annotations
@@ -154,3 +157,35 @@ def test_a_text_mode_failed_sync_streams_real_uv_live_under_a_bare_header(
     marker_at = _index_of(lines, f"RuntimeError: {_MARKER}")
     error_at = _index_of(lines, "error: Failed to build", prefix=True)
     assert error_at < marker_at < header_at, "uv's output streamed live, before bmk's header"
+
+
+_MISSING_PACKAGE = "bmk-no-such-package-e2e-9d41"
+
+
+def test_a_json_mode_failed_lock_reports_real_uv_s_resolver_error_under_its_header(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        f'[project]\nname = "demo"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n'
+        f'dependencies = ["{_MISSING_PACKAGE}"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
+    monkeypatch.setenv("BMK_VENV_LOCK_DIR", str(tmp_path / "locks"))
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
+
+    assert ensure_project_venv_at(project, project / ".venv", None, quiet=True) is None
+
+    lines = capfd.readouterr().err.splitlines()
+    header = re.compile(
+        rf"\[venv\] uv lock failed in {re.escape(str(project))} \(exit [1-9][0-9]*\); "
+        r"provisioning \.venv from pyproject\.toml instead:"
+    )
+    found = [i for i, line in enumerate(lines) if header.fullmatch(line)]
+    assert len(found) == 1, f"exactly one lock failure header expected in: {lines!r}"
+    block = _indented_block(lines, found[0])
+    _index_of(block, "error: No solution found", prefix=True)
+    _index_of(block, _MISSING_PACKAGE)

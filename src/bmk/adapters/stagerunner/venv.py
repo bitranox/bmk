@@ -35,9 +35,9 @@ from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
 
-# Sync targets, tried in order: a project with no ``[dev]`` extra (bmk itself is
-# one - all its tooling is a runtime dependency by design) must still sync.
-# Mirrors the fallback chain in ``src/bmk/makefile/Makefile``.
+# Install targets of the no-lock fallback, tried in order: a project with no ``[dev]``
+# extra (bmk itself is one - all its tooling is a runtime dependency by design) must
+# still install.
 _INSTALL_TARGETS: tuple[str, ...] = (".[dev]", ".")
 
 #: How long a bmk waits for another bmk to finish mutating the same venv. Generous,
@@ -251,8 +251,9 @@ def _uv_env() -> dict[str, str]:
     shell activated (an IDE's, say). uv then prints
     ``warning: VIRTUAL_ENV=... does not match the project environment path ... and will
     be ignored`` on every provisioning call. bmk targets the venv explicitly
-    (``uv venv <path>``, ``uv pip install --python <path>``), so ``VIRTUAL_ENV`` is pure
-    noise here - drop it so the output stays clean and uv cannot prefer a foreign env.
+    (``uv venv <path>``, ``uv sync`` with ``UV_PROJECT_ENVIRONMENT=<path>``, and the no-lock
+    fallback's ``uv pip install --python <path>``), so ``VIRTUAL_ENV`` is pure noise here -
+    drop it so the output stays clean and uv cannot prefer a foreign env.
     """
     return {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
 
@@ -590,7 +591,7 @@ def _discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, q
 
 
 def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True) -> Path | None:
-    """Create the project venv if absent, then sync it to ``pyproject.toml``.
+    """Create the project venv if absent, lock the project, then sync the venv from ``uv.lock``.
 
     An existing venv is updated in place, so its path - and therefore the pins
     derived from it - stay stable across the run. The one exception is the Python
@@ -599,8 +600,11 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
     same path (see ``_discard_venv_on_wrong_python``). That happens here, before
     ``build_context`` freezes the pins, so nothing downstream sees a stale path.
 
-    The sync needs ``--exact`` *and* ``--upgrade``; either alone leaves the venv
-    lying about what the project resolves, in a different way:
+    The lock is the source (``uv sync --locked``): the venv then holds exactly what
+    ``uv.lock`` pins and CI installs. Only when no lock can be made does provisioning
+    fall back to installing from ``pyproject.toml``, and that install needs
+    ``--exact`` *and* ``--upgrade``; either alone leaves the venv lying about what
+    the project resolves, in a different way:
 
     * ``--exact`` removes packages the manifest no longer asks for. Without it, a
       dropped dependency lingers and pip-audit reports CVEs against a package the
@@ -612,11 +616,12 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
       fixed one.
 
     The trade-off is that packages installed into the venv by hand do not survive
-    a sync.
+    a sync, from the lock or from the manifest. Both also remove ``pip`` (a
+    uv-created venv ships none anyway); the ``pip_audit`` stage bootstraps a current
+    pip into the resolved interpreter before every audit, so that repairs itself.
 
-    ``--exact`` also removes ``pip`` (a uv-created venv ships none anyway); the
-    ``pip_audit`` stage bootstraps a current pip into the resolved interpreter
-    before every audit, so that repairs itself.
+    Every failing step (``uv venv``, ``uv lock``, ``uv sync``, the fallback install)
+    is reported on stderr with uv's own reason, even in JSON mode.
 
     Because bmk creates this directory, it also keeps it out of git
     (``ensure_venv_ignored``).
@@ -732,9 +737,11 @@ def ensure_project_venv_at(
     ``minor=None`` means "no declared version": uv's own interpreter choice stands and no
     ``--python`` pin is passed - the historical default-venv behaviour.
 
-    The sync needs ``--exact`` AND ``--upgrade``; each covers a distinct way a venv drifts
-    (a dropped dep lingering; an unconstrained transitive never moving off a vulnerable
-    release). Packages installed by hand do not survive it. See :func:`ensure_project_venv`.
+    The venv is synced from ``uv.lock``; only when no lock can be made is it installed from
+    ``pyproject.toml`` instead, with ``--exact`` AND ``--upgrade``, each covering a distinct
+    way a venv drifts (a dropped dep lingering; an unconstrained transitive never moving off
+    a vulnerable release). Packages installed by hand do not survive either. See
+    :func:`ensure_project_venv`.
 
     ``install_python=False`` leaves uv's Python store alone: ``test-all`` prepares every minor
     serially before its parallel cells, and a cell that installed again could rewrite the minor
@@ -762,10 +769,7 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     """
     _discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
 
-    create = ["uv", "venv", *(["--python", minor] if minor else []), str(venv)]
-    if not is_venv(venv) and _run(create, cwd, quiet=quiet) != 0:
-        return None
-    if not is_venv(venv):
+    if not is_venv(venv) and not _create_venv(cwd, venv, minor, quiet=quiet):
         return None
 
     ensure_venv_ignored(cwd, venv)
@@ -777,13 +781,40 @@ def _provision_locked(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) 
     # sys._base_executable, which on CPython <= 3.10 is the venv's own bin/python - deleted by
     # then, so uv failed and left an empty directory (bmk OPEN-WORK [19]).
     synced = _sync_from_lock(cwd, venv, minor or str(python), quiet=quiet)
-    if synced is not None:
-        return venv if synced else None
+    if synced is None:
+        synced = _install_from_manifest(cwd, venv, quiet=quiet)
+    return venv if synced else None
+
+
+def _create_venv(cwd: Path, venv: Path, minor: str | None, *, quiet: bool) -> bool:
+    """``uv venv`` at ``venv``; on failure say why and return False.
+
+    uv exiting 0 without leaving a ``pyvenv.cfg`` is a failure too: every later step pins at a venv
+    that is not there, so it is reported with the exit code uv gave.
+    """
+    create = ["uv", "venv", *(["--python", minor] if minor else []), str(venv)]
+    rc, stderr = _run_for_report(create, cwd, quiet=quiet)
+    if rc == 0 and is_venv(venv):
+        return True
+    _report_failed_uv("uv venv", venv, rc, stderr, quiet=quiet)
+    return False
+
+
+def _install_from_manifest(cwd: Path, venv: Path, *, quiet: bool) -> bool:
+    """The no-lock fallback: install the project from ``pyproject.toml``, ``.[dev]`` first, then ``.``.
+
+    Only the LAST target's failure is reported: ``.[dev]`` failing on a project without that extra
+    is the expected route to ``.``, so its reason would only bury the one that ended provisioning.
+    """
+    python = str(venv_python(venv))
+    rc, stderr = 1, ""
     for target in _INSTALL_TARGETS:
-        argv = ["uv", "pip", "install", "--python", str(python), "--exact", "--upgrade", "-e", target]
-        if _run(argv, cwd, quiet=quiet) == 0:
-            return venv
-    return None
+        argv = ["uv", "pip", "install", "--python", python, "--exact", "--upgrade", "-e", target]
+        rc, stderr = _run_for_report(argv, cwd, quiet=quiet)
+        if rc == 0:
+            return True
+    _report_failed_uv("uv pip install (fallback from pyproject.toml)", venv, rc, stderr, quiet=quiet)
+    return False
 
 
 def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool) -> bool | None:
@@ -803,39 +834,60 @@ def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool) -> bool 
         must surface rather than be covered by a manifest install; None when no lock could be
         made, so the caller may fall back to the manifest.
     """
-    if not lock_project(cwd, quiet=quiet):
+    rc, stderr = _lock(cwd, quiet=quiet, upgrade=False)
+    if rc is None:
+        # No uv ran (another bmk held the project's lock and said so): there is no exit code or
+        # reason to add, only where provisioning goes next.
         print(f"[venv] uv lock failed in {cwd}; provisioning {venv.name} from pyproject.toml instead", file=sys.stderr)
         return None
+    if rc != 0:
+        header = f"[venv] uv lock failed in {cwd} (exit {rc}); provisioning {venv.name} from pyproject.toml instead"
+        _write_failure(header, stderr, quiet=quiet)
+        return None
     argv = ["uv", "sync", "--locked", "--python", python, "--no-default-groups", *_sync_extras(cwd)]
-    env = {**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)}
-    if quiet:
-        rc, stderr = _run_keeping_stderr(argv, cwd, quiet=True, env=env)
-    else:
-        # Text mode inherits the terminal: a piped stderr would hold back a multi-minute first sync
-        # until uv exits, and uv drops its progress display when stderr is not a terminal.
-        rc, stderr = _run(argv, cwd, quiet=False, env=env), ""
+    rc, stderr = _run_for_report(argv, cwd, quiet=quiet, env={**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)})
     if rc == 0:
         return True
-    _report_failed_sync(venv, rc, stderr, quiet=quiet)
+    _report_failed_uv("uv sync from uv.lock", venv, rc, stderr, quiet=quiet)
     return False
 
 
-def _report_failed_sync(venv: Path, rc: int, stderr: str, *, quiet: bool) -> None:
-    """Say on stderr that the sync failed, why uv says it did, and what it left of ``venv``.
+def _run_for_report(
+    argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None
+) -> tuple[int, str]:
+    """Run a provisioning uv call so a failure can be reported: stderr kept when quiet, live when not.
+
+    Text mode inherits the terminal: a piped stderr would hold back a multi-minute first sync until
+    uv exits, and uv drops its progress display when stderr is not a terminal. uv's reason is then
+    already on screen, so there is nothing to hand back.
+    """
+    if quiet:
+        return _run_keeping_stderr(argv, cwd, quiet=True, env=env)
+    return _run(argv, cwd, quiet=False, env=env), ""
+
+
+def _report_failed_uv(what: str, venv: Path, rc: int, stderr: str, *, quiet: bool) -> None:
+    """Say on stderr that the provisioning step ``what`` failed, why uv says so, and what it left of ``venv``."""
+    _write_failure(
+        f"[venv] {what} failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)})", stderr, quiet=quiet
+    )
+
+
+def _write_failure(header: str, stderr: str, *, quiet: bool) -> None:
+    """Write ``header`` and, when quiet, all of uv's ``stderr`` under it, as ONE write to stderr.
 
     Always printed, never gated on ``quiet``: the caller degrades silently to an ERROR, and the
-    failure is intermittent, so asking for a text-mode re-run would lose the very evidence it
+    failure can be intermittent, so asking for a text-mode re-run would lose the very evidence it
     asks for. When not quiet, uv's output already streamed above, so only the header is printed.
 
     When quiet, ALL of uv's stderr follows, uncapped: uv puts its verdict first and the detail
     after it (uv 0.13.0, a failing build: ``error: Failed to build`` on line 6 of 26), so any tail
-    drops the cause, and the block prints only on a failure. The block goes out as ONE write,
-    because parallel test-all cells share this stderr and only the header names the venv.
+    drops the cause. The block goes out as ONE write, because parallel test-all cells share this
+    stderr and only the header names the venv. With nothing from uv to show, the header stands
+    alone rather than ending in a colon with nothing after it.
     """
-    header = f"[venv] uv sync from uv.lock failed for {venv.name} (exit {rc}; venv afterwards: {_venv_state(venv)})"
-    lines = [header]
-    if quiet:
-        lines = [f"{header}:", *(f"    {line}" for line in _ANSI_SGR.sub("", stderr).splitlines())]
+    reason = _ANSI_SGR.sub("", stderr).splitlines() if quiet else []
+    lines = [f"{header}:", *(f"    {line}" for line in reason)] if any(line.strip() for line in reason) else [header]
     sys.stderr.write("\n".join(lines) + "\n")
     sys.stderr.flush()
 
@@ -880,16 +932,30 @@ def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> boo
     index with ``max-age=600`` and uv honours it, so without a refresh a release from minutes
     ago stays invisible and the own floor, which rises only to what the lock resolves, stays put.
     """
+    return _lock(cwd, quiet=quiet, upgrade=upgrade)[0] == 0
+
+
+def uv_lock_guard_path(cwd: Path) -> Path:
+    """The lock file that lets only one bmk at a time run ``uv lock`` for the project at ``cwd``."""
+    return _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
+
+
+def _lock(cwd: Path, *, quiet: bool, upgrade: bool) -> tuple[int | None, str]:
+    """:func:`lock_project` with uv's exit code and, when quiet, its stderr, for a failure report.
+
+    The exit code is None when uv never ran because another bmk held the project's lock past the
+    timeout; that case has already said so on stderr.
+    """
     argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
     refresh = _lock_argv(cwd, upgrade=upgrade)[len(argv) :]
-    path = _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
+    path = uv_lock_guard_path(cwd)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(path), timeout=_lock_timeout()):
             return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
     except Timeout:
         print(f"[venv] another bmk is still locking {cwd}; waited {_lock_timeout():g}s and gave up", file=sys.stderr)
-        return False
+        return None, ""
     except OSError:
         # An unlockable location must not make bmk unusable there; lock unguarded instead.
         return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
@@ -946,21 +1012,23 @@ def _run_keeping_stderr(
     return done.returncode, done.stderr
 
 
-def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> bool:
+def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> tuple[int, str]:
     """Lock with the own-package refresh, and once more without it only if uv refused the refresh.
 
     The plain lock is the old behaviour, so the refresh may only ever add, never break a gate. Any
     other failure stands: retried without the refresh, an index that is down for the revalidation
     could lock from the max-age=600 cache, and the own floor would silently stay put again.
+
+    Returns uv's exit code and the stderr a caller may report (see :func:`_run_for_report`).
     """
     if not refresh:
-        return _run(argv, cwd, quiet=quiet) == 0
+        return _run_for_report(argv, cwd, quiet=quiet)
     rc, stderr = _run_keeping_stderr([*argv, *refresh], cwd, quiet=quiet)
     if not _refresh_refused(rc, stderr):
-        return rc == 0
+        return rc, stderr
     print(
         "[venv] uv refused --refresh-package (offline is configured, or a package name it rejects); "
         "locking without refreshing our own packages",
         file=sys.stderr,
     )
-    return _run(argv, cwd, quiet=quiet) == 0
+    return _run_for_report(argv, cwd, quiet=quiet)

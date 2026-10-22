@@ -6,6 +6,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- **Every venv-provisioning failure now says why, not only a failed sync.** A failed `uv venv`,
+  `uv lock` or no-lock fallback install (`uv pip install` from `pyproject.toml`) used to discard
+  uv's stderr in JSON mode, so provisioning said at most `uv lock failed` with no reason. Each now
+  reports like the sync does: `[venv] uv venv failed for <venv> (exit N; venv afterwards: <state>)`,
+  `[venv] uv lock failed in <project> (exit N); provisioning <venv> from pyproject.toml instead`, and
+  `[venv] uv pip install (fallback from pyproject.toml) failed for <venv> (...)`, followed in JSON
+  mode by all of uv's stderr; in text mode uv streams live and only the header is added. A `uv venv`
+  that exits 0 without leaving a venv is reported too, and a report with nothing from uv to show
+  no longer ends in a colon.
+
 ## [3.22.3] 2026-10-21 20:59:38
 
 ### Fixed

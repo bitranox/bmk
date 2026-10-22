@@ -25,7 +25,7 @@ from venv import EnvBuilder
 
 import pytest
 
-from bmk.adapters.stagerunner.venv import ensure_project_venv_at, sync_lock_path
+from bmk.adapters.stagerunner.venv import ensure_project_venv_at, sync_lock_path, uv_lock_guard_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -119,6 +119,29 @@ def test_a_sync_refuses_loudly_rather_than_running_under_another_bmk(
     assert stub_uv.calls() == [], "must not touch the venv while another bmk holds it"
     assert not venv.exists()
     assert "lock" in capsys.readouterr().err.lower(), "a refusal must say why, not fail silently"
+
+
+@pytest.mark.os_posix
+def test_a_timed_out_uv_lock_reports_no_exit_code_and_no_reason_because_uv_never_ran(
+    tmp_path: Path,
+    stub_uv: StubUv,
+    lock_holder: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Another bmk holding the project's ``uv lock`` keeps its own message, with nothing invented after it."""
+    project = _project(tmp_path)
+    venv = project / ".venv"
+    monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
+    lock_holder(uv_lock_guard_path(project))  # type: ignore[operator]
+
+    assert ensure_project_venv_at(project, venv, None, quiet=True) == venv, "the manifest fallback still provisions"
+
+    assert not any(c[:2] == ["uv", "lock"] for c in stub_uv.commands())
+    assert capfd.readouterr().err == (
+        f"[venv] another bmk is still locking {project}; waited {_SHORT_WAIT}s and gave up\n"
+        f"[venv] uv lock failed in {project}; provisioning .venv from pyproject.toml instead\n"
+    )
 
 
 @pytest.mark.os_posix

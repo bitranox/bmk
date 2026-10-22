@@ -25,15 +25,23 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ESC",
+    "LOCK_MARKER",
+    "PIP_MARKER",
     "SYNC_COLOURED",
     "SYNC_FILLER_LINES",
     "SYNC_LAST_FILLER",
     "SYNC_MARKER",
+    "VENV_MARKER",
     "StubUv",
     "UvCall",
 ]
 
 SYNC_MARKER = "stub-uv-sync-error-7f3a"
+# What a failing `uv venv`, `uv lock` and `uv pip install` print on stderr, so a test can tell uv's
+# own reason from bmk's header. The pip marker is followed by the install target that failed.
+VENV_MARKER = "stub-uv-venv-error-2c9e"
+LOCK_MARKER = "stub-uv-lock-error-81d4"
+PIP_MARKER = "stub-uv-pip-error-e6b0"
 # uv puts its verdict FIRST and the detail after it (measured, uv 0.13.0: a failing build printed
 # 26 lines with `error: Failed to build` on line 6), so the stub follows its error with more lines
 # than any tail a reader might be tempted to cap the report at.
@@ -86,6 +94,7 @@ class StubUv:
         self,
         *,
         venv_rc: int = 0,
+        venv_creates: bool = True,
         python_rc: int = 0,
         lock_rc: int = 0,
         sync_rc: int = 0,
@@ -97,14 +106,16 @@ class StubUv:
         """Write the stub with these answers.
 
         Args:
-            venv_rc: Exit code of ``uv venv``; only 0 creates the venv-shaped directory.
+            venv_rc: Exit code of ``uv venv``; a non-zero one prints :data:`VENV_MARKER` on stderr.
+            venv_creates: Whether a ``uv venv`` that exits 0 creates the venv-shaped directory; False
+                makes uv report success and leave nothing behind.
             python_rc: Exit code of every ``uv python ...``; a non-zero ``list`` prints nothing.
-            lock_rc: Exit code of ``uv lock``.
+            lock_rc: Exit code of ``uv lock``; a non-zero one prints :data:`LOCK_MARKER` on stderr.
             sync_rc: Exit code of ``uv sync``, which always prints :data:`SYNC_MARKER`, one
                 SGR-coloured line and :data:`SYNC_FILLER_LINES` filler lines on stderr.
             sync_aftermath: Shell run by ``uv sync`` against ``$UV_PROJECT_ENVIRONMENT`` first.
             pip_install_rc: Exit code of ``uv pip install`` per install target (its last word);
-                a target not listed succeeds.
+                a target not listed succeeds, a failing one prints :data:`PIP_MARKER` and the target.
             installed_json: What ``uv python list --only-installed`` prints.
             offered_json: What any other ``uv python list`` prints.
         """
@@ -113,6 +124,7 @@ class StubUv:
         stub.write_text(
             self._script(
                 venv_rc=venv_rc,
+                venv_creates=venv_creates,
                 python_rc=python_rc,
                 lock_rc=lock_rc,
                 sync_rc=sync_rc,
@@ -140,6 +152,7 @@ class StubUv:
         self,
         *,
         venv_rc: int,
+        venv_creates: bool,
         python_rc: int,
         lock_rc: int,
         sync_rc: int,
@@ -149,7 +162,8 @@ class StubUv:
         offered_json: str,
     ) -> str:
         allowed = shlex.quote(str(self._allowed))
-        pip_cases = "".join(f"      {shlex.quote(target)}) exit {rc} ;;\n" for target, rc in pip_install_rc.items())
+        pip_cases = "".join(f"      {shlex.quote(target)}) rc={rc} ;;\n" for target, rc in pip_install_rc.items())
+        create = '    mkdir -p "$last/bin" && echo "home = /usr" > "$last/pyvenv.cfg" && : > "$last/bin/python"\n'
         # A mutating subcommand refuses a target outside tmp_path, so a `rm -rf` aftermath or a
         # `mkdir` can never reach a real venv if bmk stopped passing its own path.
         return (
@@ -165,8 +179,8 @@ class StubUv:
             "  venv)\n"
             "    for last; do :; done\n"
             f'    inside "$last" || exit {_REFUSED_OUTSIDE}\n'
-            f"    [ {venv_rc} -eq 0 ] || exit {venv_rc}\n"
-            '    mkdir -p "$last/bin" && echo "home = /usr" > "$last/pyvenv.cfg" && : > "$last/bin/python"\n'
+            f'    [ {venv_rc} -eq 0 ] || {{ echo "error: {VENV_MARKER}" >&2; exit {venv_rc}; }}\n'
+            f"{create if venv_creates else ''}"
             "    exit 0 ;;\n"
             "  python)\n"
             f"    [ {python_rc} -eq 0 ] || exit {python_rc}\n"
@@ -183,12 +197,14 @@ class StubUv:
             "      esac\n"
             "    fi\n"
             "    exit 0 ;;\n"
-            f"  lock) exit {lock_rc} ;;\n"
+            f'  lock) [ {lock_rc} -eq 0 ] || {{ echo "error: {LOCK_MARKER}" >&2; exit {lock_rc}; }}; exit 0 ;;\n'
             "  pip)\n"
             "    for last; do :; done\n"
+            "    rc=0\n"
             '    case "$last" in\n'
             f"{pip_cases}"
             "    esac\n"
+            f'    [ "$rc" -eq 0 ] || {{ echo "error: {PIP_MARKER} $last" >&2; exit "$rc"; }}\n'
             "    exit 0 ;;\n"
             "  sync)\n"
             f'    inside "$UV_PROJECT_ENVIRONMENT" || exit {_REFUSED_OUTSIDE}\n'

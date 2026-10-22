@@ -13,7 +13,16 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
-from uv_stub import ESC, SYNC_COLOURED, SYNC_FILLER_LINES, SYNC_LAST_FILLER, SYNC_MARKER
+from uv_stub import (
+    ESC,
+    LOCK_MARKER,
+    PIP_MARKER,
+    SYNC_COLOURED,
+    SYNC_FILLER_LINES,
+    SYNC_LAST_FILLER,
+    SYNC_MARKER,
+    VENV_MARKER,
+)
 
 from bmk.adapters.stagerunner.helpers import _matrix
 from bmk.adapters.stagerunner.helpers._matrix import CellStatus
@@ -30,6 +39,7 @@ from bmk.adapters.stagerunner.venv import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from uv_stub import StubUv
@@ -377,6 +387,110 @@ def test_a_successful_quiet_sync_prints_nothing(stub_uv_project: Path, capfd: py
     assert ensure_project_venv_at(stub_uv_project, venv, None, quiet=True) == venv
 
     assert capfd.readouterr().err == ""
+
+
+# --- every other provisioning failure keeps uv's reason too (bmk OPEN-WORK [220]) -------------------
+# `uv venv`, `uv lock` and the manifest fallback ran with stderr discarded in JSON mode, so a failed
+# provisioning said at most "uv lock failed" and never why. Each now reports like the sync does.
+
+_VENV_RC = 3
+_LOCK_RC = 3
+_PIP_DEV_RC = 4
+_PIP_LAST_RC = 5
+
+
+def _lock_failure_line(project: Path) -> str:
+    return f"[venv] uv lock failed in {project} (exit {_LOCK_RC}); provisioning .venv from pyproject.toml instead"
+
+
+_PIP_FAILURE_HEADER = f"[venv] uv pip install (fallback from pyproject.toml) failed for .venv (exit {_PIP_LAST_RC}; venv afterwards: venv)"
+
+
+def _venv_failure_header(rc: int) -> str:
+    return f"[venv] uv venv failed for .venv (exit {rc}; venv afterwards: absent)"
+
+
+# Per scenario: how the stub fails, and whether provisioning still succeeds (only a failed lock
+# leaves the manifest fallback to succeed).
+_FAILURES: dict[str, tuple[Callable[[StubUv], None], bool]] = {
+    "uv-venv": (lambda stub: stub.install(venv_rc=_VENV_RC), False),
+    "uv-venv-exit-0-but-no-venv": (lambda stub: stub.install(venv_creates=False), False),
+    "uv-lock": (lambda stub: stub.install(lock_rc=_LOCK_RC), True),
+    "fallback-install": (
+        lambda stub: stub.install(lock_rc=_LOCK_RC, pip_install_rc={".[dev]": _PIP_DEV_RC, ".": _PIP_LAST_RC}),
+        False,
+    ),
+}
+
+
+def _expected_reports(scenario: str, project: Path) -> list[tuple[str, list[str]]]:
+    """Every report bmk must print for ``scenario``, in order: (header, the stderr lines uv printed)."""
+    lock = (_lock_failure_line(project), [f"error: {LOCK_MARKER}"])
+    no_reason: list[str] = []
+    reports: dict[str, list[tuple[str, list[str]]]] = {
+        "uv-venv": [(_venv_failure_header(_VENV_RC), [f"error: {VENV_MARKER}"])],
+        "uv-venv-exit-0-but-no-venv": [(_venv_failure_header(0), no_reason)],
+        "uv-lock": [lock],
+        # Only the LAST target's reason: ".[dev]" failing first is the expected route to ".".
+        "fallback-install": [lock, (_PIP_FAILURE_HEADER, [f"error: {PIP_MARKER} ."])],
+    }
+    return reports[scenario]
+
+
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
+@pytest.mark.parametrize("scenario", list(_FAILURES))
+def test_a_quiet_provisioning_failure_writes_its_header_and_uv_s_reason_as_one_block_each(
+    stub_uv_project: Path,
+    stub_uv: StubUv,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+) -> None:
+    fail, provisions = _FAILURES[scenario]
+    fail(stub_uv)
+    recorder = _WriteRecorder()
+    monkeypatch.setattr(sys, "stderr", recorder)
+    venv = stub_uv_project / ".venv"
+
+    result = ensure_project_venv_at(stub_uv_project, venv, None, quiet=True)
+
+    assert result == (venv if provisions else None)
+    expected = [
+        f"{header}:\n" + "".join(f"    {line}\n" for line in lines) if lines else f"{header}\n"
+        for header, lines in _expected_reports(scenario, stub_uv_project)
+    ]
+    assert recorder.writes == expected, "each failure is one write: its header, a colon, and uv's lines"
+    assert capfd.readouterr().err == "", "uv's own stderr reaches the output only inside bmk's report"
+
+
+@pytest.mark.os_posix
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub uv is a POSIX shell script")
+@pytest.mark.parametrize("scenario", list(_FAILURES))
+def test_a_text_mode_provisioning_failure_streams_uv_live_and_adds_bare_headers(
+    stub_uv_project: Path,
+    stub_uv: StubUv,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+) -> None:
+    fail, provisions = _FAILURES[scenario]
+    fail(stub_uv)
+    recorder = _WriteRecorder()
+    monkeypatch.setattr(sys, "stderr", recorder)
+    venv = stub_uv_project / ".venv"
+
+    result = ensure_project_venv_at(stub_uv_project, venv, None, quiet=False)
+
+    assert result == (venv if provisions else None)
+    reports = _expected_reports(scenario, stub_uv_project)
+    assert recorder.getvalue() == "".join(f"{header}\n" for header, _ in reports), (
+        "no trailing colon and no copy of uv's lines: uv's output is already above the header"
+    )
+    live = capfd.readouterr().err.splitlines()
+    for _, lines in reports:
+        for line in lines:
+            assert live.count(line) == 1, f"uv's {line!r} streams live, straight from uv, once"
 
 
 # uv sync may remove the venv and recreate it from the --python interpreter's sys._base_executable.
