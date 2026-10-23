@@ -7,6 +7,7 @@ with bashate options driven by ``pyproject.toml`` configuration.
 
 Contents
 --------
+* ``BashateSettings`` -- The bashate line length and ignored rules.
 * ``get_bashate_config`` -- Read bashate settings from pyproject.toml.
 * ``find_sh_files`` -- Discover the project's own ``.sh`` files (gitignored ones skipped).
 * ``run_shellcheck`` -- Invoke shellcheck via subprocess.
@@ -26,6 +27,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from bmk.adapters.stagerunner.helpers._project_files import find_project_files
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
@@ -35,6 +37,7 @@ _FALLBACK_BASHATE_MAX_LINE_LENGTH: int = 120
 _FALLBACK_BASHATE_IGNORES: tuple[str, ...] = ("E003",)
 
 __all__ = [
+    "BashateSettings",
     "find_sh_files",
     "get_bashate_config",
     "main",
@@ -57,27 +60,39 @@ def _build_missing_section_warning() -> str:
     )
 
 
-def get_bashate_config(pyproject: Path = Path("pyproject.toml")) -> tuple[int, tuple[str, ...]]:
+class BashateSettings(NamedTuple):
+    """The bashate settings a run uses.
+
+    Attributes:
+        max_line_length: The longest line bashate accepts.
+        ignores: The bashate rule codes skipped.
+    """
+
+    max_line_length: int
+    ignores: tuple[str, ...]
+
+
+def get_bashate_config(pyproject: Path = Path("pyproject.toml")) -> BashateSettings:
     """Read bashate settings from pyproject.toml [tool.bashate].
 
     Args:
         pyproject: Path to pyproject.toml file.
 
     Returns:
-        Tuple of (max_line_length, ignores). Returns fallback values if
+        The settings; the fallback values if
         pyproject.toml doesn't exist or has no [tool.bashate] section.
     """
     if not pyproject.exists():
-        return _FALLBACK_BASHATE_MAX_LINE_LENGTH, _FALLBACK_BASHATE_IGNORES
+        return BashateSettings(_FALLBACK_BASHATE_MAX_LINE_LENGTH, _FALLBACK_BASHATE_IGNORES)
 
     config = load_pyproject_config(pyproject)
     bashate_cfg = config.tool.bashate
 
     if bashate_cfg.max_line_length != 120 or bashate_cfg.ignores:
-        return bashate_cfg.max_line_length, bashate_cfg.ignores
+        return BashateSettings(bashate_cfg.max_line_length, bashate_cfg.ignores)
 
     print(_build_missing_section_warning(), file=sys.stderr)
-    return _FALLBACK_BASHATE_MAX_LINE_LENGTH, _FALLBACK_BASHATE_IGNORES
+    return BashateSettings(_FALLBACK_BASHATE_MAX_LINE_LENGTH, _FALLBACK_BASHATE_IGNORES)
 
 
 def find_sh_files(project_dir: Path) -> list[Path]:
@@ -202,7 +217,7 @@ def main(
     print(f"Found {len(files)} .sh files to lint.")
 
     pyproject = project_dir / "pyproject.toml"
-    max_line_length, ignores = get_bashate_config(pyproject)
+    bashate = get_bashate_config(pyproject)
 
     overall_exit = 0
 
@@ -216,7 +231,7 @@ def main(
         overall_exit = 1
 
     print("Running bashate...")
-    if run_bashate(files=files, max_line_length=max_line_length, ignores=ignores, verbose=verbose) != 0:
+    if run_bashate(files=files, max_line_length=bashate.max_line_length, ignores=bashate.ignores, verbose=verbose) != 0:
         print("bashate found style issues", file=sys.stderr)
         overall_exit = 1
 

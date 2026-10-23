@@ -15,7 +15,6 @@ import rich_click as click
 
 from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
 from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
-from bmk.domain.stages import normalize_returncode
 
 from .. import safe_console
 from ..context import CLIContext
@@ -147,4 +146,4 @@ def resolve_output_format(*, human: bool) -> ToolOutputFormat:
     return read_tool_output_format()
 
 
-__all__ = ["normalize_returncode", "resolve_output_format", "run_command"]
+__all__ = ["resolve_output_format", "run_command"]

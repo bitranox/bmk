@@ -53,11 +53,11 @@ def _fake_linters(**mock_kwargs: Any) -> Generator[MagicMock]:
 @pytest.mark.os_agnostic
 def test_get_bashate_config_returns_fallback_when_no_pyproject(tmp_path: Path) -> None:
     """Falls back to built-in defaults when pyproject.toml is absent."""
-    max_len, ignores = get_bashate_config(tmp_path / "nonexistent.toml")
+    settings = get_bashate_config(tmp_path / "nonexistent.toml")
 
-    assert max_len == 120
-    assert isinstance(ignores, tuple)
-    assert "E003" in ignores
+    assert settings.max_line_length == 120
+    assert isinstance(settings.ignores, tuple)
+    assert "E003" in settings.ignores
 
 
 @pytest.mark.os_agnostic
@@ -68,10 +68,10 @@ def test_get_bashate_config_returns_fallback_when_no_section(
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text("[project]\nname = 'test'\n")
 
-    max_len, ignores = get_bashate_config(pyproject)
+    settings = get_bashate_config(pyproject)
 
-    assert max_len == 120
-    assert "E003" in ignores
+    assert settings.max_line_length == 120
+    assert "E003" in settings.ignores
     captured = capsys.readouterr()
     assert "WARNING: No [tool.bashate] section found" in captured.err
     assert "[tool.bashate]" in captured.err
@@ -85,12 +85,12 @@ def test_get_bashate_config_reads_from_pyproject(tmp_path: Path) -> None:
         '[project]\nname = "test"\n\n[tool.bashate]\nmax-line-length = 100\nignores = ["E006", "E010"]\n'
     )
 
-    max_len, ignores = get_bashate_config(pyproject)
+    settings = get_bashate_config(pyproject)
 
-    assert max_len == 100
-    assert "E006" in ignores
-    assert "E010" in ignores
-    assert len(ignores) == 2
+    assert settings.max_line_length == 100
+    assert "E006" in settings.ignores
+    assert "E010" in settings.ignores
+    assert len(settings.ignores) == 2
 
 
 @pytest.mark.os_agnostic
@@ -99,10 +99,10 @@ def test_get_bashate_config_reads_ignores_from_pyproject(tmp_path: Path) -> None
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "test"\n\n[tool.bashate]\nmax-line-length = 80\nignores = ["E003"]\n')
 
-    max_len, ignores = get_bashate_config(pyproject)
+    settings = get_bashate_config(pyproject)
 
-    assert max_len == 80
-    assert ignores == ("E003",)
+    assert settings.max_line_length == 80
+    assert settings.ignores == ("E003",)
 
 
 # ---------------------------------------------------------------------------
