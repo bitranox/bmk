@@ -554,6 +554,39 @@ def reconcile_floor_pins(
     uv = _subtable(_subtable(document, "tool", super_table=True), "uv")
     current: dict[str, object] = {str(name): value for name, value in uv.get("exclude-newer-package", {}).items()}
     wanted = {normalize(name): pin for name, pin in pins.items()}
+    entries, changes = _reconciled_pins(
+        current, pyproject=pyproject, wanted=wanted, is_floor_pin=is_floor_pin, cutoff=cutoff
+    )
+    if not changes:
+        return []
+    _store_entries(uv, current=current, entries=entries)
+    pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
+    return changes
+
+
+def _reconciled_pins(
+    current: Mapping[str, object],
+    *,
+    pyproject: Path,
+    wanted: Mapping[str, str],
+    is_floor_pin: Callable[[str, object], bool],
+    cutoff: datetime | None,
+) -> tuple[dict[str, object], list[str]]:
+    """The entries ``exclude-newer-package`` should hold, and one line per change from ``current``.
+
+    ``current`` keeps the spelling of its names, so a project that wrote ``Foo_Bar`` still finds
+    that key; new keys follow, sorted, so the file grows in a stable order.
+
+    Args:
+        current: The table as written, by its own key spelling.
+        pyproject: The file, named in the stderr line about a kept pin.
+        wanted: bmk's floor pins, by normalized name.
+        is_floor_pin: Whether an entry is one bmk wrote.
+        cutoff: The default cutoff, which decides when a pin nothing demands may go.
+
+    Returns:
+        The entries in write order, and the change lines in the order they are reported.
+    """
     entries: dict[str, object] = {}
     changes: list[str] = []
     for name, value in current.items():
@@ -577,8 +610,17 @@ def reconcile_floor_pins(
     for key in sorted(set(wanted) - listed):
         entries[key] = wanted[key]
         changes.append(f'[tool.uv] exclude-newer-package: {key} = "{wanted[key]}" (floor younger than the cooldown)')
-    if not changes:
-        return []
+    return entries, changes
+
+
+def _store_entries(uv: Any, *, current: Mapping[str, object], entries: Mapping[str, object]) -> None:
+    """Make ``[tool.uv] exclude-newer-package`` hold exactly ``entries``, dropping it when empty.
+
+    Args:
+        uv: The parsed ``[tool.uv]`` table, changed in place.
+        current: The entries the table held before, by its own key spelling.
+        entries: What it should hold, in write order.
+    """
     container = uv.get("exclude-newer-package")
     if _typed_tomlkit.is_standard_table(container) and entries:
         # Edited in place, so the project's comments and the table's own form survive.
@@ -592,8 +634,6 @@ def reconcile_floor_pins(
         uv["exclude-newer-package"] = table
     elif "exclude-newer-package" in uv:
         del uv["exclude-newer-package"]
-    pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
-    return changes
 
 
 def _admits_beyond(pin: object, cutoff: datetime | None) -> bool:
