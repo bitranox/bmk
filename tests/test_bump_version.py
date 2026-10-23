@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -15,7 +19,7 @@ from bmk.domain.enums import BumpPart
 from bmk.domain.version import next_version
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from uv_stub import StubUv
 
 
 # Import the module under test
@@ -626,3 +630,119 @@ def test_an_unreadable_file_is_reported_as_unread_not_as_rewritten(bump_module: 
 
     assert path == unreadable
     assert "could not be read" in reason
+
+
+# A bump rewrites the synced files too (__init__conf__.py, the bundled Makefile, plugin.json), inside
+# the same undo, and a SIGTERM or SIGHUP (a CI cancel, a closed terminal) is undone like Ctrl-C.
+
+
+def _project_with_package(tmp_path: Path) -> Path:
+    """A project whose package ``x`` carries ``src/x/__init__conf__.py`` at the project's version."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    _uv_project(tmp_path)
+    (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n\n- x\n", encoding="utf-8")
+    package = tmp_path / "src" / "x"
+    package.mkdir(parents=True)
+    (package / "__init__conf__.py").write_text('version = "1.2.3"\n', encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.os_agnostic
+def test_a_bump_syncs_initconf_in_the_same_step(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _project_with_package(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(project)])
+
+    assert bump_module.main() == 0
+
+    assert (project / "src" / "x" / "__init__conf__.py").read_text(encoding="utf-8") == 'version = "1.2.4"\n'
+
+
+@pytest.mark.os_agnostic
+def test_a_bump_whose_initconf_sync_fails_is_undone(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A directory where __init__conf__.py belongs fails the sync after pyproject and CHANGELOG were written."""
+    project = _project_with_package(tmp_path)
+    initconf = project / "src" / "x" / "__init__conf__.py"
+    initconf.unlink()
+    initconf.mkdir()
+    before = {path: path.read_bytes() for path in (project / "pyproject.toml", project / "CHANGELOG.md")}
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(project)])
+
+    assert bump_module.main() == 1
+
+    assert {path: path.read_bytes() for path in before} == before
+    assert "was undone" in capsys.readouterr().err
+
+
+_BUMP_SCRIPT = (
+    Path(__file__).resolve().parents[1] / "src" / "bmk" / "adapters" / "stagerunner" / "helpers" / "_bump_version.py"
+)
+
+
+def _wait_for(path: Path, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while not path.exists():
+        if time.monotonic() > deadline:
+            pytest.fail(f"{path.name} never appeared within {timeout:g}s")
+        time.sleep(0.05)
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.skipif(sys.platform == "win32", reason="a parent's terminate() is TerminateProcess on Windows")
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP"])
+def test_a_signal_during_the_relock_undoes_the_bump(tmp_path: Path, stub_uv: StubUv, signame: str) -> None:
+    project = _project_with_package(tmp_path / "project")
+    (project / "uv.lock").write_bytes(b"version = 1\n# x 1.2.3\n")
+    started = tmp_path / "lock-started"
+    # exec: the process the bump's subprocess kills is the sleep itself, so nothing orphaned keeps
+    # the child's stderr open after it exits.
+    stub_uv.install(lock_aftermath=f"touch {shlex.quote(str(started))}; exec sleep 30")
+    files = [
+        project / "pyproject.toml",
+        project / "CHANGELOG.md",
+        project / "uv.lock",
+        project / "src" / "x" / "__init__conf__.py",
+    ]
+    before = {path: path.read_bytes() for path in files}
+    signum = int(getattr(signal, signame))
+    proc = subprocess.Popen(
+        [sys.executable, str(_BUMP_SCRIPT), "patch", "--project-dir", str(project)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        _wait_for(started, timeout=10)
+        proc.send_signal(signum)
+        _, err = proc.communicate(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+    assert proc.returncode == 128 + signum, err
+    assert {path: path.read_bytes() for path in files} == before
+    assert "was undone" in err
+
+
+@pytest.mark.os_agnostic
+def test_an_in_process_bump_leaves_the_host_s_signal_handlers_as_they_were(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Covers a bump that is undone too: the undo holds off Ctrl-C, and must hand it back."""
+    watched = [signal.SIGINT, signal.SIGTERM, *([signal.SIGHUP] if sys.platform != "win32" else [])]
+    before = {sig: signal.getsignal(sig) for sig in watched}
+    project = _project_with_package(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(project)])
+    assert bump_module.main() == 0
+    initconf = project / "src" / "x" / "__init__conf__.py"
+    initconf.unlink()
+    initconf.mkdir()
+    assert bump_module.main() == 1
+
+    assert {sig: signal.getsignal(sig) for sig in watched} == before

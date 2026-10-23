@@ -54,6 +54,28 @@ def derive_package_name(project_dir: Path) -> str:
     return name
 
 
+def synced_paths(project_dir: Path) -> list[Path]:
+    """The files the three ``sync_*_version`` functions may write, for a caller that must undo them.
+
+    Without a derivable package name only ``plugin.json`` is listed: the other two live under the
+    package, and the sync functions themselves raise in that case before writing either.
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        ``.claude-plugin/plugin.json``, then ``src/<pkg>/__init__conf__.py`` and
+        ``src/<pkg>/makefile/Makefile`` when the package name is known; listed whether or not
+        they exist.
+    """
+    paths = [project_dir / ".claude-plugin" / "plugin.json"]
+    try:
+        package = project_dir / "src" / derive_package_name(project_dir)
+    except ValueError:
+        return paths
+    return [*paths, package / "__init__conf__.py", package / "makefile" / "Makefile"]
+
+
 def sync_initconf_version(project_dir: Path) -> bool:
     """Patch the version line in __init__conf__.py to match pyproject.toml.
 

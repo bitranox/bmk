@@ -12,6 +12,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   so uv locks the whole release, not only its older files. pydantic-core 2.50.1 uploaded 137 files
   over four minutes and straddled a 1-day cutoff: no pin was demanded, and an existing one was kept
   with the false note "no declared floor demands it".
+- A failed or cancelled `make bump-*` is undone in full: the `__init__conf__.py`, Makefile and
+  plugin.json syncs run inside the bump's undo, and SIGTERM or SIGHUP (a CI cancel, a closed
+  terminal) undo the bump like Ctrl-C does; such a bump exits 128 plus the signal number. Before,
+  a failing sync left the version bumped, so a re-run skipped a version. On Windows a cancel that
+  terminates the process cannot be undone.
 
 ## [3.22.6] 2026-10-23 10:08:52
 

@@ -14,6 +14,14 @@ FINALIZED to ``1.2.3`` rather than stepped past it.
 Uses _toml_config for TOML parsing to centralize configuration access,
 and a tomlkit round-trip to preserve file formatting when writing.
 
+A bump is all or nothing. It also writes the files ``_sync_initconf`` keeps in line with the
+version (``src/<pkg>/__init__conf__.py``, ``src/<pkg>/makefile/Makefile``,
+``.claude-plugin/plugin.json``) and re-locks a committed ``uv.lock``, and every one of those is
+put back byte for byte when the bump stops short of success: an exception, Ctrl-C, SIGTERM or
+SIGHUP (a CI cancel, a closed terminal). Half-applied, a re-run would bump a second time and skip a
+version. One case cannot be undone: on Windows a parent's ``terminate()`` is TerminateProcess,
+which ends the process without running any of its code.
+
 Contents:
     * :func:`update_pyproject` - Update version in pyproject.toml.
     * :func:`update_changelog` - Update CHANGELOG.md with new version section.
@@ -23,15 +31,33 @@ Contents:
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
+from bmk.adapters.stagerunner.helpers._sync_initconf import (
+    sync_initconf_version,
+    sync_makefile_version,
+    sync_plugin_version,
+    synced_paths,
+)
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.venv import lock_project
 from bmk.domain.enums import BumpPart
 from bmk.domain.version import next_version
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
+    from types import FrameType
+
+# What signal.signal accepts and returns: a function, SIG_DFL / SIG_IGN, or None for a handler
+# installed outside Python.
+_Handler: TypeAlias = "Callable[[int, FrameType | None], Any] | int | None"
 
 
 def update_pyproject(project_dir: Path, new_version: str) -> str:
@@ -145,13 +171,19 @@ def update_changelog(project_dir: Path, new_version: str) -> None:
 
 
 def _snapshot(project_dir: Path) -> dict[Path, bytes]:
-    """The files a bump rewrites, byte for byte (CHANGELOG.md and uv.lock only when present).
+    """The files a bump rewrites, byte for byte (each one only when present).
 
     Bytes, not text: a text round trip turns CRLF into the platform's newline, so an undone
     bump would still leave a whole-file diff behind. uv.lock is in it because the re-lock
-    rewrites it, and a Ctrl-C after that write would otherwise leave it on the new version.
+    rewrites it, and a Ctrl-C after that write would otherwise leave it on the new version;
+    the synced files because the bump writes them too.
     """
-    paths = [project_dir / "pyproject.toml", project_dir / "CHANGELOG.md", project_dir / "uv.lock"]
+    paths = [
+        project_dir / "pyproject.toml",
+        project_dir / "CHANGELOG.md",
+        project_dir / "uv.lock",
+        *synced_paths(project_dir),
+    ]
     return {path: path.read_bytes() for path in paths if path.is_file()}
 
 
@@ -183,9 +215,65 @@ def _restore(originals: dict[Path, bytes]) -> list[tuple[Path, str]]:
     return [(path, reason) for path, reason in outcomes if reason is not None]
 
 
+class _Terminated(BaseException):
+    """A SIGTERM or SIGHUP turned into an exception, so the bump's undo runs before the process exits.
+
+    A BaseException, like KeyboardInterrupt: an ``except Exception`` on the way must not swallow it.
+    """
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+# Set while the undo runs; read by the signal handler, which cannot be handed any state.
+_UNDOING = threading.Event()
+
+
+def _on_signal(signum: int, _frame: object) -> None:
+    # A second signal (the stage runner terminating its children after a Ctrl-C) must not cut
+    # the undo short and leave half the files restored.
+    if _UNDOING.is_set():
+        return
+    raise _Terminated(signum)
+
+
+def _termination_signals() -> list[signal.Signals]:
+    """SIGTERM, and SIGHUP where it exists (not on Windows)."""
+    return [sig for name in ("SIGTERM", "SIGHUP") if (sig := getattr(signal, name, None)) is not None]
+
+
+@contextmanager
+def _handlers(handlers: dict[signal.Signals, _Handler]) -> Generator[None]:
+    """Install ``handlers`` for the block and put the previous ones back after it.
+
+    Restored because ``main`` also runs in-process (the tests): a handler left behind would turn
+    the host process's own SIGTERM into this module's exception. Python accepts a handler only in
+    the main thread, so elsewhere the block runs with the handlers as they are.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {sig: signal.signal(sig, handler) for sig, handler in handlers.items()}
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def _undo_bump(originals: dict[Path, bytes], new_version: str) -> int:
-    """Restore the snapshot and say exactly what state the files are in; always exit code 1."""
-    failed = _restore(originals)
+    """Restore the snapshot and say exactly what state the files are in; always exit code 1.
+
+    Ctrl-C, SIGTERM and SIGHUP are held off while the files are written back: the process is
+    ending either way, and an interrupted restore is the one outcome worse than none.
+    """
+    _UNDOING.set()
+    try:
+        with _handlers({signal.SIGINT: signal.SIG_IGN}):
+            failed = _restore(originals)
+    finally:
+        _UNDOING.clear()
     if not failed:
         print(f"Error: the bump to {new_version} was undone; fix the cause and bump again", file=sys.stderr)
         return 1
@@ -200,9 +288,16 @@ def _undo_bump(originals: dict[Path, bytes], new_version: str) -> int:
 
 
 def _apply_bump(project_dir: Path, new_version: str) -> str | None:
-    """Write the bump and re-lock; returns why it failed, or None when it is complete."""
+    """Write the bump, sync the files that carry the version, and re-lock.
+
+    Returns:
+        Why it failed, or None when it is complete.
+    """
     update_pyproject(project_dir, new_version)
     update_changelog(project_dir, new_version)
+    sync_initconf_version(project_dir)
+    sync_makefile_version(project_dir)
+    sync_plugin_version(project_dir)
     # uv.lock records the project's own version; left stale it fails `uv sync --locked`
     # and CI's `uv export --locked` on the very commit that is about to be released.
     # Not quiet: when it fails, uv's own reason is the only useful part of the message.
@@ -224,6 +319,9 @@ def _read_bump(project_dir: Path, part: str) -> tuple[str, str, dict[Path, bytes
 def main() -> int:
     """CLI entry point for version bump utility.
 
+    SIGTERM and SIGHUP raise :class:`_Terminated` while it runs, so they undo a bump the way
+    Ctrl-C does; the ``__main__`` block turns that into exit code 128 + the signal number.
+
     Returns:
         Exit code: 0 on success, 1 on error.
     """
@@ -232,8 +330,14 @@ def main() -> int:
     parser.add_argument("--project-dir", type=Path, default=Path.cwd(), help="Project directory")
     args, _unknown = parser.parse_known_args()
 
+    with _handlers(dict.fromkeys(_termination_signals(), _on_signal)):
+        return _bump(args.project_dir, args.part)
+
+
+def _bump(project_dir: Path, part: str) -> int:
+    """Read, apply and on any way out short of success undo the bump; the exit code."""
     try:
-        old_version, new_version, originals = _read_bump(args.project_dir, args.part)
+        old_version, new_version, originals = _read_bump(project_dir, part)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -244,10 +348,10 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    # Undone on ANY way out short of success (a failed re-lock, an unwritable file, Ctrl-C):
-    # half-applied, a re-run would bump a second time and skip a version.
+    # Undone on ANY way out short of success (a failed re-lock, an unwritable file, Ctrl-C,
+    # SIGTERM, SIGHUP): half-applied, a re-run would bump a second time and skip a version.
     try:
-        failure = _apply_bump(args.project_dir, new_version)
+        failure = _apply_bump(project_dir, new_version)
     except (ValueError, OSError) as e:
         failure = str(e)
     except BaseException:
@@ -262,4 +366,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except _Terminated as terminated:
+        # The shell convention for a process ended by a signal it handled.
+        sys.exit(128 + terminated.signum)
