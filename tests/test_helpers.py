@@ -617,22 +617,22 @@ class TestDependencyVersionParsing:
         expected_upper: str,
     ) -> None:
         """_parse_version_constraint extracts name, constraint, min, and upper bound."""
-        name, constraint, min_ver, upper = deps_module._parse_version_constraint(spec)
+        parsed = deps_module._parse_version_constraint(spec)
 
-        assert name == expected_name
-        assert constraint == expected_constraint
-        assert min_ver == expected_min
-        assert upper == expected_upper
+        assert parsed.name == expected_name
+        assert parsed.constraint == expected_constraint
+        assert parsed.min_version == expected_min
+        assert parsed.upper_bound == expected_upper
 
     @pytest.mark.os_agnostic
     def test_parse_version_constraint_handles_empty_string(self, deps_module: Any) -> None:
         """_parse_version_constraint handles empty string."""
-        name, constraint, min_ver, upper = deps_module._parse_version_constraint("")
+        parsed = deps_module._parse_version_constraint("")
 
-        assert name == ""
-        assert constraint == ""
-        assert min_ver == ""
-        assert upper == ""
+        assert parsed.name == ""
+        assert parsed.constraint == ""
+        assert parsed.min_version == ""
+        assert parsed.upper_bound == ""
 
 
 class TestVersionComparison:
