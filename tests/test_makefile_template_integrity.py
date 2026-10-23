@@ -35,6 +35,8 @@ from pathlib import Path
 import pytest
 import rtoml  # not stdlib tomllib: it does not exist on Python 3.10, this project's floor
 
+from bmk.adapters.stagerunner.helpers._sync_initconf import sync_makefile_cooldown
+
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE = PROJECT_DIR / "src" / "bmk" / "makefile" / "Makefile"
 
@@ -82,6 +84,24 @@ def test_template_header_matches_package_version() -> None:
 
 
 # --- _ensure_bmk cannot silently degrade ------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_the_shipped_cooldown_is_what_the_sync_writes_from_pyproject(tmp_path: Path) -> None:
+    """The cooldown deployed beside the Makefile is regenerated from bmk's [tool.uv], never hand-kept.
+
+    Compared through the sync itself on a copy, so an edit to [tool.uv] released without the sync
+    shows up here rather than as a tool env holding the previous release's exemptions.
+    """
+    copy = tmp_path / "copy"
+    (copy / "src" / "bmk" / "makefile").mkdir(parents=True)
+    (copy / "pyproject.toml").write_text((PROJECT_DIR / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    (copy / "src" / "bmk" / "makefile" / "Makefile").write_text(_template_text(), encoding="utf-8")
+
+    sync_makefile_cooldown(copy)
+
+    shipped = (PROJECT_DIR / "src" / "bmk" / "makefile" / "cooldown.mk").read_text(encoding="utf-8")
+    assert shipped == (copy / "src" / "bmk" / "makefile" / "cooldown.mk").read_text(encoding="utf-8")
 
 
 @pytest.mark.os_agnostic

@@ -8,6 +8,19 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Changed
 
+- **bmk's own tool env resolves under bmk's supply-chain cooldown.** `make` upgraded bmk's shared
+  env with no cooldown, so a dependency release reached the env that runs every repo's ruff, pyright,
+  bandit, pip-audit and build a minute after its upload. A release now writes bmk's window and its
+  `false` exemptions (bmk and its own libraries) as uv flags to `src/bmk/makefile/cooldown.mk`;
+  `bmk install` deploys it as `.bmk-cooldown.mk` beside the Makefile, which includes it, and refreshes
+  the two together. Before each upgrade the template refreshes uv's tool receipt with those flags,
+  since `uv tool upgrade` stores no option it is given. Flags rather than `--config-file`, which would
+  make uv ignore your own uv config (a private index or proxy). Dated per-package pins are left out:
+  one older than the window makes uv silently resolve an older bmk. When the window cannot be met (a
+  fresh install whose bmk floor is younger than the window) the make installs without a cooldown and
+  says so on stderr; the next make has the window again. A repo without the file behaves as before.
+  Commit `.bmk-cooldown.mk` with the Makefile.
+- A failed `make bump-*` also removes a synced file the bump created, instead of leaving it behind.
 - **The `pyright` stage type-checks every OS the project's CI runs on.** pyright checks one
   platform per run, so `make test` on Linux passed code whose types break under Windows' stubs
   (`os.geteuid()`, `signal.SIGHUP`), and every windows-latest CI cell went red; this cost bmk two

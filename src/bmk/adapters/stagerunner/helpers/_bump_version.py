@@ -31,6 +31,7 @@ Contents:
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import threading
@@ -42,6 +43,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._sync_initconf import (
     sync_initconf_version,
+    sync_makefile_cooldown,
     sync_makefile_version,
     sync_plugin_version,
     synced_paths,
@@ -170,8 +172,12 @@ def update_changelog(project_dir: Path, new_version: str) -> None:
     changelog_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _snapshot(project_dir: Path) -> dict[Path, bytes]:
-    """The files a bump rewrites, byte for byte (each one only when present).
+# A file's bytes before the bump, or None when it did not exist yet (the bump may create it).
+_Snapshot: TypeAlias = "dict[Path, bytes | None]"
+
+
+def _snapshot(project_dir: Path) -> _Snapshot:
+    """The files a bump rewrites, byte for byte, and the ones it may create, as None.
 
     Bytes, not text: a text round trip turns CRLF into the platform's newline, so an undone
     bump would still leave a whole-file diff behind. uv.lock is in it because the re-lock
@@ -184,17 +190,27 @@ def _snapshot(project_dir: Path) -> dict[Path, bytes]:
         project_dir / "uv.lock",
         *synced_paths(project_dir),
     ]
-    return {path: path.read_bytes() for path in paths if path.is_file()}
+    # Only a path that does not exist at all is recorded as created-by-the-bump: one that exists
+    # without being a file (a directory, a dangling symlink) is not the bump's to delete.
+    return {
+        path: path.read_bytes() if path.is_file() else None
+        for path in paths
+        if path.is_file() or not os.path.lexists(path)
+    }
 
 
-def _restore_one(path: Path, data: bytes) -> str | None:
+def _restore_one(path: Path, data: bytes | None) -> str | None:
     """Put one file back unless it already holds ``data``; returns why it could not be, or None.
+
+    ``None`` means the file did not exist before the bump, so a copy the bump created is removed.
 
     Written in place, never by temp file and rename: a rename would replace a symlink rather than
     the file behind it, and needs write access to the directory, which the bump itself never did.
     The price is that a write failing midway (disk full) leaves neither version, so the reason
     says the contents may be incomplete rather than calling the file still bumped.
     """
+    if data is None:
+        return _remove_created(path)
     try:
         if path.read_bytes() == data:
             return None
@@ -209,7 +225,16 @@ def _restore_one(path: Path, data: bytes) -> str | None:
     return None
 
 
-def _restore(originals: dict[Path, bytes]) -> list[tuple[Path, str]]:
+def _remove_created(path: Path) -> str | None:
+    """Remove a file the bump created; returns why it could not be, or None."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        return f"was created by the bump and could not be removed ({error.strerror or error})"
+    return None
+
+
+def _restore(originals: _Snapshot) -> list[tuple[Path, str]]:
     """Put back what :func:`_snapshot` read, every file on its own; returns the ones that failed."""
     outcomes = ((path, _restore_one(path, data)) for path, data in originals.items())
     return [(path, reason) for path, reason in outcomes if reason is not None]
@@ -262,7 +287,7 @@ def _handlers(handlers: dict[signal.Signals, _Handler]) -> Generator[None]:
             signal.signal(sig, handler)
 
 
-def _undo_bump(originals: dict[Path, bytes], new_version: str) -> int:
+def _undo_bump(originals: _Snapshot, new_version: str) -> int:
     """Restore the snapshot and say exactly what state the files are in; always exit code 1.
 
     Ctrl-C, SIGTERM and SIGHUP are held off while the files are written back: the process is
@@ -297,6 +322,7 @@ def _apply_bump(project_dir: Path, new_version: str) -> str | None:
     update_changelog(project_dir, new_version)
     sync_initconf_version(project_dir)
     sync_makefile_version(project_dir)
+    sync_makefile_cooldown(project_dir)
     sync_plugin_version(project_dir)
     # uv.lock records the project's own version; left stale it fails `uv sync --locked`
     # and CI's `uv export --locked` on the very commit that is about to be released.
@@ -306,7 +332,7 @@ def _apply_bump(project_dir: Path, new_version: str) -> str | None:
     return None
 
 
-def _read_bump(project_dir: Path, part: str) -> tuple[str, str, dict[Path, bytes]]:
+def _read_bump(project_dir: Path, part: str) -> tuple[str, str, _Snapshot]:
     """Current version, next version and the snapshot - everything read before the first write."""
     config = load_pyproject_config(project_dir / "pyproject.toml")
     current_version = config.project.version

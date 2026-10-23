@@ -71,3 +71,29 @@ Two further problems were never named anywhere:
   `ensure_project_venv` already syncs `.[dev]`, and the bitranox template declares them.
   A project that does not gets a clear failure rather than a silent pass in bmk's env.
 - **Projects keep a stale `.venv-bmk`** until removed; it is gitignored and disposable.
+
+## Addendum (2026-10-23): the shared env gets bmk's own cooldown
+
+The projects resolve under a supply-chain cooldown (`[tool.uv] exclude-newer`), but bmk's own
+env did not: every `make` ran `uv tool upgrade bmk` unbounded, so a dependency release reached the
+env that runs ruff, pyright, bandit, pip-audit and build for every repo within a minute of its
+upload. The env now resolves under bmk's own window.
+
+- **Where it lives.** A release regenerates `src/bmk/makefile/cooldown.mk` from bmk's `[tool.uv]`:
+  one make variable, `BMK_COOLDOWN`, holding uv flags. `bmk install` deploys it as
+  `.bmk-cooldown.mk` beside the Makefile, which includes it by a relative name; the two are refreshed
+  together, under the Makefile's version. The Makefile carries no options itself.
+- **Why flags.** `--config-file` makes uv ignore the user's and the system's uv config (measured), so
+  a machine that sets a private index or a proxy there would lose it; flags leave that config alone.
+- **What it holds.** The window and the packages exempted with `false` (bmk itself and its own
+  libraries). Dated values are left out: a fixed instant turns tighter than the rolling window once
+  the window passes it, and uv then silently resolves an older bmk (measured: bmk 3.22.0 under a
+  stale certifi pin, exit 0).
+- **How it is applied.** `uv tool upgrade` stores no option given on its command line, so the
+  recipe first refreshes the receipt with `uv tool install "bmk>=MIN" $(BMK_COOLDOWN)` (over an
+  existing env this changes no package and replaces the stored options), then upgrades. Neither
+  step downgrades an installed env. The refresh takes the tool lock without waiting, so a busy lock
+  costs the same 10s as before.
+- **When it cannot be met.** A fresh install whose bmk floor is still inside the window fails;
+  the recipe then installs without a cooldown and says so on stderr. Measured: the next `make`
+  regains the window, because the refresh over an existing env keeps its packages.

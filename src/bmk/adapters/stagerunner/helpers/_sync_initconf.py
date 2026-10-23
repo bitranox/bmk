@@ -73,7 +73,12 @@ def synced_paths(project_dir: Path) -> list[Path]:
         package = project_dir / "src" / derive_package_name(project_dir)
     except ValueError:
         return paths
-    return [*paths, package / "__init__conf__.py", package / "makefile" / "Makefile"]
+    return [
+        *paths,
+        package / "__init__conf__.py",
+        package / "makefile" / "Makefile",
+        package / "makefile" / "cooldown.mk",
+    ]
 
 
 def sync_initconf_version(project_dir: Path) -> bool:
@@ -142,6 +147,65 @@ def sync_makefile_version(project_dir: Path) -> bool:
 
     makefile_path.write_text(new_content, encoding="utf-8")
     print(f"Synced Makefile version and BMK_MIN to {version}")
+    return True
+
+
+# A value uv reads as a fixed instant (a date or timestamp), as opposed to a rolling span.
+_DATED_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+# The fragment is expanded into a bash command line, so only plain package names and plain spans
+# ("7 days", "P7D") are written; anything else is left out rather than quoted.
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SAFE_SPAN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .]*$")
+
+_COOLDOWN_HEADER = (
+    "# bmk's own supply-chain cooldown for its shared tool env: uv flags, regenerated from bmk's\n"
+    "# [tool.uv] on every release. `bmk install` deploys it beside the Makefile, which includes it.\n"
+    "# Do not edit; commit it with the Makefile.\n"
+)
+
+
+def _cooldown_flags(project_name: str, exclude_newer: object, per_package: dict[str, object]) -> list[str]:
+    """The uv flags the tool env installs under: the window and the packages exempted with ``false``.
+
+    Dated values are dropped, the global one included: a fixed instant becomes TIGHTER than the rolling
+    window once the window passes it, and uv answers a floor it then cannot meet by silently resolving
+    an older bmk (measured, uv 0.13.0). The project itself is exempt, so its own fresh release is never
+    held back.
+    """
+    if not isinstance(exclude_newer, str) or _DATED_RE.match(exclude_newer) or not _SAFE_SPAN_RE.match(exclude_newer):
+        return []
+    exempt = [project_name, *(name for name, value in per_package.items() if value is False)]
+    safe = (name for name in exempt if _SAFE_NAME_RE.match(name))
+    exemptions = [flag for name in dict.fromkeys(safe) for flag in ("--exclude-newer-package", f"{name}=false")]
+    return ["--exclude-newer", f'"{exclude_newer}"', *exemptions]
+
+
+def sync_makefile_cooldown(project_dir: Path) -> bool:
+    """Write ``src/<pkg>/makefile/cooldown.mk`` from the project's ``[tool.uv]`` cooldown.
+
+    Only a project that ships a Makefile template (bmk itself) gets one. A project without a
+    cooldown gets a file that sets none, so the deployed copy never keeps an older release's flags.
+    Flags rather than a uv.toml for ``--config-file``, which makes uv ignore the user's and the
+    system's own uv config (measured, uv 0.13.0): a private index or a proxy set there would be lost.
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        True if the file was written, False if already in sync or there is no Makefile template.
+    """
+    makefile_dir = project_dir / "src" / derive_package_name(project_dir) / "makefile"
+    if not (makefile_dir / "Makefile").exists():
+        return False
+    config = load_pyproject_config(project_dir / "pyproject.toml")
+    uv = config.tool.uv
+    flags = _cooldown_flags(config.project.name, uv.exclude_newer, uv.exclude_newer_package)
+    new_content = _COOLDOWN_HEADER + f"BMK_COOLDOWN := {' '.join(flags)}".rstrip() + "\n"
+    target = makefile_dir / "cooldown.mk"
+    if target.is_file() and target.read_text(encoding="utf-8") == new_content:
+        return False
+    target.write_text(new_content, encoding="utf-8")
+    print(f"Synced the tool-env cooldown into {target.relative_to(project_dir)}")
     return True
 
 
@@ -239,6 +303,7 @@ def main() -> int:
     try:
         sync_initconf_version(args.project_dir)
         sync_makefile_version(args.project_dir)
+        sync_makefile_cooldown(args.project_dir)
         sync_plugin_version(args.project_dir)
     except (ValueError, FileNotFoundError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

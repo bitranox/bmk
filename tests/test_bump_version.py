@@ -648,6 +648,38 @@ def _project_with_package(tmp_path: Path) -> Path:
 
 
 @pytest.mark.os_agnostic
+def test_an_undone_bump_removes_a_synced_file_it_created(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The undo puts back the files that existed AND removes the ones the bump created.
+
+    The tool-env cooldown is generated beside the Makefile template; in a checkout without it, a
+    bump that fails later (here the re-lock, offline with a cold cache) must not leave a new file.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    project = _project_with_package(tmp_path)
+    makefile = project / "src" / "x" / "makefile" / "Makefile"
+    makefile.parent.mkdir()
+    makefile.write_text("# BMK MAKEFILE 1.2.3\nBMK_MIN := 1.2.3\n", encoding="utf-8")
+    subprocess.run(["uv", "lock", "-q"], cwd=project, check=True)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8").replace("dependencies = []", 'dependencies = ["idna>=3"]'),
+        encoding="utf-8",
+    )
+    (tmp_path / "cold-cache").mkdir()
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cold-cache"))
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(project)])
+
+    assert bump_module.main() == 1
+
+    assert not (makefile.parent / "cooldown.mk").exists()
+    assert makefile.read_text(encoding="utf-8") == "# BMK MAKEFILE 1.2.3\nBMK_MIN := 1.2.3\n"
+
+
+@pytest.mark.os_agnostic
 def test_a_bump_syncs_initconf_in_the_same_step(
     bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

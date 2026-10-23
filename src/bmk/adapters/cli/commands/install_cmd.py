@@ -31,6 +31,21 @@ logger = logging.getLogger(__name__)
 _BMK_MAKEFILE_SENTINEL = "# BMK MAKEFILE"
 
 _BUNDLED_MAKEFILE = Path(__file__).resolve().parent.parent.parent.parent / "makefile" / "Makefile"
+# bmk's own supply-chain cooldown for its tool env, regenerated from bmk's [tool.uv] on every
+# release. The deployed Makefile's _ensure_bmk hands it to uv from beside itself.
+_BUNDLED_COOLDOWN = _BUNDLED_MAKEFILE.with_name("cooldown.mk")
+_DEPLOYED_COOLDOWN = ".bmk-cooldown.mk"
+
+
+def _deploy_makefile(target: Path) -> None:
+    """Write the bundled Makefile to ``target`` and the cooldown beside it, as one versioned pair.
+
+    The Makefile sentinel is the pair's only version, so a Makefile refreshed alone would run the
+    new recipe under the previous release's cooldown.
+    """
+    shutil.copy2(_BUNDLED_MAKEFILE, target)
+    if _BUNDLED_COOLDOWN.is_file():
+        shutil.copy2(_BUNDLED_COOLDOWN, target.with_name(_DEPLOYED_COOLDOWN))
 
 
 def _extract_version(first_line: str) -> str | None:
@@ -93,7 +108,7 @@ def check_makefile_update() -> bool:
     ):
         return False
 
-    shutil.copy2(_BUNDLED_MAKEFILE, target)
+    _deploy_makefile(target)
     if not auto_accept:
         safe_console.echo(f"Makefile updated to {bundled_ver}")
     return True
@@ -128,11 +143,11 @@ def cli_install() -> None:
                 else:
                     logger.info("Updating existing bmk Makefile")
                     safe_console.echo("Updating existing bmk Makefile")
-                    shutil.copy2(_BUNDLED_MAKEFILE, target)
+                    _deploy_makefile(target)
             else:
                 logger.info("Installing bmk Makefile")
                 safe_console.echo("Installing bmk Makefile")
-                shutil.copy2(_BUNDLED_MAKEFILE, target)
+                _deploy_makefile(target)
 
         # Deferred: keep `bmk install` (and thus command registration) from paying
         # for the prerequisites-check module unless this command actually runs.

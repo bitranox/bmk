@@ -169,6 +169,7 @@ include = [
     "src/bmk/adapters/config/defaultconfig.toml",
     "src/bmk/adapters/config/defaultconfig.d/*.toml",
     "src/bmk/makefile/Makefile",
+    "src/bmk/makefile/cooldown.mk",
 ]
 
 [tool.ruff]
