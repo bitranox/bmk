@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.7] 2026-10-23 13:02:17
+
 ### Fixed
 
 - **A dependency floor is no longer lowered when no single release installs on every supported
