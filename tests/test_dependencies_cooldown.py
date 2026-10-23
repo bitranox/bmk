@@ -1108,7 +1108,10 @@ def test_a_higher_release_the_cooldown_cuts_is_never_left_half_visible(tmp_path:
     pin = _pins(pyproject).get("gadget")
     cutoff = datetime.fromisoformat(pin.replace("Z", "+00:00")) if isinstance(pin, str) else _NOW - timedelta(days=14)
     visible_of_2_0 = sum(
-        1 for entry in releases["2.0"] if datetime.fromisoformat(entry["upload_time_iso_8601"]) < cutoff
+        # Python 3.10's fromisoformat cannot read the trailing Z PyPI writes.
+        1
+        for entry in releases["2.0"]
+        if datetime.fromisoformat(entry["upload_time_iso_8601"].replace("Z", "+00:00")) < cutoff
     )
     assert visible_of_2_0 in (0, len(releases["2.0"]))
     # Pinned BACK to the floor's own release, never forward past it (user decision 2026-10-23).
@@ -1150,6 +1153,100 @@ def test_a_pin_back_stops_at_the_newest_release_still_whole(tmp_path: Path, pypi
     assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
 
     assert _pins(pyproject) == {"gadget": _pin_of(30)}
+
+
+def _write_two_pythons(tmp_path: Path, deps: str) -> Path:
+    """A project supporting 3.10 and 3.11 under a 14-day cooldown, so a marker can split a floor."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\nrequires-python = ">=3.10"\n'
+        'classifiers = ["Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11"]\n'
+        f'dependencies = [{deps}]\n\n[tool.uv]\nexclude-newer = "14 days"\n',
+        encoding="utf-8",
+    )
+    return pyproject
+
+
+_OLD_PY_FLOOR = "\"gadget>=1.0; python_version < '3.11'\""
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "deps",
+    [
+        f"{_OLD_PY_FLOOR}, \"gadget>=1.6; python_version >= '3.11'\"",
+        f"\"gadget>=1.6; python_version >= '3.11'\", {_OLD_PY_FLOOR}",
+    ],
+    ids=["lower-floor-first", "higher-floor-first"],
+)
+def test_a_pin_back_never_hides_another_requirements_floor(tmp_path: Path, pypi: _FakeIndex, deps: str) -> None:
+    # Review of the first pin-back, 2026-10-23: pinned back for `gadget>=1.0` alone, gadget sat at
+    # 1.5 and hid 1.6, which the 3.11 floor needs, in either order. 1.6 is whole, 2.0 is cut.
+    pypi.packages["gadget"] = _doc(
+        "2.0",
+        {
+            "1.0": _uploaded(90),
+            "1.5": _uploaded(30),
+            "1.6": _uploaded(20, requires_python=">=3.11"),
+            "2.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pyproject = _write_two_pythons(tmp_path, deps)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(20)}
+
+
+@pytest.mark.os_agnostic
+def test_a_pin_back_never_hides_an_exact_pin_a_walked_release_needs(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # tool 1.0 requires gadget==1.6 (yanked, so only the exact pin takes it); the pin back that
+    # `gadget>=1.0` alone asks for would sit at 1.5 and hide it.
+    pypi.packages["gadget"] = _doc(
+        "2.0",
+        {
+            "1.0": _uploaded(90),
+            "1.5": _uploaded(30),
+            "1.6": [{**_uploaded(20)[0], "yanked": True}],
+            "2.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pypi.packages["tool"] = _doc("1.0", {"1.0": _uploaded(5)})
+    pypi.versions["tool/1.0"] = ["gadget==1.6"]
+    pyproject = _write(tmp_path, deps='"gadget>=1.0", "tool>=1.0"', tool_uv='exclude-newer = "14 days"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject)["gadget"] == _pin_of(20)
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "deps",
+    [
+        f"\"gadget>=1.0; python_version >= '3.11'\", {_OLD_PY_FLOOR}",
+        f"{_OLD_PY_FLOOR}, \"gadget>=1.0; python_version >= '3.11'\"",
+    ],
+    ids=["newer-python-first", "older-python-first"],
+)
+def test_a_pin_back_cuts_no_release_only_a_newer_python_sees(tmp_path: Path, pypi: _FakeIndex, deps: str) -> None:
+    # 1.7 installs only on 3.11, so the 3.10 floor never saw it: the pin back landed at 1.5's pin and
+    # left 1.7 half visible to the 3.11 fork, or at 1.0 three months back, by walk order. The pin
+    # that shows 1.7 whole and hides 2.0 is the one uv can lock on both Pythons.
+    pypi.packages["gadget"] = _doc(
+        "2.0",
+        {
+            "1.0": _uploaded(90),
+            "1.5": _uploaded(30),
+            "1.7": [*_uploaded(31, requires_python=">=3.11"), *_uploaded(25, requires_python=">=3.11")],
+            "2.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pyproject = _write_two_pythons(tmp_path, deps)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(25)}
 
 
 @pytest.mark.os_agnostic

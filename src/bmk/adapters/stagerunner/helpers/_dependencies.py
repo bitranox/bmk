@@ -1692,6 +1692,11 @@ class _FloorDemand:
         self._exempt = exempt
         self._kept = kept
         self._walked: set[_ReleaseKey] = set()
+        # Per package, every requirement seen so far: the releases any of them admits, and the
+        # latest of their earliest whole-release pins. The pin is chosen from both together, so it
+        # does not depend on the order the requirements are walked in.
+        self._admitted: dict[str, dict[str, Any]] = {}
+        self._bound: dict[str, str] = {}
         self.pins: dict[str, str] = {}
 
     def add(self, requirement: Requirement, *, python: str | None) -> None:
@@ -1708,7 +1713,7 @@ class _FloorDemand:
         if name in self._exempt:
             self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
             return
-        pin = self._pin_for(satisfying, at_least=self.pins.get(name))
+        pin = self._pin_for(name, satisfying)
         if pin is None:
             return
         self.pins[name] = pin
@@ -1723,27 +1728,20 @@ class _FloorDemand:
             raise _UnjudgeableError(f"no file of {name} that installs on Python {python} has an upload time")
         self._walk(name, max(takeable, key=Version), python=python, extras=extras)
 
-    def _pin_for(self, satisfying: dict[str, Any], *, at_least: str | None) -> str | None:
-        """The pin one floor needs under the default cutoff, or None when it needs none.
+    def _pin_for(self, name: str, satisfying: dict[str, Any]) -> str | None:
+        """The pin ``name`` needs once this requirement joins the earlier ones; None to keep the last.
 
-        uv locks the highest visible release with whichever of its files the cutoff admits, so no
-        satisfying release may be left with files on both sides of the cutoff that applies.
+        uv locks the highest visible release with whichever of its files the cutoff admits, and it
+        resolves every Python and platform at once, so no release ANY requirement admits may be left
+        with files on both sides of the cutoff that applies, and each requirement must keep a whole
+        release visible.
         """
-        floor_release = min(satisfying, key=Version)
-        floor_whole = not _cuts_at({floor_release: satisfying[floor_release]}, self._cutoff)
-        if admitted_releases(satisfying, self._cutoff) and floor_whole:
-            if not _cuts_at(satisfying, self._cutoff):
-                return None  # every satisfying release is admitted whole or not at all
-            if at_least is None or _as_moment(at_least) <= self._cutoff:
-                # A HIGHER release is cut while the floor's own is whole: pin BACK to where the
-                # cut release is invisible, never forward past the floor's upload (user, 2026-10-12
-                # 16:06 and 2026-10-23 21:54). The pin goes once the cut release clears the cooldown.
-                before = self._cutoff if at_least is None else _as_moment(at_least)
-                return _latest_whole_pin(satisfying, floor_release=floor_release, before=before)
-        # A floor release too young, or with files on both sides of the cutoff, gets the pin that
-        # admits it whole (uv would otherwise lock it with only its older files); that pin always lies
-        # past the cutoff, as does one an earlier floor already set past it.
-        return _earliest_whole_pin(satisfying, at_least=at_least, after=self._cutoff)
+        admitted = self._admitted.setdefault(name, {})
+        admitted.update(satisfying)
+        earliest = min((p for files in satisfying.values() if (p := floor_pin(files)) is not None), default=None)
+        if earliest is not None and earliest > self._bound.get(name, ""):
+            self._bound[name] = earliest
+        return _package_pin(admitted, bound=self._bound.get(name), cutoff=self._cutoff)
 
     def _walk(self, name: str, version: str, *, python: str | None, extras: frozenset[str]) -> None:
         if (name, version, extras) in self._walked:
@@ -1762,44 +1760,39 @@ def _exact_pin(specifier: SpecifierSet) -> bool:
     return any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
 
 
-def _earliest_whole_pin(
-    satisfying: dict[str, Any], *, at_least: str | None, after: datetime | None = None
-) -> str | None:
-    """The earliest cutoff, from ``at_least`` on, at which every release in ``satisfying`` is whole.
+def _package_pin(admitted: dict[str, Any], *, bound: str | None, cutoff: datetime) -> str | None:
+    """The pin a package needs, given every release its requirements admit; None when it needs none.
 
-    Each candidate is one second after a release's newest file, so that release is admitted whole;
-    one at which another satisfying release has files on both sides is skipped, since uv would lock
-    that release with only its older files (pydantic-core 2.50.1 kept one macOS wheel of dozens), and
-    every other platform would build from source or fail. The latest candidate always qualifies.
+    ``bound`` is the earliest cutoff at which every requirement sees one of its releases whole, so no
+    pin may lie before it. Each candidate is one second after a release's newest file, which admits
+    that release whole and is how bmk recognises the pin as its own; one at which some admitted
+    release has files on both sides is skipped, since uv would lock that release with only its older
+    files (pydantic-core 2.50.1 kept one macOS wheel of dozens) and every other platform would build
+    from source or fail.
 
-    With ``after``, only cutoffs later than it qualify: a pin is written only where the default
-    cutoff falls short, so one at or before it would admit nothing the default does not.
+    No pin is needed while the default cutoff already shows every requirement a whole release and
+    cuts none. Otherwise, when the bound allows it, the pin goes BACK to the latest candidate at or
+    before the cutoff: a higher release is cut, and pinning forward past a floor's own upload would
+    admit young files no floor asked for (user, 2026-10-12 16:06 and 2026-10-23 21:54); the pin
+    goes once the cut release clears the cooldown. Failing that it goes FORWARD to the earliest
+    candidate past the cutoff, where a floor release too young or itself cut is admitted whole.
     """
-    candidates = sorted({pin for files in satisfying.values() if (pin := floor_pin(files)) is not None})
-    if at_least is not None:
-        candidates = sorted({at_least, *(c for c in candidates if c > at_least)})
-    if after is not None:
-        candidates = [c for c in candidates if _as_moment(c) > after]
-    return next((c for c in candidates if not _cuts_a_release(satisfying, c)), None)
-
-
-def _latest_whole_pin(satisfying: dict[str, Any], *, floor_release: str, before: datetime) -> str | None:
-    """The latest cutoff, at or before ``before``, that admits ``floor_release`` and cuts no release.
-
-    Candidates are, as everywhere, one second after a release's newest file, so the pin stays one bmk
-    recognises as its own. One earlier than the floor release's own would hide the floor itself.
-    """
-    floor = floor_pin(satisfying[floor_release])
-    if floor is None:
+    floor_whole = bound is not None and _as_moment(bound) <= cutoff
+    if floor_whole and not _cuts_at(admitted, cutoff):
         return None
     candidates = sorted(
-        {pin for files in satisfying.values() if (pin := floor_pin(files)) is not None and pin >= floor},
-        reverse=True,
+        {
+            pin
+            for files in admitted.values()
+            if (pin := floor_pin(files)) is not None and (bound is None or pin >= bound)
+        }
     )
-    return next(
-        (c for c in candidates if _as_moment(c) <= before and not _cuts_a_release(satisfying, c)),
-        None,
-    )
+    if floor_whole:
+        back = [c for c in candidates if _as_moment(c) <= cutoff]
+        pin = next((c for c in reversed(back) if not _cuts_a_release(admitted, c)), None)
+        if pin is not None:
+            return pin
+    return next((c for c in candidates if _as_moment(c) > cutoff and not _cuts_a_release(admitted, c)), None)
 
 
 def _as_moment(pin: str) -> datetime:
