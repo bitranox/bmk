@@ -735,7 +735,11 @@ def test_an_in_process_bump_leaves_the_host_s_signal_handlers_as_they_were(
     bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Covers a bump that is undone too: the undo holds off Ctrl-C, and must hand it back."""
-    watched = [signal.SIGINT, signal.SIGTERM, *([signal.SIGHUP] if sys.platform != "win32" else [])]
+    watched: list[signal.Signals] = [signal.SIGINT, signal.SIGTERM]
+    # Typed list plus a statement guard: in the inline `*([SIGHUP] if ... else [])` form, pyright on
+    # Windows keeps only the `else []` arm, whose bare [] is list[Unknown] under strict mode.
+    if sys.platform != "win32":
+        watched.append(signal.SIGHUP)
     before = {sig: signal.getsignal(sig) for sig in watched}
     project = _project_with_package(tmp_path)
     monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(project)])
