@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -341,3 +343,155 @@ def test_clean_quiet_suppresses_summary(tmp_path: Path, capsys: pytest.CaptureFi
     (tmp_path / ".ruff_cache").mkdir()
     clean(project_dir=tmp_path, patterns=[".ruff_cache"], quiet=True)
     assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# clean - characterisation of the exact output (pins behaviour across refactors)
+# ---------------------------------------------------------------------------
+
+# A plain ``Path`` subclass only instantiates on 3.12+; on the 3.10 floor the
+# concrete flavour class has to be the base, so pick it per platform.
+if sys.platform == "win32":
+    _NativePath = pathlib.WindowsPath
+else:
+    _NativePath = pathlib.PosixPath
+
+
+class _VanishingPath(_NativePath):
+    """A path whose file is deleted by "someone else" right before ``unlink``.
+
+    Injected through ``clean``'s own ``project_dir`` parameter (glob children keep
+    the class), so the race between glob and unlink is real filesystem behaviour:
+    the stdlib ``unlink`` genuinely raises ``FileNotFoundError``. No real-file
+    layout reproduces this deterministically, because ``Path.glob`` checks each
+    candidate lazily and never yields a path that is already gone.
+    """
+
+    # The boolean-positional signature is Path.unlink's own; an override must keep
+    # it to stay substitutable (pyright reportIncompatibleMethodOverride).
+    def unlink(self, missing_ok: bool = False) -> None:  # noqa: FBT002 - fixed by the base signature
+        # The first call plays the other process deleting the file; the second
+        # is the one ``clean`` made, and it now finds nothing there.
+        super().unlink()
+        super().unlink(missing_ok=missing_ok)
+
+
+@pytest.mark.os_agnostic
+def test_clean_file_vanishing_before_unlink_is_not_counted(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A file removed between glob and unlink is skipped silently and not counted."""
+    (tmp_path / "gone.txt").write_text("x")
+
+    result = clean(project_dir=_VanishingPath(tmp_path), patterns=["gone.txt"])
+
+    assert result == 0
+    assert not (tmp_path / "gone.txt").exists()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_clean_file_vanishing_verbose_announces_but_counts_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verbose prints the removal line before unlink, so it appears even when unlink fails."""
+    (tmp_path / "gone.txt").write_text("x")
+
+    result = clean(project_dir=_VanishingPath(tmp_path), patterns=["gone.txt"], verbose=True)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"Removing file: {tmp_path / 'gone.txt'}\nRemoved 0 items\n"
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_clean_dry_run_summary_survives_quiet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """quiet suppresses only the real-run summary; a dry run still reports."""
+    (tmp_path / "build").mkdir()
+
+    result = clean(project_dir=tmp_path, patterns=["build"], dry_run=True, quiet=True)
+
+    assert result == 0
+    assert (tmp_path / "build").exists()
+    captured = capsys.readouterr()
+    assert captured.out == f"[DRY RUN] Would remove: {tmp_path / 'build'}\n\n[DRY RUN] Would remove 1 items\n"
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_clean_skip_without_verbose_prints_only_the_count(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Without verbose a skipped path is reported only by the summary line."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "outside.txt").write_text("x")
+
+    result = clean(project_dir=project, patterns=["../outside.txt"])
+
+    assert result == 0
+    assert (tmp_path / "outside.txt").exists()
+    captured = capsys.readouterr()
+    assert captured.out == "Skipped 1 paths outside project directory\n"
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_clean_verbose_reports_zero_when_nothing_matched(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verbose prints the summary even when nothing was removed."""
+    result = clean(project_dir=tmp_path, patterns=["nonexistent_*"], verbose=True)
+
+    assert result == 0
+    assert capsys.readouterr().out == "Removed 0 items\n"
+
+
+@pytest.mark.os_agnostic
+def test_clean_quiet_keeps_verbose_lines_but_drops_summary(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """quiet silences the summary only; per-path verbose lines still print."""
+    (tmp_path / ".ruff_cache").mkdir()
+
+    clean(project_dir=tmp_path, patterns=[".ruff_cache"], verbose=True, quiet=True)
+
+    assert capsys.readouterr().out == f"Removing directory: {tmp_path / '.ruff_cache'}\n"
+
+
+@pytest.mark.os_agnostic
+def test_clean_verbose_output_order_across_patterns(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Per-path lines follow pattern order; the skip count precedes the removal count."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "outside.txt").write_text("x")
+    (project / "build").mkdir()
+    (project / "coverage.xml").write_text("<xml/>")
+
+    result = clean(project_dir=project, patterns=["../outside.txt", "build", "coverage.xml"], verbose=True)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == (
+        f"Skipping (outside project): {project / '..' / 'outside.txt'}\n"
+        f"Removing directory: {project / 'build'}\n"
+        f"Removing file: {project / 'coverage.xml'}\n"
+        "Skipped 1 paths outside project directory\n"
+        "Removed 2 items\n"
+    )
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_clean_dry_run_with_skip_output_order(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """In a dry run the skip count prints before the dry-run summary."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "outside.txt").write_text("x")
+    (project / "build").mkdir()
+
+    result = clean(project_dir=project, patterns=["../outside.txt", "build"], dry_run=True)
+
+    assert result == 0
+    assert (project / "build").exists()
+    captured = capsys.readouterr()
+    assert captured.out == (
+        f"[DRY RUN] Would remove: {project / 'build'}\n"
+        "Skipped 1 paths outside project directory\n"
+        "\n[DRY RUN] Would remove 1 items\n"
+    )
