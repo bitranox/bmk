@@ -16,13 +16,13 @@ from pydantic import ValidationError
 
 from bmk.adapters.stagerunner.helpers._coverage import (
     CoverageConfig,
+    RepoRemote,
     _build_codecov_args,
     _build_codecov_env,
     _build_env,
     _check_codecov_prerequisites,
     _find_dotenv_upward,
     _get_repo_metadata_from_git,
-    _get_repo_slug,
     _handle_codecov_result,
     _resolve_commit_sha,
     _resolve_git_branch,
@@ -1031,32 +1031,32 @@ def test_resolve_git_service_case_insensitive() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_slug
+# RepoRemote.slug
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
-def test_get_repo_slug_returns_slug() -> None:
-    """Returns 'owner/name' when both are provided."""
-    assert _get_repo_slug("myorg", "myrepo") == "myorg/myrepo"
+def test_repo_remote_slug_joins_owner_and_name() -> None:
+    """Returns 'owner/name' when both are present."""
+    assert RepoRemote("github.com", "myorg", "myrepo").slug == "myorg/myrepo"
 
 
 @pytest.mark.os_agnostic
-def test_get_repo_slug_returns_none_when_owner_missing() -> None:
-    """Returns None when owner is None."""
-    assert _get_repo_slug(None, "myrepo") is None
+def test_repo_remote_slug_is_none_when_owner_empty() -> None:
+    """Returns None when the owner segment is empty."""
+    assert RepoRemote("github.com", "", "myrepo").slug is None
 
 
 @pytest.mark.os_agnostic
-def test_get_repo_slug_returns_none_when_name_missing() -> None:
-    """Returns None when name is None."""
-    assert _get_repo_slug("myorg", None) is None
+def test_repo_remote_slug_is_none_when_name_empty() -> None:
+    """Returns None when the name segment is empty."""
+    assert RepoRemote("github.com", "myorg", "").slug is None
 
 
 @pytest.mark.os_agnostic
-def test_get_repo_slug_returns_none_when_both_missing() -> None:
-    """Returns None when both are None."""
-    assert _get_repo_slug(None, None) is None
+def test_repo_remote_slug_is_none_when_both_empty() -> None:
+    """Returns None when both segments are empty."""
+    assert RepoRemote("github.com", "", "").slug is None
 
 
 # ---------------------------------------------------------------------------
@@ -1071,11 +1071,9 @@ def test_get_repo_metadata_parses_ssh_url() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com:myorg/myrepo.git\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host == "github.com"
-    assert owner == "myorg"
-    assert name == "myrepo"
+    assert remote == RepoRemote("github.com", "myorg", "myrepo")
 
 
 @pytest.mark.os_agnostic
@@ -1085,11 +1083,9 @@ def test_get_repo_metadata_parses_ssh_url_without_git_suffix() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@gitlab.com:team/project\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host == "gitlab.com"
-    assert owner == "team"
-    assert name == "project"
+    assert remote == RepoRemote("gitlab.com", "team", "project")
 
 
 # ---------------------------------------------------------------------------
@@ -1104,11 +1100,9 @@ def test_get_repo_metadata_parses_https_url() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://github.com/myorg/myrepo.git\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host == "github.com"
-    assert owner == "myorg"
-    assert name == "myrepo"
+    assert remote == RepoRemote("github.com", "myorg", "myrepo")
 
 
 @pytest.mark.os_agnostic
@@ -1118,11 +1112,9 @@ def test_get_repo_metadata_parses_https_url_without_git_suffix() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://bitbucket.org/team/project\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host == "bitbucket.org"
-    assert owner == "team"
-    assert name == "project"
+    assert remote == RepoRemote("bitbucket.org", "team", "project")
 
 
 @pytest.mark.os_agnostic
@@ -1132,11 +1124,9 @@ def test_get_repo_metadata_parses_http_url() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="http://gitea.local/dev/app.git\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host == "gitea.local"
-    assert owner == "dev"
-    assert name == "app"
+    assert remote == RepoRemote("gitea.local", "dev", "app")
 
 
 # ---------------------------------------------------------------------------
@@ -1145,31 +1135,27 @@ def test_get_repo_metadata_parses_http_url() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_get_repo_metadata_returns_none_tuple_on_git_failure() -> None:
-    """Returns (None, None, None) when git command fails."""
+def test_get_repo_metadata_returns_none_on_git_failure() -> None:
+    """Returns None when git command fails."""
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host is None
-    assert owner is None
-    assert name is None
+    assert remote is None
 
 
 @pytest.mark.os_agnostic
-def test_get_repo_metadata_returns_none_tuple_for_unknown_format() -> None:
-    """Returns (None, None, None) for unrecognised URL format."""
+def test_get_repo_metadata_returns_none_for_unknown_format() -> None:
+    """Returns None for unrecognised URL format."""
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="svn://example.com/repo\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host is None
-    assert owner is None
-    assert name is None
+    assert remote is None
 
 
 # ---------------------------------------------------------------------------
@@ -1288,7 +1274,7 @@ def test_build_codecov_args_includes_git_service(monkeypatch: pytest.MonkeyPatch
         args = _build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
-            repo_host="github.com",
+            remote=RepoRemote("github.com", "", ""),
         )
 
     assert "--git-service" in args
@@ -1304,8 +1290,7 @@ def test_build_codecov_args_includes_slug(monkeypatch: pytest.MonkeyPatch) -> No
         args = _build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
-            repo_owner="myorg",
-            repo_name="myrepo",
+            remote=RepoRemote("", "myorg", "myrepo"),
         )
 
     assert "--slug" in args
@@ -1320,7 +1305,7 @@ def test_build_codecov_args_includes_slug(monkeypatch: pytest.MonkeyPatch) -> No
 @pytest.mark.os_agnostic
 def test_build_codecov_env_always_sets_no_combine() -> None:
     """Always includes CODECOV_NO_COMBINE=1."""
-    env = _build_codecov_env(None, None)
+    env = _build_codecov_env(None)
 
     assert env["CODECOV_NO_COMBINE"] == "1"
 
@@ -1328,15 +1313,15 @@ def test_build_codecov_env_always_sets_no_combine() -> None:
 @pytest.mark.os_agnostic
 def test_build_codecov_env_sets_slug_when_available() -> None:
     """Sets CODECOV_SLUG when owner and name are provided."""
-    env = _build_codecov_env("myorg", "myrepo")
+    env = _build_codecov_env(RepoRemote("github.com", "myorg", "myrepo"))
 
     assert env["CODECOV_SLUG"] == "myorg/myrepo"
 
 
 @pytest.mark.os_agnostic
 def test_build_codecov_env_omits_slug_when_missing() -> None:
-    """Omits CODECOV_SLUG when owner or name is missing."""
-    env = _build_codecov_env(None, "myrepo")
+    """Omits CODECOV_SLUG when owner or name is empty."""
+    env = _build_codecov_env(RepoRemote("github.com", "", "myrepo"))
 
     assert "CODECOV_SLUG" not in env
 
@@ -1638,44 +1623,38 @@ def test_main_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 @pytest.mark.os_agnostic
 def test_get_repo_metadata_returns_none_for_ssh_without_colon() -> None:
-    """Returns (None, None, None) when SSH URL has no colon separator."""
+    """Returns None when SSH URL has no colon separator."""
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com/owner/repo.git\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host is None
-    assert owner is None
-    assert name is None
+    assert remote is None
 
 
 @pytest.mark.os_agnostic
 def test_get_repo_metadata_returns_none_for_ssh_single_path_segment() -> None:
-    """Returns (None, None, None) when SSH URL has only one path segment after colon."""
+    """Returns None when SSH URL has only one path segment after colon."""
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com:repoonly\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host is None
-    assert owner is None
-    assert name is None
+    assert remote is None
 
 
 @pytest.mark.os_agnostic
 def test_get_repo_metadata_returns_none_for_https_too_few_parts() -> None:
-    """Returns (None, None, None) when HTTPS URL has too few path segments."""
+    """Returns None when HTTPS URL has too few path segments."""
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://github.com/owner-only\n"),
     ):
-        host, owner, name = _get_repo_metadata_from_git()
+        remote = _get_repo_metadata_from_git()
 
-    assert host is None
-    assert owner is None
-    assert name is None
+    assert remote is None
 
 
 @pytest.mark.os_agnostic

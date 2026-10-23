@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from bmk.adapters.stagerunner.helpers._plugin_manifest import PluginManifest, PluginManifestError
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
@@ -127,11 +127,34 @@ def _git_output(project_dir: Path, *args: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def _plugin_version_pair(project_dir: Path, plugin_path: Path, previous_tag: str) -> tuple[str, str] | None:
+class PluginVersionPair(NamedTuple):
+    """The plugin manifest's version at the previous tag and on disk now.
+
+    Named fields because both are plain strings: positionally, swapping them would
+    still type-check and the refusal message would quote the old version as current.
+
+    Attributes:
+        at_tag: The version ``.claude-plugin/plugin.json`` held at the previous tag.
+        on_disk: The version it holds in the working tree.
+    """
+
+    at_tag: str
+    on_disk: str
+
+
+def _plugin_version_pair(project_dir: Path, plugin_path: Path, previous_tag: str) -> PluginVersionPair | None:
     """Return the plugin version at ``previous_tag`` and the one on disk now.
 
     None when either cannot be read - the manifest is newer than the tag, or one side
     is not a JSON object - because there is then no honest comparison to make.
+
+    Args:
+        project_dir: The repository the tag belongs to.
+        plugin_path: The working-tree ``.claude-plugin/plugin.json``.
+        previous_tag: The tag of the previous release.
+
+    Returns:
+        Both versions, or None when either side cannot be read.
     """
     old_blob = _git_output(project_dir, "show", f"{previous_tag}:.claude-plugin/plugin.json")
     if old_blob is None:
@@ -141,7 +164,7 @@ def _plugin_version_pair(project_dir: Path, plugin_path: Path, previous_tag: str
         now = PluginManifest.from_json(plugin_path.read_text(encoding="utf-8")).version
     except (OSError, json.JSONDecodeError, PluginManifestError):
         return None
-    return was, now
+    return PluginVersionPair(at_tag=was, on_disk=now)
 
 
 def shipped_skill_needs_a_bump(project_dir: Path) -> str | None:
@@ -171,12 +194,12 @@ def shipped_skill_needs_a_bump(project_dir: Path) -> str | None:
 
     changed = (_git_output(project_dir, "diff", "--name-only", f"{previous_tag}..HEAD", "--", "skills") or "").strip()
     versions = _plugin_version_pair(project_dir, plugin_path, previous_tag) if changed else None
-    if versions is None or versions[0] != versions[1]:
+    if versions is None or versions.at_tag != versions.on_disk:
         return None
 
     files = ", ".join(sorted(changed.split())[:3])
     return (
-        f"skills/ changed since {previous_tag} ({files}) but .claude-plugin/plugin.json is still {versions[1]}. "
+        f"skills/ changed since {previous_tag} ({files}) but .claude-plugin/plugin.json is still {versions.on_disk}. "
         "An install re-fetches a skill only when that version changes, so this release would "
         "ship the code and leave every install on the old skill. Bump the plugin version "
         "(semver) and commit it, then release again."

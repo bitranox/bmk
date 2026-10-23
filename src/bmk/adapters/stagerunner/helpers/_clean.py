@@ -22,12 +22,28 @@ from __future__ import annotations
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+class SweepCounts(NamedTuple):
+    """How a clean sweep went, by outcome.
+
+    Named because both counts are plain ints: positionally, swapping them type-checks
+    and the summary would report skipped paths as removed.
+
+    Attributes:
+        removed: Paths removed, or that would be removed in a dry run.
+        skipped: Paths skipped because they resolve outside the project.
+    """
+
+    removed: int
+    skipped: int
+
 
 # The project venv is deliberately absent: bmk provisions and syncs it (see
 # ``stagerunner/venv.py``), and the ``push`` pipeline cleans at order 30, right
@@ -146,12 +162,12 @@ def clean(
         pyproject = project_dir / "pyproject.toml"
         patterns = get_clean_patterns(pyproject)
 
-    removed, skipped = _sweep(project_dir, patterns=patterns, dry_run=dry_run, verbose=verbose)
-    _print_clean_summary(removed=removed, skipped=skipped, dry_run=dry_run, verbose=verbose, quiet=quiet)
+    counts = _sweep(project_dir, patterns=patterns, dry_run=dry_run, verbose=verbose)
+    _print_clean_summary(removed=counts.removed, skipped=counts.skipped, dry_run=dry_run, verbose=verbose, quiet=quiet)
     return 0
 
 
-def _sweep(project_dir: Path, *, patterns: Iterable[str], dry_run: bool, verbose: bool) -> tuple[int, int]:
+def _sweep(project_dir: Path, *, patterns: Iterable[str], dry_run: bool, verbose: bool) -> SweepCounts:
     """Remove every contained path matching ``patterns`` and count the outcome.
 
     Args:
@@ -161,15 +177,15 @@ def _sweep(project_dir: Path, *, patterns: Iterable[str], dry_run: bool, verbose
         verbose: If True, print a line per removed or skipped path.
 
     Returns:
-        ``(removed, skipped)``: paths removed (or that would be, in a dry run)
-        and paths skipped because they resolve outside ``project_dir``.
+        The paths removed (or that would be, in a dry run) and the paths
+        skipped because they resolve outside ``project_dir``.
 
     Examples:
         >>> import tempfile
         >>> with tempfile.TemporaryDirectory() as tmp:
         ...     _ = (Path(tmp) / "build").mkdir()
         ...     _sweep(Path(tmp), patterns=["build"], dry_run=False, verbose=False)
-        (1, 0)
+        SweepCounts(removed=1, skipped=0)
     """
     resolved_root = project_dir.resolve()
     removed = 0
@@ -185,7 +201,7 @@ def _sweep(project_dir: Path, *, patterns: Iterable[str], dry_run: bool, verbose
                 continue
             if _remove_path(path, dry_run=dry_run, verbose=verbose):
                 removed += 1
-    return removed, skipped
+    return SweepCounts(removed=removed, skipped=skipped)
 
 
 def _remove_path(path: Path, *, dry_run: bool, verbose: bool) -> bool:

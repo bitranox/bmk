@@ -478,7 +478,7 @@ def test_one_failed_restore_does_not_stop_the_others(bump_module: Any, tmp_path:
 
     failed = bump_module._restore({unrestorable: b"old", changelog: b"original"})
 
-    assert [path for path, _reason in failed] == [unrestorable]
+    assert [failure.path for failure in failed] == [unrestorable]
     assert changelog.read_bytes() == b"original"
 
 
@@ -613,8 +613,8 @@ def test_a_failed_rewrite_is_reported_as_possibly_incomplete_not_as_still_bumped
     finally:
         pyproject.chmod(0o644)
 
-    assert [path for path, _reason in failed] == [pyproject]
-    assert "may be incomplete" in failed[0][1]
+    assert [failure.path for failure in failed] == [pyproject]
+    assert "may be incomplete" in failed[0].reason
 
 
 @pytest.mark.os_agnostic
@@ -626,10 +626,10 @@ def test_an_unreadable_file_is_reported_as_unread_not_as_rewritten(bump_module: 
     unreadable = tmp_path / "pyproject.toml"
     unreadable.mkdir()
 
-    [(path, reason)] = bump_module._restore({unreadable: b"original"})
+    [failure] = bump_module._restore({unreadable: b"original"})
 
-    assert path == unreadable
-    assert "could not be read" in reason
+    assert failure.path == unreadable
+    assert "could not be read" in failure.reason
 
 
 # A bump rewrites the synced files too (__init__conf__.py, the bundled Makefile, plugin.json), inside

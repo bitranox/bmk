@@ -29,7 +29,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 
@@ -60,27 +60,43 @@ def _extract_dependency_names(config: PyprojectConfig) -> list[str]:
     return names
 
 
-def _find_local_dependencies(project_dir: Path, config: PyprojectConfig) -> list[tuple[str, str]]:
+class LocalDependency(NamedTuple):
+    """A declared dependency that has a checkout beside the project.
+
+    Attributes:
+        package_name: The distribution name with hyphens (PyPI convention), as
+            ``--reinstall-package`` expects it.
+        path: The sibling directory holding that dependency's pyproject.toml.
+    """
+
+    package_name: str
+    path: str
+
+
+def _find_local_dependencies(project_dir: Path, config: PyprojectConfig) -> list[LocalDependency]:
     """Find sibling directories that match project dependencies.
 
     Scans the parent directory for subdirectories that match dependency names
     and contain a pyproject.toml file (indicating a valid Python project).
 
+    Args:
+        project_dir: The project whose parent directory is scanned.
+        config: The project's parsed pyproject.toml.
+
     Returns:
-        List of tuples (package_name, absolute_path) for local dependencies.
-        Package names use hyphens (PyPI convention) for --reinstall-package.
+        The local dependencies, in the order the project declares them.
     """
     parent_dir = project_dir.parent
     dependency_names = _extract_dependency_names(config)
 
-    local_deps: list[tuple[str, str]] = []
+    local_deps: list[LocalDependency] = []
     for dep_name in dependency_names:
         variants = [dep_name, dep_name.replace("_", "-")]
         for variant in variants:
             sibling = parent_dir / variant
             if sibling.is_dir() and (sibling / "pyproject.toml").exists():
                 package_name = dep_name.replace("_", "-")
-                local_deps.append((package_name, str(sibling)))
+                local_deps.append(LocalDependency(package_name=package_name, path=str(sibling)))
                 break
     return local_deps
 
@@ -119,9 +135,8 @@ def run_cli(*, project_dir: Path, args: list[str]) -> int:
 
     command = ["uvx", "--from", str(project_dir), "--no-cache"]
 
-    local_deps = _find_local_dependencies(project_dir, config)
-    for _dep_name, local_path in local_deps:
-        command.extend(["--with", local_path])
+    for dependency in _find_local_dependencies(project_dir, config):
+        command.extend(["--with", dependency.path])
 
     command.extend([project_name, *forwarded])
 

@@ -38,7 +38,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeAlias
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._sync_initconf import (
@@ -176,6 +176,35 @@ def update_changelog(project_dir: Path, new_version: str) -> None:
 _Snapshot: TypeAlias = "dict[Path, bytes | None]"
 
 
+class BumpPlan(NamedTuple):
+    """Everything a bump reads before its first write.
+
+    Named fields because the two versions are both plain strings: positionally, swapping
+    them type-checks and the bump would announce (or undo) the wrong direction.
+
+    Attributes:
+        old_version: The ``[project].version`` before the bump.
+        new_version: The version the bump writes.
+        originals: The snapshot an undo restores.
+    """
+
+    old_version: str
+    new_version: str
+    originals: _Snapshot
+
+
+class RestoreFailure(NamedTuple):
+    """A file the undo could not put back as it was.
+
+    Attributes:
+        path: The file that is not back in its pre-bump state.
+        reason: What happened to it, phrased to follow the path in the report.
+    """
+
+    path: Path
+    reason: str
+
+
 def _snapshot(project_dir: Path) -> _Snapshot:
     """The files a bump rewrites, byte for byte, and the ones it may create, as None.
 
@@ -234,10 +263,10 @@ def _remove_created(path: Path) -> str | None:
     return None
 
 
-def _restore(originals: _Snapshot) -> list[tuple[Path, str]]:
+def _restore(originals: _Snapshot) -> list[RestoreFailure]:
     """Put back what :func:`_snapshot` read, every file on its own; returns the ones that failed."""
     outcomes = ((path, _restore_one(path, data)) for path, data in originals.items())
-    return [(path, reason) for path, reason in outcomes if reason is not None]
+    return [RestoreFailure(path=path, reason=reason) for path, reason in outcomes if reason is not None]
 
 
 class _Terminated(BaseException):
@@ -303,8 +332,8 @@ def _undo_bump(originals: _Snapshot, new_version: str) -> int:
         print(f"Error: the bump to {new_version} was undone; fix the cause and bump again", file=sys.stderr)
         return 1
     print(f"Error: the bump to {new_version} could NOT be fully undone; not back as they were:", file=sys.stderr)
-    for path, reason in failed:
-        print(f"  {path}: {reason}", file=sys.stderr)
+    for failure in failed:
+        print(f"  {failure.path}: {failure.reason}", file=sys.stderr)
     print(
         "Restore those files before bumping again (git checkout -- <file>; `uv lock` rebuilds uv.lock).",
         file=sys.stderr,
@@ -332,14 +361,18 @@ def _apply_bump(project_dir: Path, new_version: str) -> str | None:
     return None
 
 
-def _read_bump(project_dir: Path, part: BumpPart) -> tuple[str, str, _Snapshot]:
+def _read_bump(project_dir: Path, part: BumpPart) -> BumpPlan:
     """Current version, next version and the snapshot - everything read before the first write."""
     config = load_pyproject_config(project_dir / "pyproject.toml")
     current_version = config.project.version
     if not current_version:
         msg = "Could not find [project].version in pyproject.toml"
         raise ValueError(msg)
-    return current_version, next_version(current_version, part), _snapshot(project_dir)
+    return BumpPlan(
+        old_version=current_version,
+        new_version=next_version(current_version, part),
+        originals=_snapshot(project_dir),
+    )
 
 
 def main() -> int:
@@ -365,7 +398,7 @@ def main() -> int:
 def _bump(project_dir: Path, part: BumpPart) -> int:
     """Read, apply and on any way out short of success undo the bump; the exit code."""
     try:
-        old_version, new_version, originals = _read_bump(project_dir, part)
+        plan = _read_bump(project_dir, part)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -379,17 +412,17 @@ def _bump(project_dir: Path, part: BumpPart) -> int:
     # Undone on ANY way out short of success (a failed re-lock, an unwritable file, Ctrl-C,
     # SIGTERM, SIGHUP): half-applied, a re-run would bump a second time and skip a version.
     try:
-        failure = _apply_bump(project_dir, new_version)
+        failure = _apply_bump(project_dir, plan.new_version)
     except (ValueError, OSError) as e:
         failure = str(e)
     except BaseException:
-        _undo_bump(originals, new_version)
+        _undo_bump(plan.originals, plan.new_version)
         raise
     if failure is not None:
         print(f"Error: {failure}", file=sys.stderr)
-        return _undo_bump(originals, new_version)
+        return _undo_bump(plan.originals, plan.new_version)
 
-    print(f"Bumped version: {old_version} -> {new_version}")
+    print(f"Bumped version: {plan.old_version} -> {plan.new_version}")
     return 0
 
 

@@ -363,18 +363,14 @@ class TestGitServiceHelpers:
         [
             ("myorg", "myrepo", "myorg/myrepo"),
             ("user", "project", "user/project"),
-            (None, "myrepo", None),
-            ("myorg", None, None),
-            (None, None, None),
             ("", "myrepo", None),
             ("myorg", "", None),
+            ("", "", None),
         ],
     )
-    def test_get_repo_slug_builds_slug(
-        self, coverage_module: Any, owner: str | None, name: str | None, expected: str | None
-    ) -> None:
-        """_get_repo_slug builds owner/name slug."""
-        assert coverage_module._get_repo_slug(owner, name) == expected
+    def test_repo_remote_builds_slug(self, coverage_module: Any, owner: str, name: str, expected: str | None) -> None:
+        """RepoRemote.slug builds the owner/name slug, None when either part is empty."""
+        assert coverage_module.RepoRemote("github.com", owner, name).slug == expected
 
 
 class TestBuildCodecovEnv:
@@ -390,14 +386,14 @@ class TestBuildCodecovEnv:
     @pytest.mark.os_agnostic
     def test_always_sets_no_combine(self, coverage_module: Any) -> None:
         """_build_codecov_env always sets CODECOV_NO_COMBINE."""
-        env = coverage_module._build_codecov_env(None, None)
+        env = coverage_module._build_codecov_env(None)
 
         assert env["CODECOV_NO_COMBINE"] == "1"
 
     @pytest.mark.os_agnostic
     def test_sets_slug_when_owner_and_name_provided(self, coverage_module: Any) -> None:
         """_build_codecov_env sets CODECOV_SLUG when owner and name provided."""
-        env = coverage_module._build_codecov_env("myorg", "myrepo")
+        env = coverage_module._build_codecov_env(coverage_module.RepoRemote("github.com", "myorg", "myrepo"))
 
         assert env["CODECOV_SLUG"] == "myorg/myrepo"
 
@@ -1344,7 +1340,7 @@ class TestBuildCodecovArgs:
         args = coverage_module._build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
-            repo_host="github.com",
+            remote=coverage_module.RepoRemote("github.com", "", ""),
         )
 
         assert "--git-service" in args
@@ -1358,8 +1354,7 @@ class TestBuildCodecovArgs:
         args = coverage_module._build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
-            repo_owner="myorg",
-            repo_name="myrepo",
+            remote=coverage_module.RepoRemote("", "myorg", "myrepo"),
         )
 
         assert "--slug" in args
@@ -1373,9 +1368,7 @@ class TestBuildCodecovArgs:
         args = coverage_module._build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
-            repo_host="unknown.example.com",
-            repo_owner=None,
-            repo_name=None,
+            remote=coverage_module.RepoRemote("unknown.example.com", "", ""),
         )
 
         assert "--branch" not in args

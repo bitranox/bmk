@@ -34,7 +34,7 @@ import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 import rtoml
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -248,8 +248,21 @@ def _build_env(project_dir: Path, src_path: str) -> dict[str, str]:
     return os.environ.copy() | {"PYTHONPATH": pythonpath}
 
 
-def _resolve_test_interpreter(python: str | None) -> tuple[str | None, str]:
-    """Validate the interpreter the tests will run under. Returns (interpreter, error).
+class _InterpreterRefusal(NamedTuple):
+    """Why there is no interpreter to run the tests under.
+
+    A type of its own rather than an ``(interpreter, error)`` pair, so a caller cannot
+    read an interpreter out of a refusal or an error out of a usable interpreter.
+
+    Attributes:
+        reason: The explanation printed after ``Cannot run tests:``.
+    """
+
+    reason: str
+
+
+def _resolve_test_interpreter(python: str | None) -> str | _InterpreterRefusal:
+    """Validate the interpreter the tests will run under.
 
     The interpreter must be the PROJECT's venv python, which ``ensure_project_venv``
     syncs from the project's own ``pyproject.toml`` (including its ``[dev]`` extra, so
@@ -265,17 +278,23 @@ def _resolve_test_interpreter(python: str | None) -> tuple[str | None, str]:
     coverage/pytest. A probe would add a subprocess to every run to pre-empt a case
     ``ensure_project_venv`` already prevents, and a missing module reports itself
     perfectly well ("No module named coverage") from the command that needs it.
+
+    Args:
+        python: The project's venv interpreter, or None when no venv was found.
+
+    Returns:
+        The interpreter path, or the refusal explaining why the tests cannot run.
     """
     if not python:
-        return None, (
+        return _InterpreterRefusal(
             "no project virtualenv found, so there is no environment to run the tests in.\n"
             "bmk runs the suite in the project's own venv (the one it syncs from pyproject.toml),\n"
             "never in its own tool env. Create it with `uv venv` (bmk normally provisions it\n"
             "automatically), or unset BMK_NO_VENV_SYNC=1 if you set it."
         )
     if not Path(python).exists():
-        return None, f"the project's interpreter does not exist: {python}"
-    return python, ""
+        return _InterpreterRefusal(f"the project's interpreter does not exist: {python}")
+    return python
 
 
 @dataclass(frozen=True)
@@ -312,7 +331,19 @@ def _announce(line: str, *, quiet: bool) -> None:
         print(line)
 
 
-def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> tuple[list[str], str]:
+class _PytestCommand(NamedTuple):
+    """The pytest-under-coverage command and the line that announces it.
+
+    Attributes:
+        argv: The argv to execute.
+        display: The human-readable ``[coverage] ...`` line describing it.
+    """
+
+    argv: list[str]
+    display: str
+
+
+def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> _PytestCommand:
     """Build the pytest-under-coverage command and the line that announces it.
 
     Args:
@@ -345,7 +376,7 @@ def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> tuple[list[
         f"[coverage] python -m coverage run --source={coverage_source} "
         f"-m pytest {marker_display}{config.pytest_verbosity}"
     )
-    return argv, display
+    return _PytestCommand(argv=argv, display=display)
 
 
 def _run_pytest_under_coverage(run: _CoverageRun, *, include_integration: bool) -> int:
@@ -358,10 +389,10 @@ def _run_pytest_under_coverage(run: _CoverageRun, *, include_integration: bool) 
     Returns:
         The pytest exit code.
     """
-    argv, display = _pytest_argv(run, include_integration=include_integration)
-    _announce(display, quiet=run.quiet)
+    command = _pytest_argv(run, include_integration=include_integration)
+    _announce(command.display, quiet=run.quiet)
     result = subprocess.run(
-        argv,
+        command.argv,
         env=run.env,
         cwd=run.project_dir,
         check=False,
@@ -446,9 +477,9 @@ def run_coverage_tests(
     if project_dir is None:
         project_dir = Path.cwd()
 
-    test_python, error = _resolve_test_interpreter(python)
-    if test_python is None:
-        print(f"Cannot run tests: {error}", file=sys.stderr)
+    test_python = _resolve_test_interpreter(python)
+    if isinstance(test_python, _InterpreterRefusal):
+        print(f"Cannot run tests: {test_python.reason}", file=sys.stderr)
         return 1
 
     config = CoverageConfig.from_pyproject(project_dir)
@@ -601,26 +632,44 @@ def _resolve_git_service(repo_host: str | None) -> GitService | None:
     return _GIT_SERVICE_BY_HOST.get(host)
 
 
-def _get_repo_slug(repo_owner: str | None, repo_name: str | None) -> str | None:
-    """Get the repository slug (owner/name) if available.
+class RepoRemote(NamedTuple):
+    """The parts of the ``origin`` remote URL Codecov needs.
 
-    Args:
-        repo_owner: Repository owner/organization.
-        repo_name: Repository name.
+    Each part is the segment the URL held, which can be empty (``git@host:/repo``
+    yields an empty owner): an empty part never contributes a slug or a service,
+    so a half-parsable remote still uploads with whatever it does carry.
 
-    Returns:
-        Slug in "owner/name" format, or None.
+    Attributes:
+        host: Repository host, e.g. ``github.com``.
+        owner: Repository owner or organization.
+        name: Repository name, without a ``.git`` suffix.
     """
-    if repo_owner and repo_name:
-        return f"{repo_owner}/{repo_name}"
-    return None
+
+    host: str
+    owner: str
+    name: str
+
+    @property
+    def slug(self) -> str | None:
+        """The ``owner/name`` slug, or None when either part is empty.
+
+        Examples:
+            >>> RepoRemote("github.com", "myorg", "myrepo").slug
+            'myorg/myrepo'
+            >>> RepoRemote("github.com", "", "myrepo").slug is None
+            True
+        """
+        if self.owner and self.name:
+            return f"{self.owner}/{self.name}"
+        return None
 
 
-def _get_repo_metadata_from_git() -> tuple[str | None, str | None, str | None]:
+def _get_repo_metadata_from_git() -> RepoRemote | None:
     """Extract repo metadata from git remote origin.
 
     Returns:
-        Tuple of (host, owner, name) or (None, None, None).
+        The parsed remote, or None when git has no ``origin`` or its URL is not an
+        SSH or HTTP(S) URL with an owner and a name segment.
     """
     proc = subprocess.run(
         ["git", "remote", "get-url", "origin"],
@@ -629,7 +678,7 @@ def _get_repo_metadata_from_git() -> tuple[str | None, str | None, str | None]:
         check=False,
     )
     if proc.returncode != 0:
-        return None, None, None
+        return None
 
     url = proc.stdout.strip()
     # Handle SSH URLs: git@github.com:owner/repo.git
@@ -640,7 +689,7 @@ def _get_repo_metadata_from_git() -> tuple[str | None, str | None, str | None]:
             path = parts[1].removesuffix(".git")
             path_parts = path.split("/")
             if len(path_parts) >= 2:
-                return host, path_parts[0], path_parts[1]
+                return RepoRemote(host, path_parts[0], path_parts[1])
     # Handle HTTPS URLs: https://github.com/owner/repo.git
     # Also handles embedded auth: https://token@github.com/owner/repo.git
     elif url.startswith("https://") or url.startswith("http://"):
@@ -648,8 +697,8 @@ def _get_repo_metadata_from_git() -> tuple[str | None, str | None, str | None]:
         parts = url_without_proto.removesuffix(".git").split("/")
         if len(parts) >= 3:
             host = parts[0].rsplit("@", 1)[-1]
-            return host, parts[1], parts[2]
-    return None, None, None
+            return RepoRemote(host, parts[1], parts[2])
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -686,18 +735,15 @@ def upload_coverage_report(
         print("[codecov] Unable to resolve git commit; skipping upload", file=sys.stderr)
         return True
 
-    # Get repo metadata from git
-    repo_host, repo_owner, repo_name = _get_repo_metadata_from_git()
+    remote = _get_repo_metadata_from_git()
 
     args = _build_codecov_args(
         uploader=uploader,
         commit_sha=commit_sha,
         coverage_report_file=coverage_report_file,
-        repo_host=repo_host,
-        repo_owner=repo_owner,
-        repo_name=repo_name,
+        remote=remote,
     )
-    env_overrides = _build_codecov_env(repo_owner, repo_name)
+    env_overrides = _build_codecov_env(remote)
 
     # Build subprocess environment without mutating os.environ
     env = os.environ.copy()
@@ -756,9 +802,7 @@ def _build_codecov_args(
     uploader: str,
     commit_sha: str,
     coverage_report_file: str = DEFAULT_COVERAGE_REPORT_FILE,
-    repo_host: str | None = None,
-    repo_owner: str | None = None,
-    repo_name: str | None = None,
+    remote: RepoRemote | None = None,
 ) -> list[str]:
     """Build the codecov CLI arguments.
 
@@ -766,9 +810,7 @@ def _build_codecov_args(
         uploader: Path to codecovcli executable.
         commit_sha: Git commit SHA.
         coverage_report_file: Name of the coverage report file.
-        repo_host: Repository host (e.g., 'github.com').
-        repo_owner: Repository owner/organization.
-        repo_name: Repository name.
+        remote: The parsed ``origin`` remote, or None when it could not be read.
 
     Returns:
         List of command-line arguments.
@@ -792,31 +834,31 @@ def _build_codecov_args(
     if branch:
         args.extend(["--branch", branch])
 
-    git_service = _resolve_git_service(repo_host)
+    if remote is None:
+        return args
+
+    git_service = _resolve_git_service(remote.host)
     if git_service:
         args.extend(["--git-service", git_service])
 
-    slug = _get_repo_slug(repo_owner, repo_name)
-    if slug:
-        args.extend(["--slug", slug])
+    if remote.slug:
+        args.extend(["--slug", remote.slug])
 
     return args
 
 
-def _build_codecov_env(repo_owner: str | None, repo_name: str | None) -> dict[str, str]:
+def _build_codecov_env(remote: RepoRemote | None) -> dict[str, str]:
     """Build environment overrides for codecov upload.
 
     Args:
-        repo_owner: Repository owner/organization.
-        repo_name: Repository name.
+        remote: The parsed ``origin`` remote, or None when it could not be read.
 
     Returns:
         Dictionary of environment variable overrides.
     """
     env_overrides: dict[str, str] = {"CODECOV_NO_COMBINE": "1"}
-    slug = _get_repo_slug(repo_owner, repo_name)
-    if slug:
-        env_overrides["CODECOV_SLUG"] = slug
+    if remote is not None and remote.slug:
+        env_overrides["CODECOV_SLUG"] = remote.slug
     return env_overrides
 
 
