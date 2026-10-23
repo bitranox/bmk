@@ -6,7 +6,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
-## [3.23.4] 2026-10-23 23:54:14
+## [3.24.0] 2026-10-24 00:03:08
 
 ### Changed
 
@@ -27,6 +27,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   main config (and Windows/macOS arms over `src` only) got 159 errors `make test` reported and CI
   never showed. A pinned main config now runs once, under its pin, as CI runs it, and each
   declared platform's `pyrightconfig.<platform>.json` arm runs through `--project`.
+
+### Security
+
+- setuptools (a transitive of bashate via pbr) is floored at 84.1.0 for GHSA-xmj3-9gf7-h52w. The
+  fixed release is younger than bmk's cooldown, so `[tool.uv]` pins it, as for certifi.
 
 ## [3.23.3] 2026-10-23 22:56:09
 

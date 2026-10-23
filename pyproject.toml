@@ -1,6 +1,6 @@
 [project]
 name = "bmk"
-version = "3.23.4"
+version = "3.24.0"
 description = "Build, test and release runner for Python projects: keep the Makefile, drop the shell. Cross-OS, uv-based, one self-updating Makefile."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -85,6 +85,9 @@ dependencies = [
     # the floor that pin would be one no floor demands, and the lock would fall back to the
     # vulnerable release.
     "certifi>=2026.10.19",
+    # A transitive of pbr (via bashate), floored for GHSA-xmj3-9gf7-h52w. Same case as certifi:
+    # 84.1.0 was younger than the cooldown when this floor was raised, so bmk pins it in [tool.uv].
+    "setuptools>=84.1.0",
 
     # --- deliberately absent ------------------------------------------------------------
     # twine: bmk never uploads to PyPI itself. `release` tags, pushes and calls `gh release`;
@@ -140,7 +143,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "7 days"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, certifi = "2026-10-20T02:24:17Z"}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, certifi = "2026-10-20T02:24:17Z", setuptools = "2026-10-19T20:11:44Z"}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"
