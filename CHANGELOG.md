@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `[tool.uv] exclude-newer` that uv refuses no longer makes `deps --update` delete your
+  floor pins.** uv only warns about such a value and resolves no cutoff, which the pin reconcile
+  read as "no cooldown": every `exclude-newer-package` pin bmk recognises then looked undemanded
+  and was removed, and only afterwards did the check refuse the value and exit 1. The refusal now
+  comes first, so the update exits 1 naming the value and leaves `[tool.uv]` as it was.
+
 ## [3.23.1] 2026-10-23 16:42:34
 
 ### Changed

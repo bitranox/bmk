@@ -613,6 +613,22 @@ def test_an_update_pins_a_young_floor_at_its_upload_and_keeps_the_floor(tmp_path
 
 
 @pytest.mark.os_agnostic
+def test_a_cooldown_uv_refuses_fails_the_update_before_any_pin_is_dropped(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # uv only warns about "two weeks" and then ignores the whole [tool.uv] block, so no cutoff can
+    # be read. Without one, every pin bmk recognises looks undemanded.
+    _ = pypi
+    tool_uv = f'exclude-newer = "two weeks"\nexclude-newer-package = {{ widget = "{_pin_of(3)}" }}'
+    pyproject = _write(tmp_path, deps='"widget>=1.2"', tool_uv=tool_uv)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 1
+
+    assert _pins(pyproject) == {"widget": _pin_of(3)}
+    assert "two weeks" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
 def test_what_a_pinned_release_itself_requires_is_pinned_too(tmp_path: Path, pypi: _FakeIndex) -> None:
     # bmk's own gate, 2026-10-12: pydantic 2.14.1 was pinned, but it requires pydantic-core==2.50.1,
     # uploaded the same evening, and `uv lock` failed on that.

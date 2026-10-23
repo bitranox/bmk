@@ -1592,12 +1592,22 @@ def _pin_young_floors(pyproject: Path) -> list[str]:
 def _default_cutoff(exclude_newer: object) -> datetime | None:
     """The cutoff the project's ``exclude-newer`` sets for a package without its own; None without one.
 
+    A value uv refused must raise here, not read as "no cooldown": uv only warns and resolves no
+    cutoff, and with none every floor pin looks undemanded, so the reconcile would drop them all
+    before the check refused the value.
+
     Raises:
         SupplyChainConfigError: When uv refuses the value.
     """
     if exclude_newer is None:
         return None
-    return ReleasePolicy.from_lock(uv_resolved_options(exclude_newer, {}), now=datetime.now(timezone.utc)).default
+    # from_project, not from_lock: it is the one place that refuses a value uv resolved to nothing.
+    return ReleasePolicy.from_project(
+        exclude_newer=exclude_newer,
+        packages={},
+        lock_options=uv_resolved_options(exclude_newer, {}),
+        now=datetime.now(timezone.utc),
+    ).default
 
 
 def _demanded_pins(config: PyprojectConfig, cutoff: datetime | None, packages: dict[str, Any]) -> dict[str, str]:
