@@ -98,6 +98,7 @@ class StubUv:
         venv_reports: str | None = None,
         python_rc: int = 0,
         lock_rc: int = 0,
+        lock_upgrade_rc: int = 0,
         lock_aftermath: str = ":",
         sync_rc: int = 0,
         sync_aftermath: str = ":",
@@ -116,6 +117,8 @@ class StubUv:
                 field the free-threaded flag); None leaves an empty, unrunnable file there.
             python_rc: Exit code of every ``uv python ...``; a non-zero ``list`` prints nothing.
             lock_rc: Exit code of ``uv lock``; a non-zero one prints :data:`LOCK_MARKER` on stderr.
+            lock_upgrade_rc: The same, for a ``uv lock --upgrade`` only, so a failing upgrade can be
+                told from the plain ``uv lock`` bmk runs elsewhere (one reads the cutoff back).
             lock_aftermath: Shell run by a ``uv lock`` that succeeds, in the directory uv runs in (the
                 project), e.g. to rewrite ``uv.lock`` the way a real upgrade that moved a pin does.
             sync_rc: Exit code of ``uv sync``, which always prints :data:`SYNC_MARKER`, one
@@ -135,6 +138,7 @@ class StubUv:
                 venv_reports=venv_reports,
                 python_rc=python_rc,
                 lock_rc=lock_rc,
+                lock_upgrade_rc=lock_upgrade_rc,
                 lock_aftermath=lock_aftermath,
                 sync_rc=sync_rc,
                 sync_aftermath=sync_aftermath,
@@ -165,6 +169,7 @@ class StubUv:
         venv_reports: str | None,
         python_rc: int,
         lock_rc: int,
+        lock_upgrade_rc: int,
         lock_aftermath: str,
         sync_rc: int,
         sync_aftermath: str,
@@ -211,7 +216,9 @@ class StubUv:
             "      esac\n"
             "    fi\n"
             "    exit 0 ;;\n"
-            f'  lock) [ {lock_rc} -eq 0 ] || {{ echo "error: {LOCK_MARKER}" >&2; exit {lock_rc}; }}\n'
+            f"  lock) rc={lock_rc}\n"
+            f'    case " $* " in *" --upgrade "*) [ "$rc" -ne 0 ] || rc={lock_upgrade_rc} ;; esac\n'
+            f'    [ "$rc" -eq 0 ] || {{ echo "error: {LOCK_MARKER}" >&2; exit "$rc"; }}\n'
             f"    {lock_aftermath}\n"
             "    exit 0 ;;\n"
             "  pip)\n"

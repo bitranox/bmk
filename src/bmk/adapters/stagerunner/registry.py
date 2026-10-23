@@ -22,7 +22,7 @@ from .venv import (
     desired_python_minor,
     ensure_project_venv_at,
     is_venv,
-    lock_project,
+    lock_project_reporting,
     resolve_project_venv,
     venv_python,
     venv_sync_disabled,
@@ -123,7 +123,7 @@ def _locked_project(ctx: StageContext, sink: OutputSink) -> _dependencies.Locked
     # nothing to do and the stage passes, so the gates degrade to bmk's own interpreter instead of
     # the pipeline stopping here.
     return _dependencies.LockedProject(
-        upgrade=lambda: lock_project(ctx.project_dir, quiet=quiet, upgrade=True),
+        upgrade=lambda: lock_project_reporting(ctx.project_dir, quiet=quiet, upgrade=True, stream=out),
         sync=sync,
         sync_already_failed=ctx.venv_provisioning is VenvProvisioning.FAILED and would_sync(),
         out=out,

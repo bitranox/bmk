@@ -2067,7 +2067,7 @@ if __name__ == "__main__":  # pragma: no cover
         desired_python_minor,
         ensure_project_venv_at,
         is_venv,
-        lock_project,
+        lock_project_reporting,
         resolve_project_venv,
         venv_python,
         venv_sync_disabled,
@@ -2088,7 +2088,7 @@ if __name__ == "__main__":  # pragma: no cover
         return ensure_project_venv_at(args.project_dir, project_venv, minor, quiet=quiet) is not None
 
     locked = LockedProject(
-        upgrade=lambda: lock_project(args.project_dir, quiet=quiet, upgrade=True),
+        upgrade=lambda: lock_project_reporting(args.project_dir, quiet=quiet, upgrade=True, stream=None),
         sync=_sync,
     )
 

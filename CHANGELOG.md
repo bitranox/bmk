@@ -17,6 +17,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   terminal) undo the bump like Ctrl-C does; such a bump exits 128 plus the signal number. Before,
   a failing sync left the version bumped, so a re-run skipped a version. On Windows a cancel that
   terminates the process cannot be undone.
+- `make deps-update` in JSON mode shows uv's own error when `uv lock --upgrade` fails; the failed
+  stage block held only "uv lock --upgrade failed after the floor update".
 
 ## [3.22.6] 2026-10-23 10:08:52
 

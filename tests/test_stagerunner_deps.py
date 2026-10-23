@@ -7,6 +7,7 @@ import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from uv_stub import LOCK_MARKER
 
 from bmk.adapters.stagerunner.model import StageContext
 from bmk.adapters.stagerunner.output import CapturingSink
@@ -360,6 +361,59 @@ def test_bmk_no_venv_sync_also_skips_the_deps_update_resync(deps_project: Path, 
     assert rc == 0
     assert ["uv", "lock", "--upgrade"] in stub_uv.commands(), "the lock is still upgraded"
     assert _sync_calls(stub_uv) == 0, "BMK_NO_VENV_SYNC=1 opts out of every sync, this one too"
+
+
+# --- a failed `uv lock --upgrade` says why (OPEN-WORK [260]): uv's own reason reaches the stage's capture ---
+
+_UPGRADE_FAILED = "uv lock --upgrade failed after the floor update"
+
+
+@pytest.mark.os_posix
+def test_a_failed_upgrade_lock_reports_uv_s_reason_into_the_stage_capture(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    stub_uv.install(lock_upgrade_rc=2, lock_aftermath=_LOCK_WRITE)
+    sink = CapturingSink()
+
+    rc = PIPELINES["deps_update"][0].action(_ctx(deps_project), sink)
+
+    captured = sink.getvalue()
+    assert rc == 1
+    assert LOCK_MARKER in captured, captured
+    assert captured.index(LOCK_MARKER) < captured.index(_UPGRADE_FAILED), "uv's reason, then bmk's summary"
+    assert LOCK_MARKER not in "".join(capfd.readouterr()), "nothing of it bypasses the stage capture"
+
+
+@pytest.mark.os_posix
+def test_a_failed_upgrade_lock_in_json_mode_shows_the_reason_in_the_stage_block(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from bmk.adapters.cli.commands._shared import run_command
+
+    stub_uv.install(lock_upgrade_rc=2, lock_aftermath=_LOCK_WRITE)
+
+    rc = run_command(deps_project, (), command_prefix="deps_update", output_format=ToolOutputFormat.JSON)
+
+    out, err = capfd.readouterr()
+    block = out[out.index("[deps_update] (exit code: 1)") :] if "[deps_update] (exit code: 1)" in out else ""
+    assert rc == 1
+    assert LOCK_MARKER in block, f"{out}\n{err}"
+    assert "(no output captured)" not in out
+
+
+@pytest.mark.os_posix
+def test_a_text_mode_upgrade_lock_failure_shows_uv_s_reason_once(
+    deps_project: Path, stub_uv: StubUv, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Text mode streams uv's stderr live, so a report under the header would repeat it."""
+    stub_uv.install(lock_upgrade_rc=2, lock_aftermath=_LOCK_WRITE)
+    sink = CapturingSink()
+
+    rc = PIPELINES["deps_update"][0].action(_ctx(deps_project, ToolOutputFormat.TEXT), sink)
+
+    out, err = capfd.readouterr()
+    assert rc == 1
+    assert (out + err + sink.getvalue()).count(LOCK_MARKER) == 1, f"{out}\n{err}"
 
 
 # --- what `make test` users see: its first stage `update_deps` runs the `deps_update` PIPELINE, so the

@@ -49,6 +49,7 @@ __all__ = [
     "is_venv",
     "latest_installed_patch",
     "lock_project",
+    "lock_project_reporting",
     "resolve_project_venv",
     "sync_lock_path",
     "uv_lock_guard_path",
@@ -1098,6 +1099,26 @@ def lock_project(cwd: Path, *, quiet: bool = True, upgrade: bool = False) -> boo
     """
     lock = _lock(cwd, quiet=quiet, upgrade=upgrade)
     return lock is not None and lock.rc == 0
+
+
+def lock_project_reporting(cwd: Path, *, quiet: bool, upgrade: bool, stream: SupportsWrite | None) -> bool:
+    """:func:`lock_project`, and on a failed uv run write uv's whole reason to ``stream``.
+
+    For a caller whose own failure line would otherwise be all a JSON-mode stage shows: uv's
+    stderr is captured there, and :func:`lock_project` returns only the verdict. ``stream`` None
+    is the process's stderr, looked up at call time. In text mode uv's stderr already streamed
+    live, so only the header is written. Lock contention is reported by :func:`_lock` itself.
+
+    Returns:
+        Whether ``uv lock`` succeeded.
+    """
+    lock = _lock(cwd, quiet=quiet, upgrade=upgrade)
+    if lock is None:
+        return False
+    if lock.rc != 0:
+        command = "uv lock --upgrade" if upgrade else "uv lock"
+        _write_failure(f"[venv] {command} failed in {cwd} (exit {lock.rc})", lock, stream=stream)
+    return lock.rc == 0
 
 
 def uv_lock_guard_path(cwd: Path) -> Path:
