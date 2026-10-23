@@ -26,8 +26,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
+from bmk.adapters.stagerunner.helpers._plugin_manifest import PluginManifest, PluginManifestError
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.version import version_problem
 
@@ -107,19 +108,9 @@ def _ensure_clean() -> None:
 def _get_default_remote(config: PyprojectConfig) -> str:
     """Read default git remote from pyproject.toml [tool.git].default-remote.
 
-    Falls back to "origin" if not configured.
+    Falls back to "origin" if not configured (absent, blank, or not a string).
     """
-    try:
-        tool = config.raw_data.get("tool")
-        if isinstance(tool, dict):
-            git_config = cast("dict[str, Any]", tool).get("git")
-            if isinstance(git_config, dict):
-                remote = cast("dict[str, Any]", git_config).get("default-remote")
-                if isinstance(remote, str) and remote.strip():
-                    return remote.strip()
-    except (ValueError, OSError):
-        pass
-    return "origin"
+    return config.tool.git.default_remote or "origin"
 
 
 # ---------------------------------------------------------------------------
@@ -140,15 +131,15 @@ def _plugin_version_pair(project_dir: Path, plugin_path: Path, previous_tag: str
     """Return the plugin version at ``previous_tag`` and the one on disk now.
 
     None when either cannot be read - the manifest is newer than the tag, or one side
-    is not JSON - because there is then no honest comparison to make.
+    is not a JSON object - because there is then no honest comparison to make.
     """
     old_blob = _git_output(project_dir, "show", f"{previous_tag}:.claude-plugin/plugin.json")
     if old_blob is None:
         return None
     try:
-        was = str(json.loads(old_blob).get("version", ""))
-        now = str(json.loads(plugin_path.read_text(encoding="utf-8")).get("version", ""))
-    except (OSError, json.JSONDecodeError):
+        was = PluginManifest.from_json(old_blob).version
+        now = PluginManifest.from_json(plugin_path.read_text(encoding="utf-8")).version
+    except (OSError, json.JSONDecodeError, PluginManifestError):
         return None
     return was, now
 

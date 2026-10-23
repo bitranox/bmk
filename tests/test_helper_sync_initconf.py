@@ -259,6 +259,20 @@ def test_a_manifest_version_bmk_could_not_previously_read_is_still_raised(tmp_pa
 
 
 @pytest.mark.os_agnostic
+def test_a_manifest_that_is_not_a_json_object_is_warned_about_and_left_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = _write_project(tmp_path, version="3.0.0")
+    manifest = project / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("[1, 2]\n", encoding="utf-8")
+
+    assert sync_plugin_version(project) is False
+    assert manifest.read_text(encoding="utf-8") == "[1, 2]\n"
+    assert "cannot read plugin.json: not a JSON object" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
 def test_the_manifest_keeps_its_other_fields_and_stays_valid_json(tmp_path: Path) -> None:
     project = _write_project(tmp_path, version="3.0.0")
     manifest = project / ".claude-plugin" / "plugin.json"

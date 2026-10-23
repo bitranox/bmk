@@ -24,7 +24,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
@@ -199,18 +199,14 @@ def _exit_code(results: list[CellResult]) -> int:
     return 0 if all(r.status is CellStatus.PASSED for r in results) else 1
 
 
-def _workers_from_pyproject(project_dir: Path) -> object:
-    """Raw ``[tool.scripts.test-all].workers`` value, or ``None`` if unset/unreadable.
+def _workers_from_pyproject(project_dir: Path) -> int | None:
+    """``[tool.scripts.test-all].workers``, or ``None`` if unset, unreadable or not an integer.
 
-    Read straight out of ``PyprojectConfig.raw_data`` (like ``_release.py``'s
-    ``[tool.git].default-remote``) rather than adding a dedicated pydantic field for a
-    single key - the same "one field, no new model" call the note in
-    ``_toml_config.py`` asks for. Never raises: a missing file, malformed TOML, or a
-    wrong-shaped table all degrade to ``None``, same as every other ``[tool.*]`` reader
-    here - a bad pyproject.toml must not abort the build that is trying to read it. The
-    return type is deliberately ``object``: the caller decides what to do with a
-    wrong-shaped value (fall back) versus an explicit ``< 1`` (a real instruction, and an
-    error).
+    Never raises: a missing file, malformed TOML, or a wrong-shaped table or value all
+    degrade to ``None`` (``ScriptsTestAllConfig`` drops a non-integer, a bool included),
+    same as every other ``[tool.*]`` reader here - a bad pyproject.toml must not abort the
+    build that is trying to read it. An integer below 1 IS returned: unlike a wrong-shaped
+    value it is a real instruction, and the caller refuses it.
     """
     manifest = project_dir / "pyproject.toml"
     if not manifest.is_file():
@@ -219,16 +215,7 @@ def _workers_from_pyproject(project_dir: Path) -> object:
         config = load_pyproject_config(manifest)
     except Exception:  # an unreadable manifest degrades, never aborts - see all_python_minors
         return None
-    tool = config.raw_data.get("tool")
-    if not isinstance(tool, dict):
-        return None
-    scripts = cast("dict[str, Any]", tool).get("scripts")
-    if not isinstance(scripts, dict):
-        return None
-    test_all = cast("dict[str, Any]", scripts).get("test-all")
-    if not isinstance(test_all, dict):
-        return None
-    return cast("dict[str, Any]", test_all).get("workers")
+    return config.tool.scripts.test_all.workers
 
 
 def _reject_below_one(value: int, *, source: str) -> None:
@@ -278,11 +265,11 @@ def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, s
         _reject_below_one(configured, source=_WORKERS_ENV)
         return min(configured, len(minors))
 
-    raw_pyproject = _workers_from_pyproject(project_dir)
-    if isinstance(raw_pyproject, bool) or not isinstance(raw_pyproject, int):
+    configured_pyproject = _workers_from_pyproject(project_dir)
+    if configured_pyproject is None:
         return default
-    _reject_below_one(raw_pyproject, source="[tool.scripts.test-all].workers")
-    return min(raw_pyproject, len(minors))
+    _reject_below_one(configured_pyproject, source="[tool.scripts.test-all].workers")
+    return min(configured_pyproject, len(minors))
 
 
 def main(

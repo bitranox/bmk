@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def _make_config(raw_data: dict[str, Any]) -> PyprojectConfig:
-    """Build a PyprojectConfig with the given raw_data dict."""
-    return PyprojectConfig.from_dict(raw_data)
+def _make_config(data: dict[str, Any]) -> PyprojectConfig:
+    """Build a PyprojectConfig from a parsed pyproject document."""
+    return PyprojectConfig.from_dict(data)
 
 
 @pytest.mark.os_agnostic

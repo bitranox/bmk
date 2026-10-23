@@ -34,11 +34,12 @@ import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Annotated
 
 import rtoml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
+from bmk.adapters.stagerunner.helpers._toml_config import coerce_table
 from bmk.domain.enums import ToolOutputFormat
 
 __all__ = [
@@ -104,25 +105,78 @@ class CoverageConfig(BaseModel):
 
         # rtoml (not stdlib tomllib) so parsing works on Python 3.10, where
         # tomllib does not exist; rtoml is a declared dependency and fully typed.
-        data: dict[str, Any] = rtoml.loads(pyproject_path.read_text(encoding="utf-8"))
+        document = _CoveragePyproject.model_validate(rtoml.loads(pyproject_path.read_text(encoding="utf-8")))
+        tool = document.tool
 
-        tool = data.get("tool", {})
-        # The runner settings live under [tool.scripts.test] with hyphenated keys
-        # (the convention the rest of the pipeline uses); read them there.
-        scripts_test = tool.get("scripts", {}).get("test", {})
-        coverage_run = tool.get("coverage", {}).get("run", {})
-        coverage_report = tool.get("coverage", {}).get("report", {})
+        # coverage.py's own keys win over a same-named key in [tool.scripts.test], which
+        # the model also accepts (its alias and field names), so only a key coverage.py
+        # actually sets replaces it.
+        overrides: dict[str, object] = {}
+        if tool.coverage.report.fail_under is not None:
+            overrides["fail_under"] = tool.coverage.report.fail_under
+        if tool.coverage.run.source is not None:
+            overrides["coverage_source"] = tool.coverage.run.source
+        return tool.scripts.test.model_copy(update=overrides)
 
-        # scripts_test keys already match the model's aliases 1:1; merge the two
-        # other sections in under the alias each field declares (fail_under,
-        # source) so a single model_validate resolves every default exactly once.
-        merged: dict[str, Any] = dict(scripts_test)
-        if "fail_under" in coverage_report:
-            merged["fail_under"] = coverage_report["fail_under"]
-        if "source" in coverage_run:
-            merged["source"] = coverage_run["source"]
 
-        return cls.model_validate(merged)
+# ---------------------------------------------------------------------------
+# pyproject.toml boundary models for CoverageConfig
+#
+# Only the keys from_pyproject reads. A misshapen TABLE degrades to its defaults
+# (coerce_table); a misshapen VALUE is refused by validation, so a typo'd fail_under
+# fails the run rather than silently gating at the default.
+# ---------------------------------------------------------------------------
+
+
+class _CoverageRunTable(BaseModel):
+    """[tool.coverage.run] - the measured source paths."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    # None means absent (TOML has no null), so the CoverageConfig value stands.
+    source: list[str] | None = None
+
+
+class _CoverageReportTable(BaseModel):
+    """[tool.coverage.report] - the coverage floor."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    fail_under: int | None = None
+
+
+class _CoverageTable(BaseModel):
+    """[tool.coverage] - the two sub-tables bmk reads."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    run: Annotated[_CoverageRunTable, BeforeValidator(coerce_table)] = Field(default_factory=_CoverageRunTable)
+    report: Annotated[_CoverageReportTable, BeforeValidator(coerce_table)] = Field(default_factory=_CoverageReportTable)
+
+
+class _ScriptsTable(BaseModel):
+    """[tool.scripts] - the runner settings under [tool.scripts.test], hyphenated keys."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    test: Annotated[CoverageConfig, BeforeValidator(coerce_table)] = Field(default_factory=CoverageConfig)
+
+
+class _CoverageToolTable(BaseModel):
+    """[tool] - the two tables CoverageConfig is assembled from."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    scripts: Annotated[_ScriptsTable, BeforeValidator(coerce_table)] = Field(default_factory=_ScriptsTable)
+    coverage: Annotated[_CoverageTable, BeforeValidator(coerce_table)] = Field(default_factory=_CoverageTable)
+
+
+class _CoveragePyproject(BaseModel):
+    """The pyproject.toml document, reduced to what CoverageConfig needs."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    tool: Annotated[_CoverageToolTable, BeforeValidator(coerce_table)] = Field(default_factory=_CoverageToolTable)
 
 
 # ---------------------------------------------------------------------------
