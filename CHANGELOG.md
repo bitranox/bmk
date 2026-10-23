@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.23.1] 2026-10-23 16:42:34
+
+### Changed
+
+- The `devops-bmk` skill covers 3.23.0: the `pyright` stage checks every OS family in
+  `[tool.ci].os` while `test-all` covers only the Python versions; `bmk install` writes
+  `.bmk-cooldown.mk`, which is committed with the Makefile; an exact pin is never moved and never
+  fails the `deps` stage; and how to read which bmk a repo runs. It no longer says bmk is managed
+  per project: its env is shared by every project on the machine.
+
 ## [3.23.0] 2026-10-23 15:48:52
 
 ### Changed
