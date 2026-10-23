@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -223,6 +224,147 @@ def _resolve_test_interpreter(python: str | None) -> tuple[str | None, str]:
     return python, ""
 
 
+@dataclass(frozen=True)
+class _CoverageRun:
+    """Everything the three coverage steps of one run share.
+
+    Bundled so the steps cannot be handed mismatched pieces: the report and the
+    XML step must read the data file the pytest step wrote, which only holds if
+    all three see the same interpreter and the same ``COVERAGE_FILE``.
+
+    Attributes:
+        python: The project's venv interpreter every step runs under.
+        config: Coverage settings read from the project's pyproject.toml.
+        env: Subprocess environment, including ``PYTHONPATH`` and ``COVERAGE_FILE``.
+        project_dir: Working directory for every step.
+        quiet: Suppress the announced command lines and the terminal report.
+    """
+
+    python: str
+    config: CoverageConfig
+    env: dict[str, str]
+    project_dir: Path
+    quiet: bool
+
+
+def _announce(line: str, *, quiet: bool) -> None:
+    """Print a progress line to stdout unless quiet.
+
+    Args:
+        line: The complete line, including its ``[coverage]`` / ``[codecov]`` prefix.
+        quiet: When True, print nothing.
+    """
+    if not quiet:
+        print(line)
+
+
+def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> tuple[list[str], str]:
+    """Build the pytest-under-coverage command and the line that announces it.
+
+    Args:
+        run: The shared settings of this coverage run.
+        include_integration: Include integration tests (no marker filter).
+
+    Returns:
+        The argv to execute and the human-readable line describing it.
+    """
+    config = run.config
+    coverage_source = ",".join(config.coverage_source)
+    # The PROJECT's interpreter, never sys.executable: that is bmk's own tool env,
+    # whose dependency tree is not the one the project declares (bmk's got only
+    # `[dev]`; the project's venv gets every extra), so testing there exercised an
+    # environment nobody ships while pyright/pip-audit inspected the real one.
+    argv = [run.python, "-m", "coverage", "run", f"--source={coverage_source}", "-m", "pytest"]
+
+    marker_filter = ""
+    if not include_integration and config.exclude_markers:
+        marker_filter = f"not {config.exclude_markers}"
+        argv.extend(["-m", marker_filter])
+
+    if run.quiet:
+        argv.extend(["--tb=short", "-q", "--no-header"])
+    else:
+        argv.append(config.pytest_verbosity)
+
+    marker_display = f"-m '{marker_filter}' " if marker_filter else ""
+    display = (
+        f"[coverage] python -m coverage run --source={coverage_source} "
+        f"-m pytest {marker_display}{config.pytest_verbosity}"
+    )
+    return argv, display
+
+
+def _run_pytest_under_coverage(run: _CoverageRun, *, include_integration: bool) -> int:
+    """Announce and run the test suite under coverage.
+
+    Args:
+        run: The shared settings of this coverage run.
+        include_integration: Include integration tests (no marker filter).
+
+    Returns:
+        The pytest exit code.
+    """
+    argv, display = _pytest_argv(run, include_integration=include_integration)
+    _announce(display, quiet=run.quiet)
+    result = subprocess.run(
+        argv,
+        env=run.env,
+        cwd=run.project_dir,
+        check=False,
+    )
+    return result.returncode
+
+
+def _run_coverage_report(run: _CoverageRun) -> int:
+    """Announce and run the terminal coverage report, enforcing ``fail_under``.
+
+    The report is silenced in quiet mode because its summary only adds noise there.
+    It must use the same interpreter as the test run: the data file was written by
+    THAT coverage, and a different coverage version may refuse to read it.
+
+    Args:
+        run: The shared settings of this coverage run.
+
+    Returns:
+        The coverage report exit code (non-zero below ``fail_under``).
+    """
+    fail_under = run.config.fail_under
+    _announce(f"[coverage] python -m coverage report -m --fail-under={fail_under}", quiet=run.quiet)
+    result = subprocess.run(
+        [run.python, "-m", "coverage", "report", "-m", f"--fail-under={fail_under}"],
+        env=run.env,
+        cwd=run.project_dir,
+        check=False,
+        stdout=subprocess.DEVNULL if run.quiet else None,
+        stderr=subprocess.DEVNULL if run.quiet else None,
+    )
+    return result.returncode
+
+
+def _write_coverage_xml(run: _CoverageRun) -> None:
+    """Announce and write the XML report Codecov uploads.
+
+    A failure only warns: the tests and the coverage floor have already passed, and
+    a missing upload artefact says nothing about the code under test.
+
+    Args:
+        run: The shared settings of this coverage run.
+    """
+    report_file = run.config.coverage_report_file
+    _announce(f"[coverage] python -m coverage xml -o {report_file}", quiet=run.quiet)
+    result = subprocess.run(
+        [run.python, "-m", "coverage", "xml", "-o", report_file],
+        env=run.env,
+        cwd=run.project_dir,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(
+            f"[coverage] warning: XML report generation failed (exit {result.returncode})",
+            file=sys.stderr,
+        )
+
+
 def run_coverage_tests(
     *,
     project_dir: Path | None = None,
@@ -256,7 +398,6 @@ def run_coverage_tests(
         return 1
 
     config = CoverageConfig.from_pyproject(project_dir)
-    coverage_source = ",".join(config.coverage_source)
 
     # Clean up before run
     prune_coverage_data_files(project_dir)
@@ -265,103 +406,23 @@ def run_coverage_tests(
     base_env = _build_env(project_dir, config.src_path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        coverage_file = Path(tmpdir) / ".coverage"
-        env = base_env | {"COVERAGE_FILE": str(coverage_file)}
-
-        # Run pytest under coverage, in the PROJECT's interpreter - NOT sys.executable.
-        # sys.executable is bmk's own tool env, whose dependency tree is not the one the
-        # project declares (bmk's got only `[dev]`; the project's venv gets every extra),
-        # so testing there exercised an environment nobody ships while pyright/pip-audit
-        # inspected the real one.
-        coverage_cmd = [
-            test_python,
-            "-m",
-            "coverage",
-            "run",
-            f"--source={coverage_source}",
-            "-m",
-            "pytest",
-        ]
-
-        # Add marker filter unless including integration tests
-        marker_filter = ""
-        if not include_integration and config.exclude_markers:
-            marker_filter = f"not {config.exclude_markers}"
-            coverage_cmd.extend(["-m", marker_filter])
-
-        # In quiet mode: short tracebacks, no per-test lines, no header
-        if quiet:
-            coverage_cmd.extend(["--tb=short", "-q", "--no-header"])
-        else:
-            coverage_cmd.append(config.pytest_verbosity)
-
-        # Build display command
-        marker_display = f"-m '{marker_filter}' " if marker_filter else ""
-        if not quiet:
-            print(
-                f"[coverage] python -m coverage run --source={coverage_source} "
-                f"-m pytest {marker_display}{config.pytest_verbosity}"
-            )
-
-        result = subprocess.run(
-            coverage_cmd,
-            env=env,
-            cwd=project_dir,
-            check=False,
+        run = _CoverageRun(
+            python=test_python,
+            config=config,
+            env=base_env | {"COVERAGE_FILE": str(Path(tmpdir) / ".coverage")},
+            project_dir=project_dir,
+            quiet=quiet,
         )
-        if result.returncode != 0:
-            return result.returncode
+        returncode = _run_pytest_under_coverage(run, include_integration=include_integration)
+        if returncode != 0:
+            return returncode
 
-        # Generate terminal report (skip in quiet mode - summary adds noise).
-        # Same interpreter as the run above, necessarily: the data file was written by
-        # THAT coverage, and a different coverage version may refuse to read it.
-        report_cmd = [
-            test_python,
-            "-m",
-            "coverage",
-            "report",
-            "-m",
-            f"--fail-under={config.fail_under}",
-        ]
-        if not quiet:
-            print(f"[coverage] python -m coverage report -m --fail-under={config.fail_under}")
+        returncode = _run_coverage_report(run)
+        if returncode != 0:
+            return returncode
 
-        report_result = subprocess.run(
-            report_cmd,
-            env=env,
-            cwd=project_dir,
-            check=False,
-            stdout=subprocess.DEVNULL if quiet else None,
-            stderr=subprocess.DEVNULL if quiet else None,
-        )
-        if report_result.returncode != 0:
-            return report_result.returncode
-
-        # Generate XML report for Codecov (same interpreter as the run, see above)
         if generate_xml:
-            xml_cmd = [
-                test_python,
-                "-m",
-                "coverage",
-                "xml",
-                "-o",
-                config.coverage_report_file,
-            ]
-            if not quiet:
-                print(f"[coverage] python -m coverage xml -o {config.coverage_report_file}")
-
-            xml_result = subprocess.run(
-                xml_cmd,
-                env=env,
-                cwd=project_dir,
-                check=False,
-            )
-            if xml_result.returncode != 0:
-                print(
-                    f"[coverage] warning: XML report generation failed (exit {xml_result.returncode})",
-                    file=sys.stderr,
-                )
-                # Don't fail the whole run for XML generation failure
+            _write_coverage_xml(run)
 
     return 0
 
