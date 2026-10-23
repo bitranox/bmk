@@ -15,7 +15,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
-from bmk.domain.enums import ToolOutputFormat
+from bmk.domain.enums import PipelineResult, ToolOutputFormat
 from bmk.domain.stages import (
     PipelineSummary,
     StageResult,
@@ -117,7 +117,7 @@ def run_pipeline(stages: Sequence[Stage], ctx: StageContext, *, out: SupportsWri
                 return failures[0].returncode
 
     report_success_summary(
-        PipelineSummary("pass", len(batches), len(stages)),
+        PipelineSummary(PipelineResult.PASSED, len(batches), len(stages)),
         quiet=quiet,
         out=stream,
     )

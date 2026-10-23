@@ -12,6 +12,10 @@ import re
 import sys
 from typing import TYPE_CHECKING, Protocol
 
+from pydantic import BaseModel, ConfigDict
+
+from bmk.domain.enums import PipelineResult
+
 if TYPE_CHECKING:
     import threading
 
@@ -137,7 +141,54 @@ def report_batch_failures(results: list[StageResult], *, quiet: bool, out: Suppo
     out.write("\n")
 
 
+class _SummaryLine(BaseModel):
+    """Wire shape of the success summary line.
+
+    Consumers grep the emitted text for ``{"result":"pass",...}``, so the BYTES are the
+    contract: field declaration order fixes the key order, ``model_dump_json`` emits compact
+    JSON with no spaces, and an Enum field serializes as its ``value``. The domain
+    :class:`~bmk.domain.stages.PipelineSummary` stays a pure dataclass (the domain layer
+    carries no pydantic); this adapter-side model exists only to serialize it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    result: PipelineResult
+    stages: int
+    scripts: int
+
+
 def report_success_summary(summary: PipelineSummary, *, quiet: bool, out: SupportsWrite) -> None:
-    """Emit a single JSON summary line on success in quiet (JSON) mode."""
-    if quiet:
-        out.write(f'{{"result":"{summary.result}","stages":{summary.stages},"scripts":{summary.scripts}}}\n')
+    """Emit a single JSON summary line on success in quiet (JSON) mode.
+
+    Args:
+        summary: The pipeline's aggregate outcome.
+        quiet: Whether the run is in JSON mode; text mode emits nothing.
+        out: The stream the line is written to.
+
+    Example:
+        >>> import io
+        >>> from bmk.domain.stages import PipelineSummary
+        >>> buffer = io.StringIO()
+        >>> report_success_summary(PipelineSummary(PipelineResult.PASSED, 2, 3), quiet=True, out=buffer)
+        >>> buffer.getvalue()
+        '{"result":"pass","stages":2,"scripts":3}\\n'
+    """
+    if not quiet:
+        return
+    line = _SummaryLine(result=summary.result, stages=summary.stages, scripts=summary.scripts)
+    out.write(line.model_dump_json() + "\n")
+
+
+__all__ = [
+    "EXIT_HINTS",
+    "CapturingSink",
+    "OutputSink",
+    "PassthroughSink",
+    "PrefixedLockedSink",
+    "SupportsWrite",
+    "extract_warnings",
+    "hint_for",
+    "report_batch_failures",
+    "report_success_summary",
+]

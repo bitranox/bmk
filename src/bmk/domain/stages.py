@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, TypeVar
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from bmk.domain.enums import PipelineResult
+
 T = TypeVar("T")
 
 
@@ -56,6 +58,14 @@ class StageResult:
 class PipelineSummary:
     """Aggregate outcome of running a whole pipeline (emitted as the JSON summary)."""
 
-    result: str
+    result: PipelineResult
     stages: int
     scripts: int
+
+
+__all__ = [
+    "PipelineSummary",
+    "StageResult",
+    "group_into_batches",
+    "normalize_returncode",
+]

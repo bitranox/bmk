@@ -12,6 +12,7 @@ from bmk.adapters.stagerunner.output import (
     report_batch_failures,
     report_success_summary,
 )
+from bmk.domain.enums import PipelineResult
 from bmk.domain.stages import PipelineSummary, StageResult
 
 
@@ -57,11 +58,11 @@ def test_report_batch_failures_prints_only_failures() -> None:
 
 def test_report_success_summary_emits_json_line_when_quiet() -> None:
     out = io.StringIO()
-    report_success_summary(PipelineSummary("pass", 2, 3), quiet=True, out=out)
+    report_success_summary(PipelineSummary(PipelineResult.PASSED, 2, 3), quiet=True, out=out)
     assert out.getvalue() == '{"result":"pass","stages":2,"scripts":3}\n'
 
 
 def test_report_success_summary_silent_when_not_quiet() -> None:
     out = io.StringIO()
-    report_success_summary(PipelineSummary("pass", 2, 3), quiet=False, out=out)
+    report_success_summary(PipelineSummary(PipelineResult.PASSED, 2, 3), quiet=False, out=out)
     assert out.getvalue() == ""
