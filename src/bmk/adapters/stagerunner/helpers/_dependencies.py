@@ -12,6 +12,9 @@ Contents
 * ``check_dependencies`` - main entry point that checks all dependencies.
 * ``print_report`` - renders a formatted report of dependency status.
 * ``update_dependencies`` - updates outdated dependencies to latest versions.
+* ``PendingInstall`` / ``sync_installed_packages`` - floors the target environment does not meet yet.
+
+PyPI documents are read through :mod:`._pypi_models`, so nothing here crawls raw JSON.
 
 System Role
 -----------
@@ -34,7 +37,7 @@ from functools import cached_property, lru_cache
 from itertools import product
 from math import prod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import httpx2
 import orjson
@@ -42,8 +45,10 @@ from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
+from bmk.adapters.stagerunner.helpers._pypi_models import PypiDocument, PypiFile, PypiReleases
 from bmk.adapters.stagerunner.helpers._supply_chain import (
     OwnPackageUnreadableError,
     ReleasePolicy,
@@ -71,6 +76,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DependencyInfo",
     "DependencyStatus",
+    "PendingInstall",
     "check_dependencies",
     "compare_versions",
     "fetch_latest_version",
@@ -117,18 +123,53 @@ _RE_PACKAGE_NAME = re.compile(r"^([a-zA-Z0-9_.-]+)")
 
 @dataclass
 class DependencyInfo:
-    """Information about a single dependency."""
+    """Information about a single dependency.
+
+    Attributes:
+        name: The package name as the project writes it.
+        source: The section that declares it (``[project].dependencies``, ...).
+        constraint: The version constraint as written.
+        current_min: The floor the constraint states; empty when it states none.
+        latest_version: The release the report proposes (the one an update writes); None when
+            PyPI did not answer for the package.
+        status: How the floor compares to that release.
+        notes: Why the proposal is what it is, in the order the judgements added them; each is
+            shown in parentheses after the version.
+        original_spec: The requirement string exactly as written.
+        upper_bound: The ``<`` bound, if the constraint has one (``<9`` gives ``9``).
+        blocks_lock: An ERROR that ``uv lock`` fails on too, as opposed to one about reading PyPI:
+            it fails the check.
+    """
 
     name: str
     source: str
     constraint: str
     current_min: str
-    latest: str
+    latest_version: str | None
     status: DependencyStatus
-    original_spec: str = ""  # Original dependency specification string
-    upper_bound: str = ""  # Upper version bound if specified (e.g., "<9" means "9")
-    # An ERROR that `uv lock` fails on too, as opposed to one about reading PyPI: it fails the check.
+    notes: tuple[str, ...] = ()
+    original_spec: str = ""
+    upper_bound: str = ""
     blocks_lock: bool = False
+
+    @property
+    def latest_display(self) -> str:
+        """The report's "latest" column: the proposed release and its notes.
+
+        Example:
+            >>> DependencyInfo("p", "s", ">=1", "1", "1.2", DependencyStatus.OUTDATED, ("max <2",)).latest_display
+            '1.2 (max <2)'
+            >>> DependencyInfo("p", "s", ">=1", "1", None, DependencyStatus.ERROR).latest_display
+            'not found'
+        """
+        if self.latest_version is None:
+            return "not found"
+        return self.latest_version + "".join(f" ({note})" for note in self.notes)
+
+    @property
+    def proposed(self) -> str:
+        """The proposed release; empty when there is none (PyPI did not answer)."""
+        return self.latest_version or ""
 
 
 def _normalize_name(name: str) -> str:
@@ -191,7 +232,7 @@ def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
 # One check reads each package's PyPI document once. The latest lookup, the upper-bound lookup and
 # the Python hold then answer from the same document, so a second request that times out cannot
 # leave a floor raised past the oldest Python the first one showed it must stay installable on.
-_PYPI_DOCUMENTS: ContextVar[dict[str, dict[str, Any] | None] | None] = ContextVar("_PYPI_DOCUMENTS", default=None)
+_PYPI_DOCUMENTS: ContextVar[dict[str, PypiDocument | None] | None] = ContextVar("_PYPI_DOCUMENTS", default=None)
 
 
 @contextmanager
@@ -208,7 +249,7 @@ def _one_fetch_per_package() -> Generator[None]:
         _PYPI_DOCUMENTS.reset(token)
 
 
-def _fetch_pypi_data(package_name: str, version: str | None = None) -> dict[str, Any] | None:
+def _fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocument | None:
     """Fetch package data from PyPI, once per document inside ``_one_fetch_per_package``.
 
     ``version`` selects that release's own document, whose ``info.requires_dist`` is the one
@@ -227,12 +268,13 @@ def _fetch_pypi_data(package_name: str, version: str | None = None) -> dict[str,
     return data
 
 
-def _download_pypi_data(normalized: str) -> dict[str, Any] | None:
-    """Download one package's JSON document from PyPI.
+def _download_pypi_data(normalized: str) -> PypiDocument | None:
+    """Download one package's JSON document from PyPI, validated into a :class:`PypiDocument`.
 
     Streamed with a hard byte cap so a broken or hostile endpoint cannot make bmk buffer an
     unbounded body into memory; a response past the cap is treated as unavailable (``None``).
     The URL is fixed to pypi.org, so this is defence-in-depth, not the primary trust boundary.
+    A body that is not JSON, or JSON that is not a document (not an object), is unavailable too.
     """
     url = f"https://pypi.org/pypi/{normalized}/json"
 
@@ -246,12 +288,12 @@ def _download_pypi_data(normalized: str) -> dict[str, Any] | None:
                 if total > _MAX_PYPI_BYTES:
                     return None
                 chunks.append(chunk)
-        return orjson.loads(b"".join(chunks))  # type: ignore[no-any-return]
+        return PypiDocument.model_validate(orjson.loads(b"".join(chunks)))
     except httpx2.HTTPStatusError as exc:
         if exc.response.status_code == _HTTP_NOT_FOUND:
             return None
         return None
-    except (httpx2.RequestError, orjson.JSONDecodeError):
+    except (httpx2.RequestError, orjson.JSONDecodeError, ValidationError):
         # RequestError, not just ConnectError and timeouts: a connection reset mid-body (ReadError,
         # RemoteProtocolError) or a corrupt compressed body (DecodingError) is the same unavailable
         # index and must not crash the check.
@@ -263,12 +305,7 @@ def fetch_latest_version(package_name: str) -> str | None:
     data = _fetch_pypi_data(package_name)
     if data is None:
         return None
-    info = data.get("info")
-    if isinstance(info, dict):
-        typed_info = cast("dict[str, Any]", info)
-        version = typed_info.get("version", "")
-        return str(version) if version else ""
-    return ""
+    return data.info.version if data.info is not None else ""
 
 
 def _fetch_latest_version_within(package_name: str, ceiling: SpecifierSet) -> str | None:
@@ -299,16 +336,16 @@ def _ceiling_of_spec(spec: str, upper_bound: str) -> SpecifierSet:
 
 def _judge_against_ceiling(
     name: str, *, min_version: str, ceiling: SpecifierSet, latest: str
-) -> tuple[DependencyStatus, str]:
-    """Status and report text for a floor whose newest release ``ceiling`` excludes.
+) -> tuple[DependencyStatus, str, str]:
+    """Status, proposed release and note for a floor whose newest release ``ceiling`` excludes.
 
     Judged on the whole ceiling, so ``<=`` and ``!=`` bound the suggestion as ``<`` does: a floor
     raised past them is a requirement nothing satisfies.
     """
     in_range = _fetch_latest_version_within(name, ceiling)
     if in_range is None or _version_gte(min_version, in_range):
-        return DependencyStatus.PINNED, f"{latest} (pinned {ceiling})"
-    return DependencyStatus.OUTDATED, f"{in_range} (max {ceiling}, absolute: {latest})"
+        return DependencyStatus.PINNED, latest, f"pinned {ceiling}"
+    return DependencyStatus.OUTDATED, in_range, f"max {ceiling}, absolute: {latest}"
 
 
 def _version_or_none(text: str) -> Version | None:
@@ -378,20 +415,20 @@ def _extract_dependencies_from_list(
         # Fetch latest version (respecting upper bound if present)
         latest_absolute = fetch_latest_version(name)
         ceiling = _ceiling_of_spec(original_spec, upper_bound)
+        latest_version: str | None = latest_absolute
+        notes: tuple[str, ...] = ()
         if latest_absolute is None:
             status = DependencyStatus.ERROR
-            latest_str = "not found"
         elif not min_version:
             status = DependencyStatus.UNKNOWN
-            latest_str = latest_absolute
         elif not ceiling.contains(latest_absolute, prereleases=True):
-            status, latest_str = _judge_against_ceiling(
+            status, latest_version, note = _judge_against_ceiling(
                 name, min_version=min_version, ceiling=ceiling, latest=latest_absolute
             )
+            notes = (note,)
         else:
             # No upper bound constraint or latest is within range
             status = compare_versions(min_version, latest_absolute)
-            latest_str = latest_absolute
 
         results.append(
             DependencyInfo(
@@ -399,8 +436,9 @@ def _extract_dependencies_from_list(
                 source=source,
                 constraint=constraint,
                 current_min=min_version,
-                latest=latest_str,
+                latest_version=latest_version,
                 status=status,
+                notes=notes,
                 original_spec=original_spec,
                 upper_bound=upper_bound,
             )
@@ -605,34 +643,30 @@ def _specifier_or_none(text: str) -> SpecifierSet | None:
         return None
 
 
-def _installs_on(files: list[Any], python: str | None, *, yanked_ok: bool = False) -> bool:
+def _installs_on(files: Iterable[PypiFile], python: str | None, *, yanked_ok: bool = False) -> bool:
     """Whether a release has a file whose Requires-Python admits ``python``.
 
     Yanked files count only with ``yanked_ok``. Missing or unparseable Requires-Python metadata
     admits, as pip treats it. ``python`` None (the project names no oldest Python) admits any file.
     """
     for entry in files:
-        if not isinstance(entry, dict):
+        if entry.yanked and not yanked_ok:
             continue
-        file_info = cast("dict[str, Any]", entry)
-        if file_info.get("yanked") and not yanked_ok:
-            continue
-        requires = _specifier_or_none(str(file_info.get("requires_python") or ""))
+        requires = _specifier_or_none(entry.requires_python or "")
         if python is None or requires is None or requires.contains(python):
             return True
     return False
 
 
-def _installs_on_all(files: list[Any], pythons: tuple[str | None, ...], *, yanked_ok: bool = False) -> bool:
+def _installs_on_all(files: tuple[PypiFile, ...], pythons: tuple[str | None, ...], *, yanked_ok: bool = False) -> bool:
     """Whether a release installs on every one of ``pythons`` (see :func:`_installs_on`)."""
     return all(_installs_on(files, python, yanked_ok=yanked_ok) for python in pythons)
 
 
-def _releases_of(package_name: str) -> dict[str, Any] | None:
+def _releases_of(package_name: str) -> PypiReleases | None:
     """The ``releases`` map of a package's PyPI document, or None when PyPI did not provide one."""
     data = _fetch_pypi_data(package_name)
-    releases = data.get("releases") if data else None
-    return cast("dict[str, Any]", releases) if isinstance(releases, dict) else None
+    return data.releases if data is not None else None
 
 
 # The operators that cap a requirement or exclude a release. A floor bmk writes must still satisfy
@@ -659,7 +693,7 @@ def _ceiling_of(specifier: SpecifierSet) -> SpecifierSet:
 
 
 def _admits_installable(
-    releases: dict[str, Any],
+    releases: PypiReleases,
     *,
     python: str | None,
     specifier: SpecifierSet,
@@ -681,9 +715,8 @@ def _admits_installable(
     # Newest first: ``accept`` reads PyPI per release, and the newest admitted one usually settles it.
     ordered = sorted(releases.items(), key=lambda item: _sort_key(item[0]), reverse=True)
     found = any(
-        isinstance(files, list)
-        and specifier.contains(version, prereleases=prereleases)
-        and _installs_on_all(cast("list[Any]", files), (python,), yanked_ok=exact)
+        specifier.contains(version, prereleases=prereleases)
+        and _installs_on_all(files, (python,), yanked_ok=exact)
         and (accept is None or accept(version))
         for version, files in ordered
     )
@@ -698,14 +731,14 @@ def _sort_key(text: str) -> tuple[int, Version]:
         return (0, Version("0"))
 
 
-def _prereleases_allowed(releases: dict[str, Any], *, named: bool) -> bool:
+def _prereleases_allowed(releases: PypiReleases, *, named: bool) -> bool:
     """Whether uv would take a prerelease from ``releases``: when the requirement names one, or
     when the package publishes nothing else (uv's default ``if-necessary-or-explicit``)."""
     return named or not any((v := _version_or_none(text)) is not None and not v.is_prerelease for text in releases)
 
 
 def _newest_installable(
-    releases: dict[str, Any],
+    releases: PypiReleases,
     *,
     python: str | None,
     ceiling: SpecifierSet,
@@ -739,7 +772,7 @@ def _newest_installable(
             continue
         if highest is not None and version > highest:
             continue
-        if isinstance(files, list) and _installs_on_all(cast("list[Any]", files), (python,)):
+        if _installs_on_all(files, (python,)):
             candidates.append((version, text))
     return next((v for _, v in sorted(candidates, reverse=True) if accept is None or accept(v)), None)
 
@@ -1003,12 +1036,9 @@ def _is_version(text: str) -> bool:
 def _requires_of_release(name: str, version: str) -> list[Requirement] | None:
     """One release's parsed requirements from its own PyPI document, or None when unreadable."""
     data = _fetch_pypi_data(name, version)
-    info = data.get("info") if data else None
-    if not isinstance(info, dict):
+    if data is None or data.info is None:
         return None
-    raw: object = cast("dict[str, Any]", info).get("requires_dist")
-    specs: list[object] = cast("list[object]", raw) if isinstance(raw, list) else []
-    parsed = (_requirement_or_none(str(spec)) for spec in specs)
+    parsed = (_requirement_or_none(spec) for spec in data.info.requires_dist)
     return [r for r in parsed if r is not None]
 
 
@@ -1069,30 +1099,35 @@ def _judge_floor(
             # Only the cooldown stands in the way. Lowering would drop the fixes the floor was
             # raised for; `deps --update` pins the release instead (reconcile_floor_pins).
             return _unsatisfiable_floor(dep, why=f"floor {dep.constraint} {why}; not pinned")
-        return replace(dep, status=DependencyStatus.OUTDATED, latest=f"{installable} (floor {dep.constraint} {why})")
+        return replace(
+            dep,
+            status=DependencyStatus.OUTDATED,
+            latest_version=installable,
+            notes=(f"floor {dep.constraint} {why}",),
+        )
     newest = _newest_installable(releases, python=python, ceiling=ceiling, prereleases_named=named, also=also)
     held_back = newest if newest is not None and newest != installable else None
     limit = _LOCK_LIMIT if lockable is not None else f"inside the {_COOLDOWN} cooldown"
-    dropped = _python_dropped(releases, dep.latest.split(" ", 1)[0], python=python, also=also)
+    dropped = _python_dropped(releases, dep.proposed, python=python, also=also)
     return _hold_suggestion(
         dep, installable=installable, python=python, held_back=held_back, limit=limit, dropped=dropped
     )
 
 
-def _python_dropped(releases: dict[str, Any], version: str, *, python: str | None, also: tuple[str, ...]) -> str | None:
+def _python_dropped(releases: PypiReleases, version: str, *, python: str | None, also: tuple[str, ...]) -> str | None:
     """The first of ``also`` that ``version`` does not install on, when it installs on ``python``; else None.
 
     Names which Python held a floor back, so the report blames the later Python rather than the oldest.
     """
-    files = releases.get(version)
-    if not isinstance(files, list) or not _installs_on(cast("list[Any]", files), python):
+    files = releases.get(version, ())
+    if not _installs_on(files, python):
         return None
-    return next((p for p in also if not _installs_on(cast("list[Any]", files), p)), None)
+    return next((p for p in also if not _installs_on(files, p)), None)
 
 
 def _floor_why(
-    admitted: dict[str, Any],
-    releases: dict[str, Any],
+    admitted: PypiReleases,
+    releases: PypiReleases,
     *,
     python: str | None,
     specifier: SpecifierSet,
@@ -1115,7 +1150,7 @@ _LOCK_LIMIT = f"not lockable yet: it needs releases younger than the {_COOLDOWN}
 
 
 def _no_release_why(
-    releases: dict[str, Any],
+    releases: PypiReleases,
     *,
     python: str | None,
     ceiling: SpecifierSet,
@@ -1137,8 +1172,7 @@ def _keep_outdated_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
     """An OUTDATED floor that cannot be judged is kept and reported; any other is left as it is."""
     if dep.status is not DependencyStatus.OUTDATED:
         return dep
-    proposed = dep.latest.split(" ", 1)[0]
-    return replace(dep, status=DependencyStatus.ERROR, latest=f"{proposed} ({why}, floor kept)")
+    return replace(dep, status=DependencyStatus.ERROR, notes=(f"{why}, floor kept",))
 
 
 def _unsatisfiable_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
@@ -1147,8 +1181,7 @@ def _unsatisfiable_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
     ``uv lock`` fails on it, so reporting it ``[ok]`` would leave only uv's own message to explain
     a red gate; the floor is kept, since no release bmk could write would resolve either.
     """
-    proposed = dep.latest.split(" ", 1)[0]
-    return replace(dep, status=DependencyStatus.ERROR, latest=f"{proposed} ({why}, floor kept)", blocks_lock=True)
+    return replace(dep, status=DependencyStatus.ERROR, notes=(f"{why}, floor kept",), blocks_lock=True)
 
 
 def _hold_suggestion(
@@ -1167,22 +1200,23 @@ def _hold_suggestion(
     ``dropped`` is the later supported Python the proposed release does not install on, when that
     is what holds it rather than the oldest one.
     """
-    proposed = dep.latest.split(" ", 1)[0]
+    proposed = dep.proposed
     if dep.status is not DependencyStatus.OUTDATED or installable == proposed:
         return dep
     if _version_gte(dep.current_min, installable):
         if held_back is not None:
-            return replace(dep, status=DependencyStatus.UP_TO_DATE, latest=f"{held_back} ({limit})")
+            return replace(dep, status=DependencyStatus.UP_TO_DATE, latest_version=held_back, notes=(limit,))
         reason = (
             f"does not install on Python {_shown(dropped)}"
             if dropped
             else f"needs a newer Python than {_shown(python or '')}"
         )
-        return replace(dep, status=DependencyStatus.PINNED, latest=f"{proposed} ({reason})")
+        return replace(dep, status=DependencyStatus.PINNED, notes=(reason,))
     if held_back is not None:
-        return replace(dep, latest=f"{installable} (newest admitted; {held_back} is {limit}, absolute: {proposed})")
+        note = f"newest admitted; {held_back} is {limit}, absolute: {proposed}"
+        return replace(dep, latest_version=installable, notes=(note,))
     label = f"newest that keeps Python {_shown(dropped)}" if dropped else f"newest for Python {_shown(python or '')}"
-    return replace(dep, latest=f"{installable} ({label}, absolute: {proposed})")
+    return replace(dep, latest_version=installable, notes=(f"{label}, absolute: {proposed}",))
 
 
 def release_policy(config: PyprojectConfig, *, now: datetime | None = None) -> ReleasePolicy:
@@ -1238,7 +1272,7 @@ def _hold_exact_pin(dep: DependencyInfo) -> DependencyInfo:
     specifier = _specifier_of(dep.original_spec)
     if specifier is None or not _exact_pin(specifier):
         return dep
-    return replace(dep, status=DependencyStatus.PINNED, latest=f"{dep.latest} (exact pin {dep.constraint})")
+    return replace(dep, status=DependencyStatus.PINNED, notes=(*dep.notes, f"exact pin {dep.constraint}"))
 
 
 def _group_by_source(deps: list[DependencyInfo]) -> dict[str, list[DependencyInfo]]:
@@ -1263,7 +1297,7 @@ def _render_source_block(source: str, source_deps: list[DependencyInfo], *, verb
 
     name_width = max(len(d.name) for d in display_deps)
     constraint_width = max(len(d.constraint) for d in display_deps)
-    latest_width = max(len(d.latest) for d in display_deps)
+    latest_width = max(len(d.latest_display) for d in display_deps)
 
     for dep in sorted(display_deps, key=lambda d: d.name.lower()):
         status_icon = _get_status_icon(dep.status)
@@ -1271,7 +1305,7 @@ def _render_source_block(source: str, source_deps: list[DependencyInfo], *, verb
         print(
             f"  {status_icon} {dep.name:<{name_width}}"
             f"  {constraint_display:<{constraint_width}}"
-            f"  -> {dep.latest:<{latest_width}}  [{dep.status}]"
+            f"  -> {dep.latest_display:<{latest_width}}  [{dep.status.value}]"
         )
 
 
@@ -1404,13 +1438,11 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
     Preserves the original format (>=, ==, etc.) and any environment markers.
     """
     original = dep.original_spec
-    latest = dep.latest
+    latest_version = dep.latest_version
 
-    if not original or not latest or latest == "not found":
+    # None: PyPI did not answer, so there is no release to write.
+    if not original or not latest_version:
         return original
-
-    # Strip display annotations like "(max <1.3, ...)": only the version itself is written.
-    latest_version = latest.split(" ", 1)[0]
 
     # The marker is set aside and re-appended verbatim, so the rewrite and the extras lookup
     # see the requirement alone and nothing inside a marker is ever changed.
@@ -1423,6 +1455,22 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
     )
     updated = _complete_requirement(requirement, updated, extras=extras, latest_version=latest_version)
     return f"{updated}{marker}"
+
+
+class _UvPipListEntry(BaseModel):
+    """One package of ``uv pip list --format json``.
+
+    Strict, so only a real string counts: a number where a name belongs is no package.
+
+    Attributes:
+        name: The distribution name as installed.
+        version: The installed version.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore", strict=True)
+
+    name: str
+    version: str
 
 
 def _installed_versions(python: str) -> dict[str, str]:
@@ -1452,14 +1500,13 @@ def _installed_versions(python: str) -> dict[str, str]:
         return {}
 
     versions: dict[str, str] = {}
+    # Entry by entry: one record uv writes in a shape bmk does not know must not hide the others.
     for entry in cast("list[object]", parsed):
-        if not isinstance(entry, dict):
+        try:
+            package = _UvPipListEntry.model_validate(entry)
+        except ValidationError:
             continue
-        fields = cast("dict[str, object]", entry)
-        name = fields.get("name")
-        version = fields.get("version")
-        if isinstance(name, str) and isinstance(version, str):
-            versions[_normalize_name(name)] = version
+        versions[_normalize_name(package.name)] = package.version
     return versions
 
 
@@ -1492,9 +1539,28 @@ def _marker_of(spec: str) -> str:
     return "" if marker_idx == -1 else spec[marker_idx:]
 
 
+class PendingInstall(NamedTuple):
+    """One package the target environment lacks or holds below its floor.
+
+    A NamedTuple, so the install report sorts these exactly as it sorts plain tuples: by spec name,
+    then installed version.
+
+    Attributes:
+        spec_name: The package name with its extras (``pyright[nodejs]``).
+        installed: The installed version; None when it is not installed.
+        required: The floor it must reach.
+        marker: The ``; <environment marker>`` suffix, or an empty string.
+    """
+
+    spec_name: str
+    installed: str | None
+    required: str
+    marker: str
+
+
 def _find_packages_needing_install(
     deps: list[DependencyInfo], installed_versions: dict[str, str]
-) -> list[tuple[str, str | None, str, str]]:
+) -> list[PendingInstall]:
     """Find packages that need installation or update.
 
     Args:
@@ -1502,11 +1568,9 @@ def _find_packages_needing_install(
         installed_versions: Normalized name -> version, from the target env.
 
     Returns:
-        List of (name, installed_version, required_version, marker) tuples.
-        installed_version is None if not installed; marker is "" when the spec
-        carries no environment marker.
+        One entry per package to install or update.
     """
-    needs_install: list[tuple[str, str | None, str, str]] = []
+    needs_install: list[PendingInstall] = []
 
     for dep in deps:
         if not dep.current_min:
@@ -1516,23 +1580,21 @@ def _find_packages_needing_install(
         name_with_extras = f"{dep.name}{_extras_of(dep.original_spec)}"
         marker = _marker_of(dep.original_spec)
 
-        if installed is None:
-            needs_install.append((name_with_extras, None, dep.current_min, marker))
-        elif compare_versions(installed, dep.current_min) == DependencyStatus.OUTDATED:
-            needs_install.append((name_with_extras, installed, dep.current_min, marker))
+        if installed is None or compare_versions(installed, dep.current_min) is DependencyStatus.OUTDATED:
+            needs_install.append(PendingInstall(name_with_extras, installed, dep.current_min, marker))
 
     return needs_install
 
 
-def _print_install_report(needs_install: list[tuple[str, str | None, str, str]], *, dry_run: bool) -> None:
+def _print_install_report(needs_install: list[PendingInstall], *, dry_run: bool) -> None:
     """Print report of packages needing installation."""
     print(f"\n{'[DRY RUN] ' if dry_run else ''}Packages needing installation/update:\n")
 
-    for name, installed, required, marker in sorted(needs_install):
-        status = "NOT INSTALLED" if installed is None else installed
+    for pending in sorted(needs_install):
+        status = "NOT INSTALLED" if pending.installed is None else pending.installed
         # The marker is shown because it explains an entry that will then be skipped:
         # a win32-only package always reads as NOT INSTALLED on Linux.
-        print(f"  {name}: {status} -> >={required}{marker}")
+        print(f"  {pending.spec_name}: {status} -> >={pending.required}{pending.marker}")
 
 
 @dataclass(frozen=True)
@@ -1670,12 +1732,7 @@ def _is_floor_pin(name: str, value: object) -> bool:
     releases = _releases_of(name)
     if releases is None:
         raise _UnjudgeableError(f"release list of {name} unreadable")
-    return any(
-        floor_pin([entry]) == value
-        for files in releases.values()
-        if isinstance(files, list)
-        for entry in cast("list[Any]", files)
-    )
+    return any(floor_pin([entry]) == value for files in releases.values() for entry in files)
 
 
 class _FloorDemand:
@@ -1789,7 +1846,7 @@ def _exact_pin(specifier: SpecifierSet) -> bool:
 class _Need:
     """One requirement on a package: the releases it admits, on the Python it serves."""
 
-    def __init__(self, *, releases: dict[str, Any], python: str | None, exact: bool) -> None:
+    def __init__(self, *, releases: PypiReleases, python: str | None, exact: bool) -> None:
         self.releases = releases
         self.python = python
         self.exact = exact
@@ -1798,11 +1855,7 @@ class _Need:
         """The release uv locks for this requirement at ``moment``: the highest one a file uploaded
         before it makes visible and installable on this Python; None when there is none."""
         visible = admitted_releases(self.releases, moment)
-        takeable = [
-            v
-            for v, files in visible.items()
-            if _installs_on(cast("list[Any]", files), self.python, yanked_ok=self.exact)
-        ]
+        takeable = [v for v, files in visible.items() if _installs_on(files, self.python, yanked_ok=self.exact)]
         return max(takeable, key=Version) if takeable else None
 
     def settles(self, moment: datetime) -> bool:
@@ -1876,17 +1929,19 @@ def _as_moment(pin: str) -> datetime:
     return datetime.fromisoformat(pin.replace("Z", "+00:00"))
 
 
-def _cuts_at(satisfying: dict[str, Any], moment: datetime) -> bool:
+def _cuts_at(satisfying: PypiReleases, moment: datetime) -> bool:
     """Whether some release in ``satisfying`` has timed files both before and after ``moment``."""
     visible = admitted_releases(satisfying, moment)
     for version, files in satisfying.items():
-        timed = sum(1 for entry in cast("list[Any]", files) if floor_pin([entry]) is not None)
+        timed = sum(1 for entry in files if entry.uploaded is not None)
         if len(visible.get(version, [])) not in (0, timed):
             return True
     return False
 
 
-def _satisfying_releases(releases: dict[str, Any], specifier: SpecifierSet, *, python: str | None) -> dict[str, Any]:
+def _satisfying_releases(
+    releases: PypiReleases, specifier: SpecifierSet, *, python: str | None
+) -> dict[str, tuple[PypiFile, ...]]:
     """The releases ``specifier`` admits that uv would take on ``python``: a file installing there,
     and not only yanked ones (a yanked one counts under an exact pin)."""
     exact = _exact_pin(specifier)
@@ -1894,9 +1949,8 @@ def _satisfying_releases(releases: dict[str, Any], specifier: SpecifierSet, *, p
         version: files
         for version, files in releases.items()
         if _is_version(version)
-        and isinstance(files, list)
         and specifier.contains(version, prereleases=bool(specifier.prereleases))
-        and _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
+        and _installs_on(files, python, yanked_ok=exact)
     }
 
 
@@ -1946,16 +2000,12 @@ def _say(line: str, out: SupportsWrite | None) -> None:
 def _requires_of_newest(package_name: str) -> list[str] | None:
     """The requirement strings of a package's newest release on PyPI; None when PyPI did not answer."""
     data = _fetch_pypi_data(package_name)
-    info = data.get("info") if data else None
-    if not isinstance(info, dict):
+    if data is None or data.info is None:
         return None
-    requires = cast("dict[str, Any]", info).get("requires_dist")
-    return [str(r) for r in cast("list[Any]", requires)] if isinstance(requires, list) else []
+    return list(data.info.requires_dist)
 
 
-def _run_pip_install(
-    needs_install: list[tuple[str, str | None, str, str]], python: str, *, project_dir: Path | None = None
-) -> int:
+def _run_pip_install(needs_install: list[PendingInstall], python: str, *, project_dir: Path | None = None) -> int:
     """Install packages into ``python``'s environment.
 
     Installs into the *explicitly passed* interpreter (the project's venv), never
@@ -1978,7 +2028,7 @@ def _run_pip_install(
     argv = ["uv", "pip", "install", "--python", python, "--upgrade"]
     # The marker must follow the version, not the name: "pkg>=1; sys_platform == 'win32'"
     # is a valid PEP 508 requirement, "pkg; sys_platform == 'win32'>=1" is not.
-    argv.extend(f"{name}>={required}{marker}" for name, _, required, marker in needs_install)
+    argv.extend(f"{p.spec_name}>={p.required}{p.marker}" for p in needs_install)
 
     try:
         return subprocess.run(argv, check=False, cwd=project_dir).returncode
