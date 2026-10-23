@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.23.0] 2026-10-23 15:48:52
+
 ### Changed
 
 - **bmk's own tool env resolves under bmk's supply-chain cooldown.** `make` upgraded bmk's shared
