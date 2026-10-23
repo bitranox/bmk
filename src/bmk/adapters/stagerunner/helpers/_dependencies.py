@@ -672,19 +672,22 @@ def _admits_installable(
     explicitly because packaging 26's default admits any prerelease the bounds cover. A
     yanked release counts only when the specifier pins it exactly: PEP 592 lets an installer take a yanked release
     for ``==`` / ``===``, and uv (which provisions bmk's venvs) takes it in no other case. ``also``
-    names further Pythons the release must install on.
+    names further Pythons that must each find SOME release the specifier admits - not the same one:
+    an installer resolves per interpreter, so `pythonnet>=3.1.0` serves 3.10 with 3.1.0 and 3.15 with
+    3.2.1 although no release covers both (OPEN-WORK [3]).
     """
     exact = any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
     prereleases = _prereleases_allowed(releases, named=bool(specifier.prereleases))
     # Newest first: ``accept`` reads PyPI per release, and the newest admitted one usually settles it.
     ordered = sorted(releases.items(), key=lambda item: _sort_key(item[0]), reverse=True)
-    return any(
+    found = any(
         isinstance(files, list)
         and specifier.contains(version, prereleases=prereleases)
-        and _installs_on_all(cast("list[Any]", files), (python, *also), yanked_ok=exact)
+        and _installs_on_all(cast("list[Any]", files), (python,), yanked_ok=exact)
         and (accept is None or accept(version))
         for version, files in ordered
     )
+    return found and all(_admits_installable(releases, python=p, specifier=specifier) for p in also)
 
 
 def _sort_key(text: str) -> tuple[int, Version]:
@@ -715,9 +718,18 @@ def _newest_installable(
     A prerelease is a candidate only where uv would take one (:func:`_prereleases_allowed`), so
     ``prereleases_named`` says whether the whole requirement names one - its ceiling alone cannot.
     ``accept`` is asked last and newest first, so a costly judgement runs on as few releases as it can.
-    ``also`` names further Pythons the release must install on.
+    ``also`` names further Pythons that must each still find a release at or above the one chosen,
+    so a floor there never strands them; they need not share that release (see
+    :func:`_admits_installable`). A Python with no release under ``ceiling`` sets no limit.
     """
     prereleases = _prereleases_allowed(releases, named=prereleases_named)
+    limits = [
+        Version(newest)
+        for p in also
+        if (newest := _newest_installable(releases, python=p, ceiling=ceiling, prereleases_named=prereleases_named))
+        is not None
+    ]
+    highest = min(limits, default=None)
     candidates: list[tuple[Version, str]] = []
     for text, files in releases.items():
         version = _version_or_none(text)
@@ -725,7 +737,9 @@ def _newest_installable(
             continue
         if not ceiling.contains(version, prereleases=prereleases):
             continue
-        if isinstance(files, list) and _installs_on_all(cast("list[Any]", files), (python, *also)):
+        if highest is not None and version > highest:
+            continue
+        if isinstance(files, list) and _installs_on_all(cast("list[Any]", files), (python,)):
             candidates.append((version, text))
     return next((v for _, v in sorted(candidates, reverse=True) if accept is None or accept(v)), None)
 

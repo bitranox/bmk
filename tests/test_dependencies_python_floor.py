@@ -778,3 +778,60 @@ def test_a_marker_that_excludes_the_later_python_lets_the_floor_follow_the_cap(
     update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
 
     assert Requirement(_written_dev(pyproject)).specifier == SpecifierSet(">=2.0")
+
+
+# pythonnet as published (PyPI JSON, read 2026-10-23): no 3.x release installs on both 3.10 and
+# 3.15, while 2.5.2 declares no Requires-Python. bmk 3.22.6 lowered pwshpy's `pythonnet>=3.1.0` to
+# `>=2.5.2` (OPEN-WORK [3]), because it looked for ONE release covering every supported Python.
+_PYTHONNET: dict[str, Any] = {
+    "info": {"version": "3.2.1"},
+    "releases": {
+        "2.5.2": _release(None),
+        "3.0.5": _release("<3.14,>=3.7"),
+        "3.1.0": _release("<3.15,>=3.10"),
+        "3.2.0": _release("<3.16,>=3.11"),
+        "3.2.1": _release("<3.16,>=3.11"),
+    },
+}
+
+
+def _write_pyproject_310_315(tmp_path: Path, *, dev: str) -> Path:
+    pyproject = tmp_path / "pyproject.toml"
+    classifiers = "".join(f'  "Programming Language :: Python :: 3.{m}",\n' for m in range(10, 16))
+    pyproject.write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\nrequires-python = ">=3.10"\n'
+        f"classifiers = [\n{classifiers}]\n"
+        "dependencies = []\n\n[project.optional-dependencies]\n"
+        f"dev = [\n  {dev},\n]\n",
+        encoding="utf-8",
+    )
+    return pyproject
+
+
+@pytest.mark.os_agnostic
+def test_a_floor_no_single_release_covers_every_python_for_is_never_lowered(tmp_path: Path, pypi: _FakeIndex) -> None:
+    """3.1.0 installs on 3.10, and 3.15 still finds 3.2.x above it: each Python keeps a release."""
+    pypi.serve("pythonnet", _PYTHONNET)
+    pyproject = _write_pyproject_310_315(tmp_path, dev='"pythonnet>=3.1.0"')
+
+    deps = check_dependencies(pyproject)
+    updated = update_dependencies(deps, pyproject, quiet=True)
+
+    assert updated == 0
+    assert '"pythonnet>=3.1.0"' in pyproject.read_text(encoding="utf-8")
+    [dep] = deps
+    assert dep.status is not DependencyStatus.OUTDATED, dep
+
+
+@pytest.mark.os_agnostic
+def test_a_raise_stops_where_some_supported_python_would_find_no_release_above_it(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    """From 3.0.5: 3.10's newest is 3.1.0 and 3.15's is 3.2.1, so the floor rises to 3.1.0, not past it."""
+    pypi.serve("pythonnet", _PYTHONNET)
+    pyproject = _write_pyproject_310_315(tmp_path, dev='"pythonnet>=3.0.5"')
+
+    deps = check_dependencies(pyproject)
+    update_dependencies(deps, pyproject, quiet=True)
+
+    assert '"pythonnet>=3.1.0"' in pyproject.read_text(encoding="utf-8")

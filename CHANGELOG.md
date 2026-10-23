@@ -8,6 +8,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Fixed
 
+- **A dependency floor is no longer lowered when no single release installs on every supported
+  Python** (a regression in 3.22.6). In a project classified 3.10-3.15, `pythonnet>=3.1.0` was
+  rewritten to `pythonnet>=2.5.2`: 3.1.0 caps Python below 3.15 and 3.2.x needs 3.11, so no
+  release covers both ends, and bmk looked for ONE release installing on every supported Python.
+  Each Python is now judged on its own, as an installer resolves: the floor stands while every
+  supported Python still finds some release at or above it, and a raise stops where one of them
+  would find none.
 - `deps --update` pins a young floor whose release has files on both sides of the cooldown cutoff,
   so uv locks the whole release, not only its older files. pydantic-core 2.50.1 uploaded 137 files
   over four minutes and straddled a 1-day cutoff: no pin was demanded, and an existing one was kept
