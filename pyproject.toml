@@ -186,6 +186,7 @@ select = [
   "B",           # bugbear
   "A",           # builtins shadowing
   "C4",          # comprehension simplification
+  "C90",         # mccabe: cyclomatic complexity <= 10 (ruff's default max)
   "SIM",         # simplification
   "TCH",         # type-checking imports
   "RUF",         # ruff-specific
@@ -216,7 +217,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 #       failing `!cmd`, so without them a broken command leaves the run green.
 "notebooks/*.ipynb" = ["F401", "F821", "S101"]
 # Stage helpers: CLI-style utilities with subprocess calls, print output, and magic values
-"src/bmk/adapters/stagerunner/helpers/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0912", "PLR0913", "PLR2004"]
+"src/bmk/adapters/stagerunner/helpers/*.py" = ["T20", "S101", "S603", "S607", "E501", "PLR0913", "PLR2004"]
 # Tests: assert is standard, test fixtures have passwords, magic values are clearer inline, temp paths are fine
 # PLR0917: unittest.mock.patch stacks inject mocks POSITIONALLY in decorator (bottom-up) order,
 # so the flagged test functions cannot be made keyword-only without breaking the injection.

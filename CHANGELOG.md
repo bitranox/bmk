@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- bmk's own lint enforces cyclomatic complexity at most 10 (ruff `C90`, the CLI template's rule).
+  Six stage helpers were split to meet it (`clean`, `run_coverage_tests`, the coverage `main`,
+  `_build_updated_spec`, `update_dependencies`, `reconcile_floor_pins`), each pinned first by tests
+  of its exact output; behaviour is unchanged.
+
 ### Fixed
 
 - **A `[tool.uv] exclude-newer` that uv refuses no longer makes `deps --update` delete your
