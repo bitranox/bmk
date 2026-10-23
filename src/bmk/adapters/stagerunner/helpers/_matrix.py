@@ -24,7 +24,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
@@ -68,6 +68,21 @@ class CellResult:
     version: str  # the patch actually run ("3.14.5"), or "?" when it could not be determined
     status: CellStatus
     detail: str = ""
+
+
+class _GateOutcome(NamedTuple):
+    """What the gates said for one venv, before it is labelled with a version.
+
+    Kept apart from :class:`CellResult` because the gate runner does not know the cell's
+    label: the default cell and the per-minor cells name their result differently.
+
+    Attributes:
+        status: PASSED, or FAIL for the first gate that failed.
+        detail: That gate's explaining output, empty on success.
+    """
+
+    status: CellStatus
+    detail: str
 
 
 _VERDICT_PREFIXES = ("FAILED", "ERROR", "error:")
@@ -121,7 +136,7 @@ def pytest_marker_args(project_dir: Path) -> list[str]:
     return ["-m", f"not {exclude}"] if exclude else []
 
 
-def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[CellStatus, str]:
+def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> _GateOutcome:
     """Run pytest then pyright in ``venv``; the first failure wins.
 
     pytest runs from the venv's own interpreter (the project is installed there), with the
@@ -134,7 +149,7 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[Ce
     pytest_cmd = [str(python), "-m", "pytest", *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
     result = subprocess.run(pytest_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
-        return CellStatus.FAIL, _tail(result.stdout + result.stderr)
+        return _GateOutcome(CellStatus.FAIL, _tail(result.stdout + result.stderr))
 
     # The same runs as make test's pyright stage (pyright_runs): pyright checks one platform per
     # run, so a cell typed for the host alone passes a Windows-only error that only the older Python
@@ -146,8 +161,8 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[Ce
         checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
         if checked.returncode != 0:
             header = f"pyright {' '.join(extra)}:\n" if extra else ""
-            return CellStatus.FAIL, header + _tail(checked.stdout + checked.stderr)
-    return CellStatus.PASSED, ""
+            return _GateOutcome(CellStatus.FAIL, header + _tail(checked.stdout + checked.stderr))
+    return _GateOutcome(CellStatus.PASSED, "")
 
 
 def _run_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResult:
@@ -159,8 +174,8 @@ def _run_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResult:
     if venv is None:
         return CellResult(minor, "?", CellStatus.ERROR, "could not provision a venv for this Python")
     version = venv_version(venv) or "?"
-    status, detail = _run_gate_in_venv(venv, project_dir, quiet=quiet)
-    return CellResult(minor, version, status, detail)
+    outcome = _run_gate_in_venv(venv, project_dir, quiet=quiet)
+    return CellResult(minor, version, outcome.status, outcome.detail)
 
 
 def _run_default_cell(project_dir: Path, *, quiet: bool) -> int:
@@ -179,9 +194,9 @@ def _run_default_cell(project_dir: Path, *, quiet: bool) -> int:
     )
     if venv is None:
         return 1
-    status, detail = _run_gate_in_venv(venv, project_dir, quiet=quiet)
-    _print_report([CellResult("default", version or "?", status, detail)])
-    return 0 if status is CellStatus.PASSED else 1
+    outcome = _run_gate_in_venv(venv, project_dir, quiet=quiet)
+    _print_report([CellResult("default", version or "?", outcome.status, outcome.detail)])
+    return 0 if outcome.status is CellStatus.PASSED else 1
 
 
 def _print_report(results: list[CellResult]) -> None:

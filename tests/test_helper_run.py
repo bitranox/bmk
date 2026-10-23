@@ -171,8 +171,8 @@ def test_find_local_dependencies_finds_underscore_sibling(tmp_path: Path) -> Non
     result = _find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
-    assert result[0][0] == "rich-click"
-    assert result[0][1] == str(sibling)
+    assert result[0].package_name == "rich-click"
+    assert result[0].path == str(sibling)
 
 
 @pytest.mark.os_agnostic
@@ -188,8 +188,8 @@ def test_find_local_dependencies_finds_hyphen_sibling(tmp_path: Path) -> None:
     result = _find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
-    assert result[0][0] == "lib-log-rich"
-    assert result[0][1] == str(sibling)
+    assert result[0].package_name == "lib-log-rich"
+    assert result[0].path == str(sibling)
 
 
 @pytest.mark.os_agnostic
@@ -208,8 +208,8 @@ def test_find_local_dependencies_prefers_underscore_over_hyphen(tmp_path: Path) 
     result = _find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
-    assert result[0][0] == "my-lib"
-    assert result[0][1] == str(underscore_sibling)
+    assert result[0].package_name == "my-lib"
+    assert result[0].path == str(underscore_sibling)
 
 
 @pytest.mark.os_agnostic
@@ -225,7 +225,7 @@ def test_find_local_dependencies_returns_hyphen_package_name(tmp_path: Path) -> 
     result = _find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
-    assert result[0][0] == "lib-layered-config"
+    assert result[0].package_name == "lib-layered-config"
 
 
 @pytest.mark.os_agnostic
@@ -246,7 +246,7 @@ def test_find_local_dependencies_discovers_multiple_siblings(tmp_path: Path) -> 
 
     result = _find_local_dependencies(project_dir, config)
 
-    found_names = [name for name, _path in result]
+    found_names = [dependency.package_name for dependency in result]
     assert "lib-alpha" in found_names
     assert "lib-beta" in found_names
     assert len(result) == 2
