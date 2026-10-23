@@ -24,7 +24,7 @@ dependencies = [
     "pydantic>=2.14.1",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.14.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
-    "tomlkit>=0.15.1",             # TOML round-trip EDIT: preserves comments when bmk writes back
+    "tomlkit>=0.15.2",             # TOML round-trip EDIT: preserves comments when bmk writes back
     "httpx2>=2.13.1",               # PyPI version lookups
     "python-dotenv>=1.2.4",        # reads CODECOV_TOKEN from .env, and the LOG_* lines of a .env
                                    # in adapters/logging/setup.py
