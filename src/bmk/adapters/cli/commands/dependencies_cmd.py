@@ -27,11 +27,11 @@ from ._shared import run_command
 logger = logging.getLogger(__name__)
 
 
-def _run_dependencies(action: str) -> None:
+def _run_dependencies(*, update: bool) -> None:
     """Execute dependency check/update via the stage runner.
 
     Args:
-        action: Empty string for check, "update" for update.
+        update: True runs the ``deps_update`` pipeline, False the ``deps`` check.
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
@@ -40,7 +40,7 @@ def _run_dependencies(action: str) -> None:
 
     cwd = Path.cwd()
 
-    command_prefix = f"deps_{action}" if action else "deps"
+    command_prefix = "deps_update" if update else "deps"
     exit_code = run_command(cwd, (), command_prefix=command_prefix)
 
     if exit_code != 0:
@@ -69,10 +69,10 @@ def cli_dependencies(ctx: click.Context, update: bool) -> None:
         with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update" if update else "check"}):
             if update:
                 logger.info("Updating dependencies")
-                _run_dependencies("update")
+                _run_dependencies(update=True)
             else:
                 logger.info("Checking dependencies")
-                _run_dependencies("")
+                _run_dependencies(update=False)
 
 
 @cli_dependencies.command("update")
@@ -91,7 +91,7 @@ def dependencies_cmd_update() -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update"}):
         logger.info("Updating dependencies")
-        _run_dependencies("update")
+        _run_dependencies(update=True)
 
 
 @cli_dependencies.command("u")
@@ -109,7 +109,7 @@ def dependencies_cmd_u() -> None:
     """
     with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update"}):
         logger.info("Updating dependencies (via alias 'u')")
-        _run_dependencies("update")
+        _run_dependencies(update=True)
 
 
 # =============================================================================
@@ -129,10 +129,10 @@ def cli_deps(ctx: click.Context, update: bool) -> None:
         with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update" if update else "check"}):
             if update:
                 logger.info("Updating dependencies (via 'deps')")
-                _run_dependencies("update")
+                _run_dependencies(update=True)
             else:
                 logger.info("Checking dependencies (via 'deps')")
-                _run_dependencies("")
+                _run_dependencies(update=False)
 
 
 @cli_deps.command("update")
@@ -140,7 +140,7 @@ def deps_cmd_update() -> None:
     """Update outdated dependencies to latest versions."""
     with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update"}):
         logger.info("Updating dependencies (via 'deps')")
-        _run_dependencies("update")
+        _run_dependencies(update=True)
 
 
 @cli_deps.command("u")
@@ -148,7 +148,7 @@ def deps_cmd_u() -> None:
     """Update outdated dependencies (alias)."""
     with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update"}):
         logger.info("Updating dependencies (via 'deps u')")
-        _run_dependencies("update")
+        _run_dependencies(update=True)
 
 
 # =============================================================================
@@ -168,10 +168,10 @@ def cli_d(ctx: click.Context, update: bool) -> None:
         with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update" if update else "check"}):
             if update:
                 logger.info("Updating dependencies (via 'd')")
-                _run_dependencies("update")
+                _run_dependencies(update=True)
             else:
                 logger.info("Checking dependencies (via 'd')")
-                _run_dependencies("")
+                _run_dependencies(update=False)
 
 
 @cli_d.command("update")
@@ -179,7 +179,7 @@ def d_cmd_update() -> None:
     """Update outdated dependencies to latest versions."""
     with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update"}):
         logger.info("Updating dependencies (via 'd')")
-        _run_dependencies("update")
+        _run_dependencies(update=True)
 
 
 @cli_d.command("u")
@@ -187,7 +187,7 @@ def d_cmd_u() -> None:
     """Update outdated dependencies (alias)."""
     with lib_log_rich.runtime.bind(job_id="cli-dependencies", extra={"action": "update"}):
         logger.info("Updating dependencies (via 'd u')")
-        _run_dependencies("update")
+        _run_dependencies(update=True)
 
 
 __all__ = ["cli_d", "cli_dependencies", "cli_deps"]

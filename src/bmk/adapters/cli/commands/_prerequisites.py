@@ -40,9 +40,15 @@ class ToolName(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ToolCheck:
-    """Result of checking whether a single external tool is available."""
+    """Result of checking whether a single external tool is available.
 
-    name: str
+    Attributes:
+        name: The tool probed; its ``.value`` is the PATH lookup and the report label.
+        found: Whether the tool is available.
+        install_hint: How to install it when it is missing.
+    """
+
+    name: ToolName
     found: bool
     install_hint: str
 
@@ -55,8 +61,8 @@ def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
-def _check_tool_on_path(name: str) -> bool:
-    return shutil.which(name) is not None
+def _check_tool_on_path(name: ToolName) -> bool:
+    return shutil.which(name.value) is not None
 
 
 def _check_psscriptanalyzer(pwsh_path: str) -> bool:
@@ -79,7 +85,7 @@ def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
 
     Only probes the module when pwsh is already found in *results*.
     """
-    pwsh_result = next(r for r in results if r.name == ToolName.PWSH)
+    pwsh_result = next(r for r in results if r.name is ToolName.PWSH)
     if pwsh_result.found:
         pwsh_path = shutil.which(ToolName.PWSH.value) or ToolName.PWSH.value
         found = _check_psscriptanalyzer(pwsh_path)
@@ -87,7 +93,7 @@ def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
         found = False
     results.append(
         ToolCheck(
-            name=ToolName.PSSCRIPTANALYZER.value,
+            name=ToolName.PSSCRIPTANALYZER,
             found=found,
             install_hint="Install-Module PSScriptAnalyzer -Force -Scope CurrentUser (requires pwsh)",
         )
@@ -96,17 +102,17 @@ def _append_psscriptanalyzer_check(results: list[ToolCheck]) -> None:
 
 def _posix_tools() -> list[ToolCheck]:
     macos = is_macos()
-    tools: list[tuple[str, str]] = [
-        (ToolName.GIT.value, "brew install git" if macos else "sudo apt install git"),
+    tools: list[tuple[ToolName, str]] = [
+        (ToolName.GIT, "brew install git" if macos else "sudo apt install git"),
         (
-            ToolName.PWSH.value,
+            ToolName.PWSH,
             "brew install powershell/tap/powershell"
             if macos
             else "https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-linux",
         ),
-        (ToolName.SHELLCHECK.value, "brew install shellcheck" if macos else "sudo apt install shellcheck"),
-        (ToolName.SHFMT.value, "brew install shfmt" if macos else "sudo apt install shfmt"),
-        (ToolName.BASHATE.value, "pip install bashate"),
+        (ToolName.SHELLCHECK, "brew install shellcheck" if macos else "sudo apt install shellcheck"),
+        (ToolName.SHFMT, "brew install shfmt" if macos else "sudo apt install shfmt"),
+        (ToolName.BASHATE, "pip install bashate"),
     ]
     results: list[ToolCheck] = []
     for name, hint in tools:
@@ -118,20 +124,20 @@ def _posix_tools() -> list[ToolCheck]:
 def _windows_tools() -> list[ToolCheck]:
     results: list[ToolCheck] = [
         ToolCheck(
-            name=ToolName.WINGET.value,
-            found=_check_tool_on_path(ToolName.WINGET.value),
+            name=ToolName.WINGET,
+            found=_check_tool_on_path(ToolName.WINGET),
             install_hint=(
                 'Pre-installed on Windows 11. For Windows 10: install "App Installer" from the Microsoft Store'
             ),
         ),
         ToolCheck(
-            name=ToolName.GIT.value,
-            found=_check_tool_on_path(ToolName.GIT.value),
+            name=ToolName.GIT,
+            found=_check_tool_on_path(ToolName.GIT),
             install_hint="winget install Git.Git",
         ),
         ToolCheck(
-            name=ToolName.PWSH.value,
-            found=_check_tool_on_path(ToolName.PWSH.value),
+            name=ToolName.PWSH,
+            found=_check_tool_on_path(ToolName.PWSH),
             install_hint="winget install Microsoft.PowerShell",
         ),
     ]
@@ -148,12 +154,14 @@ def check_prerequisites() -> list[ToolCheck]:
 
 def format_prerequisites_report(results: list[ToolCheck]) -> str:
     """Format check results as a human-readable summary."""
+    # .value, never the bare member: an f-string renders a str-mixin Enum as its
+    # value on 3.10 but as ToolName.X on 3.11+, so the report would differ by Python.
     lines = ["Prerequisites:"]
     for tool in results:
         if tool.found:
-            lines.append(f"  \u2713 {tool.name}")
+            lines.append(f"  \u2713 {tool.name.value}")
         else:
-            lines.append(f"  \u2717 {tool.name} - not found")
+            lines.append(f"  \u2717 {tool.name.value} - not found")
             lines.append(f"      Install: {tool.install_hint}")
     return "\n".join(lines)
 

@@ -67,19 +67,25 @@ class _InstallAction:
 
 @dataclass(frozen=True, slots=True)
 class EnsureResult:
-    """Outcome of ensuring a single tool, with a human-readable detail."""
+    """Outcome of ensuring a single tool, with a human-readable detail.
 
-    name: str
+    Attributes:
+        name: The tool this outcome is for.
+        outcome: What the ensure pass did with it.
+        detail: The command run, or why it was skipped or failed.
+    """
+
+    name: ToolName
     outcome: InstallOutcome
     detail: str = ""
 
 
 # --- platform / environment probes -----------------------------------------
 
-_PIP_PACKAGES: dict[str, str] = {
-    ToolName.SHELLCHECK.value: "shellcheck-py",
-    ToolName.SHFMT.value: "shfmt-py",
-    ToolName.BASHATE.value: "bashate",
+_PIP_PACKAGES: dict[ToolName, str] = {
+    ToolName.SHELLCHECK: "shellcheck-py",
+    ToolName.SHFMT: "shfmt-py",
+    ToolName.BASHATE: "bashate",
 }
 
 # Ordered by preference; the first whose executable is on PATH wins.
@@ -166,16 +172,16 @@ def _action_for(check: ToolCheck) -> _InstallAction:
     name = check.name
     if name in _PIP_PACKAGES:
         return _InstallAction(_InstallKind.ARGV, _pip_install_argv(_PIP_PACKAGES[name]))
-    if name == ToolName.PSSCRIPTANALYZER:
+    if name is ToolName.PSSCRIPTANALYZER:
         return _InstallAction(_InstallKind.MODULE)
-    if name == ToolName.GIT:
+    if name is ToolName.GIT:
         return _system_action(
             linux_pkg="git",
             mac_argv=("brew", "install", "git"),
             win_argv=("winget", "install", "--id", "Git.Git", "-e", "--source", "winget"),
             skip_reason=check.install_hint,
         )
-    if name == ToolName.PWSH:
+    if name is ToolName.PWSH:
         return _system_action(
             linux_pkg=None,  # not in default Linux repos; MS-repo setup is out of scope
             mac_argv=("brew", "install", "--cask", "powershell"),
@@ -245,10 +251,12 @@ _DETAILED_OUTCOMES: frozenset[InstallOutcome] = frozenset(
 
 def format_ensure_report(results: list[EnsureResult]) -> str:
     """Format ensure results as a human-readable summary."""
+    # .value, never the bare member: f"{member}" renders a str-mixin Enum differently
+    # on 3.10 and 3.11+, and this text must not depend on the interpreter.
     lines = ["Ensure external tools:"]
     for result in results:
         glyph = _OUTCOME_GLYPH[result.outcome]
-        lines.append(f"  {glyph} {result.name}: {result.outcome.value}")
+        lines.append(f"  {glyph} {result.name.value}: {result.outcome.value}")
         if result.detail and result.outcome in _DETAILED_OUTCOMES:
             lines.append(f"      {result.detail}")
     return "\n".join(lines)

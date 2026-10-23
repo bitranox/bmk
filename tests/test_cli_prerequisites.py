@@ -11,6 +11,7 @@ import pytest
 
 from bmk.adapters.cli.commands._prerequisites import (
     ToolCheck,
+    ToolName,
     check_prerequisites,
     format_prerequisites_report,
 )
@@ -62,7 +63,14 @@ def test_check_prerequisites_posix_all_found() -> None:
         results = check_prerequisites()
 
     names = {r.name for r in results}
-    assert {"git", "pwsh", "shellcheck", "shfmt", "bashate", "PSScriptAnalyzer"} == names
+    assert {
+        ToolName.GIT,
+        ToolName.PWSH,
+        ToolName.SHELLCHECK,
+        ToolName.SHFMT,
+        ToolName.BASHATE,
+        ToolName.PSSCRIPTANALYZER,
+    } == names
     assert all(r.found for r in results)
 
 
@@ -82,12 +90,12 @@ def test_check_prerequisites_posix_some_missing() -> None:
         results = check_prerequisites()
 
     by_name = {r.name: r for r in results}
-    assert by_name["git"].found is True
-    assert by_name["pwsh"].found is True
-    assert by_name["shellcheck"].found is False
-    assert by_name["shfmt"].found is False
-    assert by_name["bashate"].found is False
-    assert by_name["PSScriptAnalyzer"].found is True
+    assert by_name[ToolName.GIT].found is True
+    assert by_name[ToolName.PWSH].found is True
+    assert by_name[ToolName.SHELLCHECK].found is False
+    assert by_name[ToolName.SHFMT].found is False
+    assert by_name[ToolName.BASHATE].found is False
+    assert by_name[ToolName.PSSCRIPTANALYZER].found is True
 
 
 @pytest.mark.os_agnostic
@@ -106,7 +114,7 @@ def test_check_prerequisites_windows_all_found() -> None:
         results = check_prerequisites()
 
     names = {r.name for r in results}
-    assert {"winget", "git", "pwsh", "PSScriptAnalyzer"} == names
+    assert {ToolName.WINGET, ToolName.GIT, ToolName.PWSH, ToolName.PSSCRIPTANALYZER} == names
     assert all(r.found for r in results)
 
 
@@ -131,8 +139,8 @@ def test_check_prerequisites_windows_pwsh_missing_skips_psscriptanalyzer() -> No
         results = check_prerequisites()
 
     by_name = {r.name: r for r in results}
-    assert by_name["pwsh"].found is False
-    assert by_name["PSScriptAnalyzer"].found is False
+    assert by_name[ToolName.PWSH].found is False
+    assert by_name[ToolName.PSSCRIPTANALYZER].found is False
     # subprocess.run should not be called when pwsh is missing
     mock_subprocess.run.assert_not_called()
 
@@ -159,19 +167,19 @@ def test_check_prerequisites_linux_vs_macos_hints() -> None:
     linux_by_name = {r.name: r for r in linux_results}
     macos_by_name = {r.name: r for r in macos_results}
 
-    assert "apt" in linux_by_name["shellcheck"].install_hint
-    assert "brew" in macos_by_name["shellcheck"].install_hint
-    assert "apt" in linux_by_name["git"].install_hint
-    assert "brew" in macos_by_name["git"].install_hint
+    assert "apt" in linux_by_name[ToolName.SHELLCHECK].install_hint
+    assert "brew" in macos_by_name[ToolName.SHELLCHECK].install_hint
+    assert "apt" in linux_by_name[ToolName.GIT].install_hint
+    assert "brew" in macos_by_name[ToolName.GIT].install_hint
 
 
 @pytest.mark.os_agnostic
 def test_format_report_shows_checkmarks_and_hints() -> None:
     """Report uses checkmark for found, cross + hint for missing."""
     results = [
-        ToolCheck(name="git", found=True, install_hint="sudo apt install git"),
-        ToolCheck(name="shellcheck", found=False, install_hint="sudo apt install shellcheck"),
-        ToolCheck(name="pwsh", found=True, install_hint="brew install powershell"),
+        ToolCheck(name=ToolName.GIT, found=True, install_hint="sudo apt install git"),
+        ToolCheck(name=ToolName.SHELLCHECK, found=False, install_hint="sudo apt install shellcheck"),
+        ToolCheck(name=ToolName.PWSH, found=True, install_hint="brew install powershell"),
     ]
 
     report = format_prerequisites_report(results)
@@ -183,6 +191,28 @@ def test_format_report_shows_checkmarks_and_hints() -> None:
     assert "Install: sudo apt install shellcheck" in report
     assert "\u2717 git" not in report
     assert "\u2717 pwsh" not in report
+
+
+@pytest.mark.os_agnostic
+def test_format_report_renders_the_tool_name_value_byte_for_byte() -> None:
+    """The whole report is pinned, not probed with ``in``.
+
+    ToolCheck.name is a str-mixin Enum: f"{member}" renders its value on 3.10 but
+    ``ToolName.X`` on 3.11+, so a substring check could pass on one interpreter while
+    the report changed on another. Comparing the full text catches either drift.
+    """
+    check, cross = chr(0x2713), chr(0x2717)
+    results = [
+        ToolCheck(name=ToolName.GIT, found=True, install_hint="sudo apt install git"),
+        ToolCheck(name=ToolName.PSSCRIPTANALYZER, found=False, install_hint="Install-Module PSScriptAnalyzer"),
+    ]
+
+    report = format_prerequisites_report(results)
+
+    assert report == (
+        f"Prerequisites:\n  {check} git\n  {cross} PSScriptAnalyzer - not found\n"
+        "      Install: Install-Module PSScriptAnalyzer"
+    )
 
 
 @pytest.mark.os_agnostic
