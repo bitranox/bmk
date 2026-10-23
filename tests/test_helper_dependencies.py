@@ -1693,3 +1693,157 @@ def test_update_dependencies_skips_when_spec_unchanged(tmp_path: Path, capsys: p
     count = update_dependencies(deps, pyproject)
 
     assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# _build_updated_spec and update_dependencies - exact output, every branch
+# ---------------------------------------------------------------------------
+# These pin whole strings rather than substrings: the two functions are split into helpers,
+# and a substring check would let a reordered extras/marker splice or a changed message pass.
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("original_spec", "latest", "expected"),
+    [
+        ("pkg>=1.0", "2.0", "pkg>=2.0"),
+        ("pkg[x]>=1.0", "2.0", "pkg[x]>=2.0"),
+        ("pkg[x,y]>=1.0,<3; python_version<'3.11'", "2.0", "pkg[x,y]>=2.0,<3; python_version<'3.11'"),
+        ("pkg>1.0", "2.0", "pkg>=2.0"),
+        ("pkg==8.0.*", "8.1.post1", "pkg==8.1.*"),
+        ("pkg!=1.5,>=1.0", "2.0 (max <3, absolute: 3.1)", "pkg!=1.5,>=2.0"),
+        ("pkg; sys_platform == 'win32'", "2.0", "pkg>=2.0; sys_platform == 'win32'"),
+        ("pkg[x]; sys_platform == 'win32'", "2.0", "pkg[x]>=2.0; sys_platform == 'win32'"),
+        ("pkg==*", "2.0", "pkg==*"),
+        ("", "2.0", ""),
+        # An unclosed bracket carries no extras, so the bare-name branch drops it.
+        ("pkg[x", "2.0", "pkg>=2.0"),
+        ("pkg[x>=1.0", "2.0", "pkg[x>=2.0"),
+        # No package name at the start: the floor is appended to the spec as written.
+        ("*weird", "2.0", "*weird>=2.0"),
+        ("[x]", "2.0", "[x]>=2.0"),
+        # A constraint INSIDE the brackets is rewritten by the substitution, which is the only
+        # way the extras re-add branch runs; the result is garbage that update_dependencies
+        # refuses to write, but the exact text is what its stderr line shows.
+        ("pkg[a>=1]>=0.5", "2.0", "pkg[a>=1][a>=2.0]>=2.0"),
+        ("pkg[a>=1]", "2.0", "pkg[a>=1][a>=2.0]"),
+        ("[a>=1]>=0.5", "2.0", "[a>=2.0]>=2.0"),
+    ],
+)
+def test_build_updated_spec_exact_output(original_spec: str, latest: str, expected: str) -> None:
+    """Every branch of the rewrite produces exactly the spec it produced before the split."""
+    dep = _make_dep(original_spec=original_spec, latest=latest)
+
+    assert _build_updated_spec(dep) == expected
+
+
+_MIXED_PYPROJECT = '[project]\ndependencies = [\n    "alpha>=1.0",  # keep\n    "pkg[a>=1]>=0.5",\n]\n'
+_REFUSED_LINE = "  pkg: pkg[a>=1]>=0.5 -> pkg[a>=1][a>=2.0]>=2.0 is not a valid requirement, not written\n"
+
+
+def _mixed_deps() -> list[DependencyInfo]:
+    """One dependency per outcome: written, not located, refused, empty, unchanged, current."""
+    return [
+        _make_dep(name="alpha", original_spec="alpha>=1.0", latest="2.0"),
+        _make_dep(name="ghost", original_spec="ghost>=1.0", latest="2.0"),
+        _make_dep(name="pkg", original_spec="pkg[a>=1]>=0.5", latest="2.0"),
+        _make_dep(name="empty", original_spec="", latest="2.0"),
+        _make_dep(name="same", original_spec="same>=1.0", latest="not found"),
+        _make_dep(name="fresh", original_spec="fresh>=1.0", latest="1.0", status=DependencyStatus.UP_TO_DATE),
+    ]
+
+
+@pytest.mark.os_agnostic
+def test_update_dependencies_mixed_run_exact_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A real update prints each outcome on its stream and writes only the valid spec."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_MIXED_PYPROJECT, encoding="utf-8")
+
+    count = update_dependencies(_mixed_deps(), pyproject)
+
+    captured = capsys.readouterr()
+    assert count == 1
+    assert captured.out == (
+        "\nUpdating 5 dependencies:\n\n"
+        "  alpha: alpha>=1.0 -> alpha>=2.0\n"
+        "  ghost: Could not locate in file (manual update needed)\n"
+        f"\nUpdated 1 dependencies in {pyproject}\n"
+    )
+    assert captured.err == _REFUSED_LINE
+    assert pyproject.read_text(encoding="utf-8") == _MIXED_PYPROJECT.replace("alpha>=1.0", "alpha>=2.0")
+
+
+@pytest.mark.os_agnostic
+def test_update_dependencies_mixed_dry_run_exact_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A dry run prints the same outcomes under a DRY RUN banner and leaves the file alone."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_MIXED_PYPROJECT, encoding="utf-8")
+
+    count = update_dependencies(_mixed_deps(), pyproject, dry_run=True)
+
+    captured = capsys.readouterr()
+    assert count == 1
+    assert captured.out == (
+        "\n[DRY RUN] Updating 5 dependencies:\n\n"
+        "  alpha: alpha>=1.0 -> alpha>=2.0\n"
+        "  ghost: Could not locate in file (manual update needed)\n"
+        "\n[DRY RUN] Would update 1 dependencies\n"
+    )
+    assert captured.err == _REFUSED_LINE
+    assert pyproject.read_text(encoding="utf-8") == _MIXED_PYPROJECT
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_update_dependencies_quiet_prints_only_the_refusal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], *, dry_run: bool
+) -> None:
+    """Quiet silences stdout in both modes; the refused spec still reaches stderr."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_MIXED_PYPROJECT, encoding="utf-8")
+
+    count = update_dependencies(_mixed_deps(), pyproject, dry_run=dry_run, quiet=True)
+
+    captured = capsys.readouterr()
+    assert count == 1
+    assert captured.out == ""
+    assert captured.err == _REFUSED_LINE
+    expected = _MIXED_PYPROJECT if dry_run else _MIXED_PYPROJECT.replace("alpha>=1.0", "alpha>=2.0")
+    assert pyproject.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.os_agnostic
+def test_update_dependencies_dry_run_quiet_without_refusals_is_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A quiet dry run with a writable update prints nothing and changes nothing."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\ndependencies = ["alpha>=1.0"]\n', encoding="utf-8")
+
+    count = update_dependencies(
+        [_make_dep(name="alpha", original_spec="alpha>=1.0", latest="2.0")], pyproject, dry_run=True, quiet=True
+    )
+
+    captured = capsys.readouterr()
+    assert count == 1
+    assert (captured.out, captured.err) == ("", "")
+    assert pyproject.read_text(encoding="utf-8") == '[project]\ndependencies = ["alpha>=1.0"]\n'
+
+
+@pytest.mark.os_agnostic
+def test_update_dependencies_nothing_written_exact_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """When no outdated spec could be written the run says so and leaves the file alone."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_MIXED_PYPROJECT, encoding="utf-8")
+
+    count = update_dependencies([_make_dep(name="ghost", original_spec="ghost>=1.0", latest="2.0")], pyproject)
+
+    captured = capsys.readouterr()
+    assert count == 0
+    assert captured.out == (
+        "\nUpdating 1 dependencies:\n\n"
+        "  ghost: Could not locate in file (manual update needed)\n"
+        "\nNo dependencies were updated\n"
+    )
+    assert captured.err == ""
+    assert pyproject.read_text(encoding="utf-8") == _MIXED_PYPROJECT
