@@ -1337,6 +1337,65 @@ def _release_segment(version: str) -> str:
         return version
 
 
+def _replace_lower_bound(match: re.Match[str], *, latest_version: str) -> str:
+    """One ``_RE_VERSION_CONSTRAINT`` match rewritten to admit ``latest_version``.
+
+    Args:
+        match: An operator plus version, as ``_RE_VERSION_CONSTRAINT`` found it.
+        latest_version: The release the floor moves to, without display annotations.
+
+    Returns:
+        The rewritten constraint, or the match unchanged for an upper bound or exclusion.
+
+    Examples:
+        >>> _RE_VERSION_CONSTRAINT.sub(lambda m: _replace_lower_bound(m, latest_version="2.0"), "pkg>1.0,<3")
+        'pkg>=2.0,<3'
+    """
+    operator = match.group(1)
+    # An upper bound or exclusion is the author's ceiling, never a floor to raise.
+    if operator in ("<", "<=", "!="):
+        return match.group(0)
+    # ">X" moved to a release must still admit it, so a strict floor is written inclusive.
+    operator = ">=" if operator == ">" else operator
+    if match.string.startswith(".*", match.end()):
+        # A wildcard may only follow a release segment: "==8.0.post1.*" is not PEP 440.
+        return f"{operator}{_release_segment(latest_version)}"
+    return f"{operator}{latest_version}"
+
+
+def _complete_requirement(requirement: str, updated: str, *, extras: str, latest_version: str) -> str:
+    """``updated`` with a floor added when ``requirement`` had none, and its extras kept.
+
+    Args:
+        requirement: The spec before the rewrite, its environment marker removed.
+        updated: ``requirement`` after ``_replace_lower_bound`` ran over it.
+        extras: The ``[extra,...]`` suffix of ``requirement``, or an empty string.
+        latest_version: The release the floor moves to.
+
+    Returns:
+        The requirement to write, still without its environment marker.
+
+    Examples:
+        >>> _complete_requirement("pyright[nodejs]", "pyright[nodejs]", extras="[nodejs]", latest_version="1.5")
+        'pyright[nodejs]>=1.5'
+    """
+    if updated == requirement and not _RE_HAS_CONSTRAINT.search(requirement):
+        # A bare name has nothing to rewrite, so the floor is added rather than raised.
+        name_match = _RE_PACKAGE_NAME.match(requirement)
+        if name_match:
+            return f"{name_match.group(1)}{extras}>={latest_version}"
+        return f"{requirement}>={latest_version}"
+    if extras and extras not in updated:
+        # A constraint written INSIDE the brackets ("pkg[a>=1]") is rewritten with the rest, so
+        # the original extras are spliced back in front; the result is not valid PEP 508, and
+        # update_dependencies refuses it while naming this text.
+        name_match = _RE_PACKAGE_NAME.match(updated)
+        if name_match:
+            pkg_name = name_match.group(1)
+            return f"{pkg_name}{extras}{updated[len(pkg_name) :]}"
+    return updated
+
+
 def _build_updated_spec(dep: DependencyInfo) -> str:
     """Build an updated dependency specification with the latest version.
 
@@ -1348,62 +1407,20 @@ def _build_updated_spec(dep: DependencyInfo) -> str:
     if not original or not latest or latest == "not found":
         return original
 
-    # Extract just the version number (strip display annotations like "(max <1.3, ...)")
-    latest_version = latest.split(" ", 1)[0] if " " in latest else latest
+    # Strip display annotations like "(max <1.3, ...)": only the version itself is written.
+    latest_version = latest.split(" ", 1)[0]
 
-    # Check for environment markers
-    marker = ""
-    marker_idx = original.find(";")
-    if marker_idx != -1:
-        marker = original[marker_idx:]
-        original = original[:marker_idx].strip()
+    # The marker is set aside and re-appended verbatim, so the rewrite and the extras lookup
+    # see the requirement alone and nothing inside a marker is ever changed.
+    marker = _marker_of(original)
+    requirement = original[: original.find(";")].strip() if marker else original
+    extras = _extras_of(requirement)
 
-    # Check for extras
-    extras = ""
-    bracket_idx = original.find("[")
-    if bracket_idx != -1:
-        close_bracket = original.find("]", bracket_idx)
-        if close_bracket != -1:
-            extras = original[bracket_idx : close_bracket + 1]
-
-    # Replace only lower-bound version constraints, preserve upper bounds
-    def replace_version(match: re.Match[str]) -> str:
-        operator = match.group(1)
-        # Preserve upper-bound and exclusion constraints as-is
-        if operator in ("<", "<=", "!="):
-            return match.group(0)
-        # ">X" moved to a release must still admit it, so a strict floor is written inclusive.
-        operator = ">=" if operator == ">" else operator
-        if match.string.startswith(".*", match.end()):
-            # A wildcard may only follow a release segment: "==8.0.post1.*" is not PEP 440.
-            return f"{operator}{_release_segment(latest_version)}"
-        return f"{operator}{latest_version}"
-
-    # Replace all version constraints with latest
-    updated = _RE_VERSION_CONSTRAINT.sub(replace_version, original)
-
-    # If no version constraint was found, add >=latest_version
-    if updated == original and not _RE_HAS_CONSTRAINT.search(original):
-        # Extract just the package name
-        name_match = _RE_PACKAGE_NAME.match(original)
-        if name_match:
-            pkg_name = name_match.group(1)
-            updated = f"{pkg_name}{extras}>={latest_version}"
-        else:
-            updated = f"{original}>={latest_version}"
-    elif extras and extras not in updated:
-        # Re-add extras if they were stripped
-        name_match = _RE_PACKAGE_NAME.match(updated)
-        if name_match:
-            pkg_name = name_match.group(1)
-            rest = updated[len(pkg_name) :]
-            updated = f"{pkg_name}{extras}{rest}"
-
-    # Re-add environment marker
-    if marker:
-        updated = f"{updated}{marker}"
-
-    return updated
+    updated = _RE_VERSION_CONSTRAINT.sub(
+        lambda match: _replace_lower_bound(match, latest_version=latest_version), requirement
+    )
+    updated = _complete_requirement(requirement, updated, extras=extras, latest_version=latest_version)
+    return f"{updated}{marker}"
 
 
 def _installed_versions(python: str) -> dict[str, str]:
