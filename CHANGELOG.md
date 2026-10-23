@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A dependency floor is no longer raised to a release that drops a Python the project declares.**
+  The floor check judged only the OLDEST supported Python, so in a project classified 3.10-3.14,
+  `pkg>=1.0` was raised to `pkg>=2.0` although `2.0` declares `Requires-Python <3.13`. uv ignores
+  that upper bound and installs it on 3.14 anyway (measured, uv 0.13.0), so no bmk gate or uv-based
+  CI shows the break; pip on 3.14 refuses it ("requires a different Python"). A raise must now keep
+  every later classifier Python the requirement as written already installs on, and the report
+  names it (`does not install on Python 3.14`, `newest that keeps Python 3.14`). A Python no
+  release of the requirement installed on before is not checked.
+
 ## [3.22.5] 2026-10-22 22:01:10
 
 ### Fixed

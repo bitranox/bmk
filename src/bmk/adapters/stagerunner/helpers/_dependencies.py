@@ -623,6 +623,11 @@ def _installs_on(files: list[Any], python: str | None, *, yanked_ok: bool = Fals
     return False
 
 
+def _installs_on_all(files: list[Any], pythons: tuple[str | None, ...], *, yanked_ok: bool = False) -> bool:
+    """Whether a release installs on every one of ``pythons`` (see :func:`_installs_on`)."""
+    return all(_installs_on(files, python, yanked_ok=yanked_ok) for python in pythons)
+
+
 def _releases_of(package_name: str) -> dict[str, Any] | None:
     """The ``releases`` map of a package's PyPI document, or None when PyPI did not provide one."""
     data = _fetch_pypi_data(package_name)
@@ -659,13 +664,15 @@ def _admits_installable(
     python: str | None,
     specifier: SpecifierSet,
     accept: Callable[[str], bool] | None = None,
+    also: tuple[str, ...] = (),
 ) -> bool:
     """Whether anything ``specifier`` admits installs on ``python``, judged as uv would choose.
 
     A prerelease counts as uv resolves it (:func:`_prereleases_allowed`); ``prereleases`` is passed
     explicitly because packaging 26's default admits any prerelease the bounds cover. A
     yanked release counts only when the specifier pins it exactly: PEP 592 lets an installer take a yanked release
-    for ``==`` / ``===``, and uv (which provisions bmk's venvs) takes it in no other case.
+    for ``==`` / ``===``, and uv (which provisions bmk's venvs) takes it in no other case. ``also``
+    names further Pythons the release must install on.
     """
     exact = any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
     prereleases = _prereleases_allowed(releases, named=bool(specifier.prereleases))
@@ -674,7 +681,7 @@ def _admits_installable(
     return any(
         isinstance(files, list)
         and specifier.contains(version, prereleases=prereleases)
-        and _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
+        and _installs_on_all(cast("list[Any]", files), (python, *also), yanked_ok=exact)
         and (accept is None or accept(version))
         for version, files in ordered
     )
@@ -701,12 +708,14 @@ def _newest_installable(
     ceiling: SpecifierSet,
     prereleases_named: bool = False,
     accept: Callable[[str], bool] | None = None,
+    also: tuple[str, ...] = (),
 ) -> str | None:
     """The newest release in ``releases``, in PEP 440 order, that installs on ``python`` and ``ceiling`` admits.
 
     A prerelease is a candidate only where uv would take one (:func:`_prereleases_allowed`), so
     ``prereleases_named`` says whether the whole requirement names one - its ceiling alone cannot.
     ``accept`` is asked last and newest first, so a costly judgement runs on as few releases as it can.
+    ``also`` names further Pythons the release must install on.
     """
     prereleases = _prereleases_allowed(releases, named=prereleases_named)
     candidates: list[tuple[Version, str]] = []
@@ -716,7 +725,7 @@ def _newest_installable(
             continue
         if not ceiling.contains(version, prereleases=prereleases):
             continue
-        if isinstance(files, list) and _installs_on(cast("list[Any]", files), python):
+        if isinstance(files, list) and _installs_on_all(cast("list[Any]", files), (python, *also)):
             candidates.append((version, text))
     return next((v for _, v in sorted(candidates, reverse=True) if accept is None or accept(v)), None)
 
@@ -732,7 +741,8 @@ def _hold_to_supported_python(
 
     Two limits apply, both judged against the newest release that is still admitted:
 
-    * the oldest Python the project supports must be able to install it, and
+    * the oldest Python the project supports must be able to install it - and so must each later
+      supported Python the requirement as written already installs on (:meth:`PythonSupport.later_for`), and
     * under ``[tool.uv] exclude-newer`` it must have been uploaded before the cutoff, since uv
       will not resolve anything newer (``policy``).
 
@@ -764,8 +774,9 @@ def _hold_to_supported_python(
         if policy is not None and exempt
         else None
     )
+    later = support.later_for(dep.original_spec) if support is not None else ()
     try:
-        return _judge_floor(dep, python=python, cutoff=cutoff, lockable=lockable)
+        return _judge_floor(dep, python=python, later=later, cutoff=cutoff, lockable=lockable)
     except _UnjudgeableError as exc:
         return _keep_outdated_floor(dep, why=str(exc))
 
@@ -1000,9 +1011,14 @@ def _requirement_or_none(spec: str) -> Requirement | None:
 
 
 def _judge_floor(
-    dep: DependencyInfo, *, python: str | None, cutoff: datetime | None, lockable: Callable[[str], bool] | None = None
+    dep: DependencyInfo,
+    *,
+    python: str | None,
+    cutoff: datetime | None,
+    lockable: Callable[[str], bool] | None = None,
+    later: tuple[str, ...] = (),
 ) -> DependencyInfo:
-    """Lower, hold or keep ``dep``'s floor against ``python``, the cooldown ``cutoff`` and ``lockable``.
+    """Lower, hold or keep ``dep``'s floor against ``python``, ``later``, the cooldown ``cutoff`` and ``lockable``.
 
     Raises:
         _UnjudgeableError: When ``lockable`` cannot read the metadata it judges from.
@@ -1016,32 +1032,60 @@ def _judge_floor(
     admitted = admitted_releases(releases, cutoff)
     ceiling = _ceiling_of(specifier)
     named = bool(specifier.prereleases)
+    # Never lose a Python (user decision 2026-10-23): a later supported Python holds the floor only
+    # where the requirement as written already installs; one no admitted release ever installed on
+    # is not the update's to fix. uv ignores a Requires-Python upper bound, so only pip shows it.
+    also = tuple(p for p in later if _admits_installable(releases, python=p, specifier=specifier))
     installable = _newest_installable(
-        admitted, python=python, ceiling=ceiling, prereleases_named=named, accept=lockable
+        admitted, python=python, ceiling=ceiling, prereleases_named=named, accept=lockable, also=also
     )
     if installable is None:
-        why = _no_release_why(releases, python=python, ceiling=ceiling, prereleases_named=named, lockable=lockable)
+        why = _no_release_why(
+            releases, python=python, ceiling=ceiling, prereleases_named=named, lockable=lockable, also=also
+        )
         return _unsatisfiable_floor(dep, why=why)
     # Judged on the whole specifier, so ">", "==" and "~=" floors count exactly as written.
-    if not _admits_installable(admitted, python=python, specifier=specifier, accept=lockable):
-        why = _floor_why(admitted, releases, python=python, specifier=specifier, lockable=lockable is not None)
-        if _admits_installable(releases, python=python, specifier=specifier):
+    if not _admits_installable(admitted, python=python, specifier=specifier, accept=lockable, also=also):
+        why = _floor_why(
+            admitted, releases, python=python, specifier=specifier, lockable=lockable is not None, also=also
+        )
+        if _admits_installable(releases, python=python, specifier=specifier, also=also):
             # Only the cooldown stands in the way. Lowering would drop the fixes the floor was
             # raised for; `deps --update` pins the release instead (reconcile_floor_pins).
             return _unsatisfiable_floor(dep, why=f"floor {dep.constraint} {why}; not pinned")
         return replace(dep, status=DependencyStatus.OUTDATED, latest=f"{installable} (floor {dep.constraint} {why})")
-    newest = _newest_installable(releases, python=python, ceiling=ceiling, prereleases_named=named)
+    newest = _newest_installable(releases, python=python, ceiling=ceiling, prereleases_named=named, also=also)
     held_back = newest if newest is not None and newest != installable else None
     limit = _LOCK_LIMIT if lockable is not None else f"inside the {_COOLDOWN} cooldown"
-    return _hold_suggestion(dep, installable=installable, python=python, held_back=held_back, limit=limit)
+    dropped = _python_dropped(releases, dep.latest.split(" ", 1)[0], python=python, also=also)
+    return _hold_suggestion(
+        dep, installable=installable, python=python, held_back=held_back, limit=limit, dropped=dropped
+    )
+
+
+def _python_dropped(releases: dict[str, Any], version: str, *, python: str | None, also: tuple[str, ...]) -> str | None:
+    """The first of ``also`` that ``version`` does not install on, when it installs on ``python``; else None.
+
+    Names which Python held a floor back, so the report blames the later Python rather than the oldest.
+    """
+    files = releases.get(version)
+    if not isinstance(files, list) or not _installs_on(cast("list[Any]", files), python):
+        return None
+    return next((p for p in also if not _installs_on(cast("list[Any]", files), p)), None)
 
 
 def _floor_why(
-    admitted: dict[str, Any], releases: dict[str, Any], *, python: str | None, specifier: SpecifierSet, lockable: bool
+    admitted: dict[str, Any],
+    releases: dict[str, Any],
+    *,
+    python: str | None,
+    specifier: SpecifierSet,
+    lockable: bool,
+    also: tuple[str, ...] = (),
 ) -> str:
-    if lockable and _admits_installable(admitted, python=python, specifier=specifier):
+    if lockable and _admits_installable(admitted, python=python, specifier=specifier, also=also):
         return f"needs a release younger than the {_COOLDOWN} cooldown, so uv cannot lock it"
-    if _admits_installable(releases, python=python, specifier=specifier):
+    if _admits_installable(releases, python=python, specifier=specifier, also=also):
         return f"is younger than the {_COOLDOWN} cooldown"
     return f"does not install on Python {_shown(python or '')}"
 
@@ -1061,8 +1105,11 @@ def _no_release_why(
     ceiling: SpecifierSet,
     prereleases_named: bool,
     lockable: Callable[[str], bool] | None,
+    also: tuple[str, ...] = (),
 ) -> str:
-    newest = _newest_installable(releases, python=python, ceiling=ceiling, prereleases_named=prereleases_named)
+    newest = _newest_installable(
+        releases, python=python, ceiling=ceiling, prereleases_named=prereleases_named, also=also
+    )
     if python is not None and newest is None:
         return f"no release installs on Python {_shown(python)}"
     if lockable is not None:
@@ -1089,12 +1136,20 @@ def _unsatisfiable_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
 
 
 def _hold_suggestion(
-    dep: DependencyInfo, *, installable: str, python: str | None, held_back: str | None, limit: str
+    dep: DependencyInfo,
+    *,
+    installable: str,
+    python: str | None,
+    held_back: str | None,
+    limit: str,
+    dropped: str | None = None,
 ) -> DependencyInfo:
     """Hold an OUTDATED suggestion to ``installable``, the newest release still admitted.
 
     ``held_back`` is the newest release the Python alone would allow, when ``limit`` (the cooldown,
     or what uv can lock under it) is what keeps it out; None when only the Python holds.
+    ``dropped`` is the later supported Python the proposed release does not install on, when that
+    is what holds it rather than the oldest one.
     """
     proposed = dep.latest.split(" ", 1)[0]
     if dep.status is not DependencyStatus.OUTDATED or installable == proposed:
@@ -1102,12 +1157,16 @@ def _hold_suggestion(
     if _version_gte(dep.current_min, installable):
         if held_back is not None:
             return replace(dep, status=DependencyStatus.UP_TO_DATE, latest=f"{held_back} ({limit})")
-        return replace(
-            dep, status=DependencyStatus.PINNED, latest=f"{proposed} (needs a newer Python than {_shown(python or '')})"
+        reason = (
+            f"does not install on Python {_shown(dropped)}"
+            if dropped
+            else f"needs a newer Python than {_shown(python or '')}"
         )
+        return replace(dep, status=DependencyStatus.PINNED, latest=f"{proposed} ({reason})")
     if held_back is not None:
         return replace(dep, latest=f"{installable} (newest admitted; {held_back} is {limit}, absolute: {proposed})")
-    return replace(dep, latest=f"{installable} (newest for Python {_shown(python or '')}, absolute: {proposed})")
+    label = f"newest that keeps Python {_shown(dropped)}" if dropped else f"newest for Python {_shown(python or '')}"
+    return replace(dep, latest=f"{installable} ({label}, absolute: {proposed})")
 
 
 def release_policy(config: PyprojectConfig, *, now: datetime | None = None) -> ReleasePolicy:

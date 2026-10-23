@@ -16,6 +16,7 @@ import orjson
 import pytest
 import rtoml
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 
 from bmk.adapters.stagerunner.helpers import _dependencies
 from bmk.adapters.stagerunner.helpers._dependencies import (
@@ -715,3 +716,65 @@ def test_python_support_carries_the_later_classifier_minors(tmp_path: Path) -> N
 
     assert support is not None
     assert (support.lowest_minor, support.later_minors) == (10, (14,))
+
+
+# A raised floor must keep every later supported Python the requirement already installs on
+# (user decision 2026-10-23: never lose a Python). _write_pyproject declares 3.10 and 3.14. uv
+# installs a capped release anyway, so only pip on 3.14 would show the break (measured, uv 0.13.0).
+_CAPPED = {"1.0": _release(">=3.8"), "2.0": _release(">=3.8,<3.13")}
+
+
+@pytest.mark.os_agnostic
+def test_a_floor_is_not_raised_to_a_release_that_drops_a_later_supported_python(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    _serve_pkg(pypi, "2.0", _CAPPED)
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=1.0"')
+    before = pyproject.read_text(encoding="utf-8")
+
+    (dep,) = check_dependencies(pyproject)
+    update_dependencies([dep], pyproject, quiet=True)
+
+    assert pyproject.read_text(encoding="utf-8") == before
+    assert dep.status is DependencyStatus.PINNED
+    assert "does not install on Python 3.14" in dep.latest
+
+
+@pytest.mark.os_agnostic
+def test_a_floor_below_the_cap_is_raised_only_as_far_as_keeps_the_later_python(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    _serve_pkg(pypi, "2.0", {"0.5": _release(">=3.8"), **_CAPPED})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=0.5"')
+
+    (dep,) = check_dependencies(pyproject)
+    update_dependencies([dep], pyproject, quiet=True)
+
+    assert _written_dev(pyproject) == "pkg>=1.0"
+    assert "newest that keeps Python 3.14" in dep.latest
+
+
+@pytest.mark.os_agnostic
+def test_a_python_no_admitted_release_ever_installed_on_does_not_hold_the_floor(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    _serve_pkg(pypi, "2.0", {"1.0": _release(">=3.8,<3.13"), "2.0": _release(">=3.8,<3.13")})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg>=1.0"')
+
+    (dep,) = check_dependencies(pyproject)
+    update_dependencies([dep], pyproject, quiet=True)
+
+    assert dep.status is not DependencyStatus.ERROR, dep.latest
+    assert _written_dev(pyproject) == "pkg>=2.0"
+
+
+@pytest.mark.os_agnostic
+def test_a_marker_that_excludes_the_later_python_lets_the_floor_follow_the_cap(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    _serve_pkg(pypi, "2.0", _CAPPED)
+    pyproject = _write_pyproject(tmp_path, dev="\"pkg>=1.0; python_version < '3.13'\"")
+
+    update_dependencies(check_dependencies(pyproject), pyproject, quiet=True)
+
+    assert Requirement(_written_dev(pyproject)).specifier == SpecifierSet(">=2.0")
