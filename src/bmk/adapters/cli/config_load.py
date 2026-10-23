@@ -13,6 +13,7 @@ loading so that a broken file cannot hide it from a command that does not read t
 configuration.
 
 Contents:
+    * :class:`LoadedConfig` - a configuration and the failure that emptied it, if any.
     * :func:`load_config` - load with profile, ``.env`` and ``--set``, or say why not.
     * :func:`start_logging` - start logging; an invalid ``[lib_log_rich]`` value or ``LOG_*``
       variable is a load failure.
@@ -25,7 +26,7 @@ Contents:
 from __future__ import annotations
 
 from traceback import format_exception
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import rich_click as click
 from lib_layered_config import Config, ConfigError
@@ -49,6 +50,18 @@ if TYPE_CHECKING:
 _LOAD_ERRORS = (ConfigError, OSError)
 
 
+class LoadedConfig(NamedTuple):
+    """The configuration a command may read, and why it is empty when it is.
+
+    Attributes:
+        config: The loaded configuration, or an empty one when loading failed.
+        error: The failure that emptied ``config``, or None when it loaded.
+    """
+
+    config: Config
+    error: Exception | None
+
+
 def _check_command_line(profile: str | None, set_overrides: tuple[str, ...]) -> None:
     """Refuse a malformed or conflicting ``--set`` or an invalid ``--profile`` name (exit 2)."""
     try:
@@ -61,7 +74,7 @@ def _check_command_line(profile: str | None, set_overrides: tuple[str, ...]) -> 
 
 def load_config(
     services: AppServices, *, profile: str | None, env_file: str | None, set_overrides: tuple[str, ...]
-) -> tuple[Config, Exception | None]:
+) -> LoadedConfig:
     """Load the layered configuration, or say why it could not be loaded.
 
     Args:
@@ -71,8 +84,8 @@ def load_config(
         set_overrides: The ``--set`` values, applied only to a configuration that loaded.
 
     Returns:
-        The configuration and None, or an empty configuration and the exception that says
-        why loading failed.
+        The configuration with no error, or an empty configuration and the exception that
+        says why loading failed.
 
     Raises:
         click.UsageError: A ``--set`` value is malformed, two of them conflict, or the
@@ -82,21 +95,21 @@ def load_config(
 
     Example:
         >>> from bmk.composition import build_testing
-        >>> config, error = load_config(build_testing(), profile=None, env_file=None, set_overrides=("a.b=1",))
-        >>> config.get("a"), error
+        >>> loaded = load_config(build_testing(), profile=None, env_file=None, set_overrides=("a.b=1",))
+        >>> loaded.config.get("a"), loaded.error
         ({'b': 1}, None)
     """
     _check_command_line(profile, set_overrides)
     try:
         config = services.get_config(profile=profile, dotenv_path=env_file)
     except _LOAD_ERRORS as exc:
-        return Config({}, {}), exc
-    return apply_overrides(config, set_overrides), None
+        return LoadedConfig(Config({}, {}), exc)
+    return LoadedConfig(apply_overrides(config, set_overrides), None)
 
 
 def start_logging(
     services: AppServices, config: Config, config_error: Exception | None, *, env_file: str | None
-) -> tuple[Config, Exception | None]:
+) -> LoadedConfig:
     """Start logging with ``config``; a logging section it refuses is recorded like a load failure.
 
     An invalid ``[lib_log_rich]`` value or ``LOG_*`` variable would otherwise stop every
@@ -121,8 +134,8 @@ def start_logging(
     try:
         services.init_logging(config, dotenv_path=env_file)
     except InvalidLoggingConfigError as exc:
-        return Config({}, {}), config_error or exc
-    return config, config_error
+        return LoadedConfig(Config({}, {}), config_error or exc)
+    return LoadedConfig(config, config_error)
 
 
 def check_logging(services: AppServices, config: Config) -> Exception | None:
@@ -196,6 +209,7 @@ def require_config(ctx: click.Context, cli_ctx: CLIContext) -> Config:
 
 
 __all__ = [
+    "LoadedConfig",
     "check_logging",
     "echo_load_traceback",
     "load_config",

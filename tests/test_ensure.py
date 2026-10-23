@@ -18,6 +18,7 @@ from bmk.adapters.cli.commands._ensure import (
     _action_for,
     _InstallKind,
     _pip_install_argv,
+    _PkgManager,
     _run_install,
     ensure_tools,
     format_ensure_report,
@@ -85,7 +86,7 @@ def test_pip_install_argv_no_flag_when_not_managed(monkeypatch: pytest.MonkeyPat
 @pytest.mark.os_agnostic
 def test_action_for_git_linux_uses_pkg_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: ("apt-get", ("install", "-y")))
+    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: _PkgManager("apt-get", ("install", "-y")))
     monkeypatch.setattr(_ensure, "_privilege_prefix", lambda: ("sudo",))
     action = _action_for(_missing(ToolName.GIT))
     assert action.kind is _InstallKind.ARGV
@@ -95,7 +96,7 @@ def test_action_for_git_linux_uses_pkg_manager(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.os_agnostic
 def test_action_for_git_linux_root_has_no_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: ("dnf", ("install", "-y")))
+    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: _PkgManager("dnf", ("install", "-y")))
     monkeypatch.setattr(_ensure, "_privilege_prefix", lambda: ())
     action = _action_for(_missing(ToolName.GIT))
     assert action.argv == ("dnf", "install", "-y", "git")
@@ -112,7 +113,7 @@ def test_action_for_git_linux_no_pkg_manager_skips(monkeypatch: pytest.MonkeyPat
 @pytest.mark.os_agnostic
 def test_action_for_git_linux_no_privilege_skips(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: ("apt-get", ("install", "-y")))
+    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: _PkgManager("apt-get", ("install", "-y")))
     monkeypatch.setattr(_ensure, "_privilege_prefix", lambda: None)
     action = _action_for(_missing(ToolName.GIT))
     assert action.kind is _InstallKind.NONE

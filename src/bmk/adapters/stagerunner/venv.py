@@ -25,7 +25,7 @@ import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -368,19 +368,31 @@ def _run_capture(argv: list[str], cwd: Path) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
-def _git(argv: list[str], cwd: Path) -> tuple[int, str]:
-    """Run a git command in ``cwd``, returning (exit code, stdout)."""
+class _GitResult(NamedTuple):
+    """What a git command answered.
+
+    Attributes:
+        returncode: git's exit status, or 1 when git could not be started.
+        output: git's stdout, empty when it could not be started.
+    """
+
+    returncode: int
+    output: str
+
+
+def _git(argv: list[str], cwd: Path) -> _GitResult:
+    """Run a git command in ``cwd``, returning its exit status and stdout."""
     try:
         result = subprocess.run(["git", *argv], cwd=cwd, capture_output=True, text=True, check=False)
     except OSError:
-        return 1, ""
-    return result.returncode, result.stdout
+        return _GitResult(1, "")
+    return _GitResult(result.returncode, result.stdout)
 
 
 def _is_git_worktree(cwd: Path) -> bool:
     """Whether ``cwd`` sits inside a git work tree."""
-    code, out = _git(["rev-parse", "--is-inside-work-tree"], cwd)
-    return code == 0 and out.strip() == "true"
+    result = _git(["rev-parse", "--is-inside-work-tree"], cwd)
+    return result.returncode == 0 and result.output.strip() == "true"
 
 
 def _untrack(cwd: Path, name: str) -> bool:
@@ -393,11 +405,11 @@ def _untrack(cwd: Path, name: str) -> bool:
     Returns:
         True if something was untracked.
     """
-    code, out = _git(["ls-files", "--", name], cwd)
-    if code != 0 or not out.strip():
+    tracked = _git(["ls-files", "--", name], cwd)
+    if tracked.returncode != 0 or not tracked.output.strip():
         return False
-    count = len(out.strip().splitlines())
-    if _git(["rm", "-r", "--cached", "--quiet", "--", name], cwd)[0] != 0:
+    count = len(tracked.output.strip().splitlines())
+    if _git(["rm", "-r", "--cached", "--quiet", "--", name], cwd).returncode != 0:
         return False
     # Announce unconditionally, never gated on quiet: this stages deletions in
     # the user's index, and `push` commits automatically.
@@ -448,10 +460,10 @@ def _is_declared(cwd: Path, name: str) -> bool:
     Queried with a trailing slash: a ``dir/`` rule only matches a path git knows
     is a directory, which it cannot for one that does not exist yet.
     """
-    code, out = _git(["check-ignore", "-v", "--", f"{name}/"], cwd)
-    if code != 0 or not out.strip():
+    verdict = _git(["check-ignore", "-v", "--", f"{name}/"], cwd)
+    if verdict.returncode != 0 or not verdict.output.strip():
         return False
-    source = out.split(":", 1)[0]
+    source = verdict.output.split(":", 1)[0]
     return not source.startswith(f"{name}/")
 
 
@@ -770,6 +782,32 @@ def _lock_timeout() -> float:
         return _DEFAULT_LOCK_TIMEOUT
 
 
+class _ExclusiveLock(Protocol):
+    """The part of a ``filelock.FileLock`` the venv sync lock uses.
+
+    ``FileLock.acquire`` is annotated as returning ``AcquireReturnProxy[Self]``, with ``Self``
+    imported from ``typing`` only under ``TYPE_CHECKING``. ``typing.Self`` does not exist before
+    Python 3.11, so type-checking for the 3.10 floor resolves the return to
+    ``AcquireReturnProxy[Unknown]`` and strict mode rejects the call. The sync lock never uses
+    the proxy, so this states the return as ``object`` and the lock is held through this type.
+    A plain annotated assignment is not enough: pyright narrows the variable back to the
+    assigned ``FileLock``, so :func:`_exclusive_file_lock` returns it under this type instead.
+    """
+
+    def acquire(self) -> object:
+        """Block until the lock is held, raising ``filelock.Timeout`` past the lock's timeout."""
+        ...
+
+    def release(self) -> None:
+        """Release the lock."""
+        ...
+
+
+def _exclusive_file_lock(path: Path) -> _ExclusiveLock:
+    """A ``FileLock`` on ``path`` with the venv sync timeout, typed as :class:`_ExclusiveLock`."""
+    return FileLock(str(path), timeout=_lock_timeout())
+
+
 @contextmanager
 def _venv_sync_lock(venv: Path, *, quiet: bool, stream: SupportsWrite | None = None) -> Generator[bool, None, None]:
     """Hold the exclusive lock for ``venv``; yield False if another bmk holds it.
@@ -791,7 +829,7 @@ def _venv_sync_lock(venv: Path, *, quiet: bool, stream: SupportsWrite | None = N
             print(f"[venv] no lock directory ({exc}); proceeding unguarded", file=sys.stderr)
         yield True
         return
-    lock = FileLock(str(path), timeout=_lock_timeout())
+    lock = _exclusive_file_lock(path)
     try:
         lock.acquire()
     except Timeout:

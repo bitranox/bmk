@@ -32,6 +32,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import NamedTuple
 
 from .. import safe_console
 from ..exit_codes import ExitCode
@@ -88,12 +89,25 @@ _PIP_PACKAGES: dict[ToolName, str] = {
     ToolName.BASHATE: "bashate",
 }
 
+
+class _PkgManager(NamedTuple):
+    """A Linux package manager and the arguments that install a package with it.
+
+    Attributes:
+        exe: The executable looked up on PATH (``apt-get``, ``dnf``, ...).
+        install_args: The arguments placed between ``exe`` and the package name.
+    """
+
+    exe: str
+    install_args: tuple[str, ...]
+
+
 # Ordered by preference; the first whose executable is on PATH wins.
-_LINUX_PKG_MANAGERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("apt-get", ("install", "-y")),
-    ("dnf", ("install", "-y")),
-    ("pacman", ("-S", "--noconfirm")),
-    ("zypper", ("install", "-y")),
+_LINUX_PKG_MANAGERS: tuple[_PkgManager, ...] = (
+    _PkgManager("apt-get", ("install", "-y")),
+    _PkgManager("dnf", ("install", "-y")),
+    _PkgManager("pacman", ("-S", "--noconfirm")),
+    _PkgManager("zypper", ("install", "-y")),
 )
 
 
@@ -114,11 +128,11 @@ def _pip_install_argv(package: str) -> tuple[str, ...]:
     return tuple(argv)
 
 
-def _detect_linux_pkg_manager() -> tuple[str, tuple[str, ...]] | None:
-    """Return the first available Linux package manager and its install subcommand."""
-    for exe, subcmd in _LINUX_PKG_MANAGERS:
-        if shutil.which(exe) is not None:
-            return exe, subcmd
+def _detect_linux_pkg_manager() -> _PkgManager | None:
+    """Return the first Linux package manager whose executable is on PATH, or None."""
+    for manager in _LINUX_PKG_MANAGERS:
+        if shutil.which(manager.exe) is not None:
+            return manager
     return None
 
 
@@ -163,8 +177,7 @@ def _system_action(
     prefix = _privilege_prefix()
     if prefix is None:
         return _InstallAction(_InstallKind.NONE, reason=f"root or sudo required to install {linux_pkg}")
-    exe, subcmd = manager
-    return _InstallAction(_InstallKind.ARGV, (*prefix, exe, *subcmd, linux_pkg))
+    return _InstallAction(_InstallKind.ARGV, (*prefix, manager.exe, *manager.install_args, linux_pkg))
 
 
 def _action_for(check: ToolCheck) -> _InstallAction:
