@@ -30,6 +30,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   command line. A project with no `[tool.ci].os` is checked for the host only, as before. A project
   that declares Windows and carries a Windows-only type error goes red on its next `make test`.
 
+### Fixed
+
+- **An exact pin (`pkg==1.5.0`, `pkg===1.5.0`) is no longer rewritten by the dependency update.**
+  bmk read `==` as a floor, so a dev pin moved to `==1.6.0` on the first `make test` after 1.6.0
+  reached PyPI, which broke a test pinned to the 1.5.0 release. An exact pin is now reported as
+  pinned and left as written, whether the update would have raised it or lowered it to a release
+  the oldest supported Python installs. A wildcard (`pkg==1.*`) and `~=` still move as before.
+
 ## [3.22.7] 2026-10-23 13:02:17
 
 ### Fixed

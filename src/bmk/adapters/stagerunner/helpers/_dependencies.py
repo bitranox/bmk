@@ -1216,7 +1216,27 @@ def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[Depende
     support = python_support(config)
     policy = release_policy(config)
     with _one_fetch_per_package():
-        return [_hold_to_supported_python(dep, support, policy) for dep in _extract_all_dependencies(config)]
+        return [
+            _hold_exact_pin(_hold_to_supported_python(dep, support, policy))
+            for dep in _extract_all_dependencies(config)
+        ]
+
+
+def _hold_exact_pin(dep: DependencyInfo) -> DependencyInfo:
+    """Report an exact pin (``==X`` / ``===X``) that the update would move as PINNED instead.
+
+    An exact pin names one release on purpose - a test pinned to one release's bytes, a known-good
+    build - and bmk writes no ``==`` pin of its own (fleet policy, user decision 2026-10-12), so
+    neither raising it to a newer release nor lowering it to one the oldest Python installs is the
+    update's to decide. Checked last, so it holds whichever floor rule moved it. A wildcard
+    (``==1.*``) is a range and stays movable, as ``~=`` does.
+    """
+    if dep.status is not DependencyStatus.OUTDATED:
+        return dep
+    specifier = _specifier_of(dep.original_spec)
+    if specifier is None or not _exact_pin(specifier):
+        return dep
+    return replace(dep, status=DependencyStatus.PINNED, latest=f"{dep.latest} (exact pin {dep.constraint})")
 
 
 def _group_by_source(deps: list[DependencyInfo]) -> dict[str, list[DependencyInfo]]:

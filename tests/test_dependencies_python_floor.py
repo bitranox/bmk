@@ -528,6 +528,40 @@ def test_an_exact_pin_on_a_yanked_release_that_installs_is_never_lowered(tmp_pat
     assert dep.status is not DependencyStatus.OUTDATED
 
 
+# An exact pin names one release on purpose (a byte-determinism test pinned to one pack, say), so
+# the update holds it as written whichever way the floor logic would move it.
+_EXACT_PINS = ['"pkg==7.0"', '"pkg===7.0"', '"pkg[cli]==7.0"', "\"pkg==7.0; python_version >= '3.10'\""]
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("declared", _EXACT_PINS, ids=["eq", "arbitrary-eq", "extras", "marker"])
+def test_an_exact_pin_with_a_newer_release_is_held_as_written(tmp_path: Path, pypi: _FakeIndex, declared: str) -> None:
+    _serve_pkg(pypi, "8.0", {"7.0": _release(">=3.10"), "8.0": _release(">=3.10")})
+    pyproject = _write_pyproject(tmp_path, dev=declared)
+    before = pyproject.read_text(encoding="utf-8")
+
+    (dep,) = check_dependencies(pyproject)
+    updated = update_dependencies([dep], pyproject, quiet=True)
+
+    assert dep.status is DependencyStatus.PINNED
+    assert updated == 0
+    assert pyproject.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.os_agnostic
+def test_an_exact_pin_the_oldest_python_cannot_install_is_never_lowered(tmp_path: Path, pypi: _FakeIndex) -> None:
+    _serve_pkg(pypi, "8.0", {"7.0": _release(">=3.10"), "8.0": _release(">=3.11")})
+    pyproject = _write_pyproject(tmp_path, dev='"pkg==8.0"')
+    before = pyproject.read_text(encoding="utf-8")
+
+    (dep,) = check_dependencies(pyproject)
+    updated = update_dependencies([dep], pyproject, quiet=True)
+
+    assert dep.status is not DependencyStatus.OUTDATED
+    assert updated == 0
+    assert pyproject.read_text(encoding="utf-8") == before
+
+
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("declared", ['"pkg=1.0.post1"', '"pkg=1.0,<2.dev1"'], ids=["floor", "ceiling"])
 def test_a_requirement_that_does_not_parse_is_reported_rather_than_raised(
