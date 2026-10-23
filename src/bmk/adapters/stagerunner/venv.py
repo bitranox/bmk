@@ -25,7 +25,7 @@ import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -782,6 +782,32 @@ def _lock_timeout() -> float:
         return _DEFAULT_LOCK_TIMEOUT
 
 
+class _ExclusiveLock(Protocol):
+    """The part of a ``filelock.FileLock`` the venv sync lock uses.
+
+    ``FileLock.acquire`` is annotated as returning ``AcquireReturnProxy[Self]``, with ``Self``
+    imported from ``typing`` only under ``TYPE_CHECKING``. ``typing.Self`` does not exist before
+    Python 3.11, so type-checking for the 3.10 floor resolves the return to
+    ``AcquireReturnProxy[Unknown]`` and strict mode rejects the call. The sync lock never uses
+    the proxy, so this states the return as ``object`` and the lock is held through this type.
+    A plain annotated assignment is not enough: pyright narrows the variable back to the
+    assigned ``FileLock``, so :func:`_exclusive_file_lock` returns it under this type instead.
+    """
+
+    def acquire(self) -> object:
+        """Block until the lock is held, raising ``filelock.Timeout`` past the lock's timeout."""
+        ...
+
+    def release(self) -> None:
+        """Release the lock."""
+        ...
+
+
+def _exclusive_file_lock(path: Path) -> _ExclusiveLock:
+    """A ``FileLock`` on ``path`` with the venv sync timeout, typed as :class:`_ExclusiveLock`."""
+    return FileLock(str(path), timeout=_lock_timeout())
+
+
 @contextmanager
 def _venv_sync_lock(venv: Path, *, quiet: bool, stream: SupportsWrite | None = None) -> Generator[bool, None, None]:
     """Hold the exclusive lock for ``venv``; yield False if another bmk holds it.
@@ -803,7 +829,7 @@ def _venv_sync_lock(venv: Path, *, quiet: bool, stream: SupportsWrite | None = N
             print(f"[venv] no lock directory ({exc}); proceeding unguarded", file=sys.stderr)
         yield True
         return
-    lock = FileLock(str(path), timeout=_lock_timeout())
+    lock = _exclusive_file_lock(path)
     try:
         lock.acquire()
     except Timeout:
