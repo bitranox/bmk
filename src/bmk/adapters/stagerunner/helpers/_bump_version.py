@@ -332,14 +332,14 @@ def _apply_bump(project_dir: Path, new_version: str) -> str | None:
     return None
 
 
-def _read_bump(project_dir: Path, part: str) -> tuple[str, str, _Snapshot]:
+def _read_bump(project_dir: Path, part: BumpPart) -> tuple[str, str, _Snapshot]:
     """Current version, next version and the snapshot - everything read before the first write."""
     config = load_pyproject_config(project_dir / "pyproject.toml")
     current_version = config.project.version
     if not current_version:
         msg = "Could not find [project].version in pyproject.toml"
         raise ValueError(msg)
-    return current_version, next_version(current_version, BumpPart(part)), _snapshot(project_dir)
+    return current_version, next_version(current_version, part), _snapshot(project_dir)
 
 
 def main() -> int:
@@ -357,10 +357,12 @@ def main() -> int:
     args, _unknown = parser.parse_known_args()
 
     with _handlers(dict.fromkeys(_termination_signals(), _on_signal)):
-        return _bump(args.project_dir, args.part)
+        # argparse ``choices`` already restricted the value, so the conversion cannot fail;
+        # it happens here, at the wire edge, so everything below takes the member.
+        return _bump(args.project_dir, BumpPart(args.part))
 
 
-def _bump(project_dir: Path, part: str) -> int:
+def _bump(project_dir: Path, part: BumpPart) -> int:
     """Read, apply and on any way out short of success undo the bump; the exit code."""
     try:
         old_version, new_version, originals = _read_bump(project_dir, part)

@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bmk.domain.enums import ToolOutputFormat
+from bmk.domain.enums import BumpPart, ToolOutputFormat
 
 from .context import resolve_test_python
 from .project import derive_package_name, pip_audit_ignore_flags, pyright_runs
@@ -207,11 +207,15 @@ def sync_initconf_argv(ctx: StageContext) -> list[str]:
     return [ctx.python_cmd, _helper("_sync_initconf.py"), "--project-dir", str(ctx.project_dir)]
 
 
-def bump_argv(kind: str) -> Callable[[StageContext], list[str]]:
-    """Build the argv for a ``bump_{major,minor,patch}`` stage."""
+def bump_argv(kind: BumpPart) -> Callable[[StageContext], list[str]]:
+    """Build the argv for a ``bump_{major,minor,patch}`` stage.
+
+    The helper runs as a subprocess, so the argv is the wire edge: it carries the member's
+    ``value``, which the helper's argparse ``choices`` accept and convert back to a member.
+    """
 
     def build(ctx: StageContext) -> list[str]:
-        return [ctx.python_cmd, _helper("_bump_version.py"), kind, "--project-dir", str(ctx.project_dir)]
+        return [ctx.python_cmd, _helper("_bump_version.py"), kind.value, "--project-dir", str(ctx.project_dir)]
 
     return build
 

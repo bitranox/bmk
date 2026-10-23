@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
+from bmk.domain.enums import BumpPart, ToolOutputFormat, VenvProvisioning
 
 from . import git_ops, tools
 from .actions import HelperAction, PipAuditAction, PipelineAction, ToolAction, ToolRunsAction
@@ -173,7 +173,7 @@ _TEST_INTEGRATION_PIPELINE: tuple[Stage, ...] = (
 )
 
 
-def _bump_pipeline(kind: str) -> tuple[Stage, ...]:
+def _bump_pipeline(kind: BumpPart) -> tuple[Stage, ...]:
     return (
         Stage("bump", 10, ToolAction(tools.bump_argv(kind))),
         Stage("sync_initconf", 20, ToolAction(tools.sync_initconf_argv)),
@@ -217,9 +217,9 @@ PIPELINES: dict[str, tuple[Stage, ...]] = {
     "clean_all": (Stage("clean_all", 10, HelperAction(purge_action)),),
     "cov": _COV_PIPELINE,
     "test_integration": _TEST_INTEGRATION_PIPELINE,
-    "bump_major": _bump_pipeline("major"),
-    "bump_minor": _bump_pipeline("minor"),
-    "bump_patch": _bump_pipeline("patch"),
+    "bump_major": _bump_pipeline(BumpPart.MAJOR),
+    "bump_minor": _bump_pipeline(BumpPart.MINOR),
+    "bump_patch": _bump_pipeline(BumpPart.PATCH),
     "commit": _COMMIT_PIPELINE,
     "bld": _BLD_PIPELINE,
     "push": _PUSH_PIPELINE,

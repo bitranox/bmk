@@ -32,6 +32,27 @@ def test_bump_dispatches_pipeline(
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize("group", ["bump", "bmp", "b"])
+@pytest.mark.parametrize(
+    ("sub", "prefix"),
+    [
+        ("major", "bump_major"),
+        ("ma", "bump_major"),
+        ("minor", "bump_minor"),
+        ("m", "bump_minor"),
+        ("patch", "bump_patch"),
+        ("p", "bump_patch"),
+    ],
+)
+def test_every_group_and_alias_dispatches_its_pipeline(
+    cli_pipeline_probe: Callable[..., Result], tmp_path: Path, group: str, sub: str, prefix: str
+) -> None:
+    result = cli_pipeline_probe([group, sub], prefix=prefix)
+    assert result.exit_code == 0
+    assert (tmp_path / "PROBE").read_text(encoding="utf-8") == "ran"
+
+
+@pytest.mark.os_agnostic
 def test_bump_propagates_failure(cli_pipeline_probe: Callable[..., Result]) -> None:
     result = cli_pipeline_probe(["bump", "major"], prefix="bump_major", exit_code=3)
     assert result.exit_code == 3

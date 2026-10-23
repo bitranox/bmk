@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import NamedTuple
 
 import lib_log_rich.runtime
 import rich_click as click
+
+from bmk.domain.enums import BumpPart
 
 from ..constants import CLICK_CONTEXT_SETTINGS
 from ._shared import run_command
@@ -26,11 +29,11 @@ from ._shared import run_command
 logger = logging.getLogger(__name__)
 
 
-def _run_bump(bump_type: str) -> None:
+def _run_bump(part: BumpPart) -> None:
     """Execute version bump via the stage runner.
 
     Args:
-        bump_type: Type of version bump: "major", "minor", or "patch".
+        part: Version component to bump.
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
@@ -39,7 +42,9 @@ def _run_bump(bump_type: str) -> None:
 
     cwd = Path.cwd()
 
-    command_prefix = f"bump_{bump_type}"
+    # ``.value``, never the member itself: f-string formatting of a ``(str, Enum)`` member
+    # yields the value on Python 3.10 but ``BumpPart.MAJOR`` on 3.11+.
+    command_prefix = f"bump_{part.value}"
     exit_code = run_command(cwd, (), command_prefix=command_prefix)
 
     if exit_code != 0:
@@ -50,40 +55,51 @@ def _run_bump(bump_type: str) -> None:
 # Subcommand definitions (shared across all bump groups)
 # =============================================================================
 
-_SUBCOMMAND_SPECS: tuple[tuple[str, str, str, bool], ...] = (
-    ("major", "major", "Bump major version (X.0.0).", False),
-    ("ma", "major", "Bump major version (alias for 'major').", True),
-    ("minor", "minor", "Bump minor version (X.Y.0).", False),
-    ("m", "minor", "Bump minor version (alias for 'minor').", True),
-    ("patch", "patch", "Bump patch version (X.Y.Z).", False),
-    ("p", "patch", "Bump patch version (alias for 'patch').", True),
+
+class _BumpSpec(NamedTuple):
+    """One bump subcommand: its CLI name, the part it bumps, and its help text.
+
+    Attributes:
+        name: CLI subcommand name (e.g. "major", "ma").
+        part: Version component the subcommand bumps.
+        help: Help string displayed by ``--help``.
+        is_alias: Whether the name is a short alias (used in log messages).
+    """
+
+    name: str
+    part: BumpPart
+    help: str
+    is_alias: bool
+
+
+_SUBCOMMAND_SPECS: tuple[_BumpSpec, ...] = (
+    _BumpSpec("major", BumpPart.MAJOR, "Bump major version (X.0.0).", is_alias=False),
+    _BumpSpec("ma", BumpPart.MAJOR, "Bump major version (alias for 'major').", is_alias=True),
+    _BumpSpec("minor", BumpPart.MINOR, "Bump minor version (X.Y.0).", is_alias=False),
+    _BumpSpec("m", BumpPart.MINOR, "Bump minor version (alias for 'minor').", is_alias=True),
+    _BumpSpec("patch", BumpPart.PATCH, "Bump patch version (X.Y.Z).", is_alias=False),
+    _BumpSpec("p", BumpPart.PATCH, "Bump patch version (alias for 'patch').", is_alias=True),
 )
 
 
-def _make_bump_subcommand(
-    name: str,
-    bump_type: str,
-    help_text: str,
-    *,
-    is_alias: bool,
-) -> click.Command:
+def _make_bump_subcommand(spec: _BumpSpec) -> click.Command:
     """Create a Click command for a specific bump action.
 
     Args:
-        name: CLI subcommand name (e.g. "major", "ma").
-        bump_type: Version part to bump ("major", "minor", or "patch").
-        help_text: Help string displayed by ``--help``.
-        is_alias: Whether this is an alias (used in log messages).
+        spec: The subcommand's name, bumped part, help text and alias flag.
     """
-    alias_suffix = f" (via alias '{name}')" if is_alias else ""
+    alias_suffix = f" (via alias '{spec.name}')" if spec.is_alias else ""
+    part = spec.part
 
-    @click.command(name, context_settings=CLICK_CONTEXT_SETTINGS)
+    @click.command(spec.name, context_settings=CLICK_CONTEXT_SETTINGS)
     def _cmd() -> None:
-        with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": bump_type}):
-            logger.info("Bumping %s version%s", bump_type, alias_suffix)
-            _run_bump(bump_type)
+        # The log record and its structured field carry the wire string, as they did before
+        # the part was typed: ``%s`` of a member would render ``BumpPart.MAJOR``.
+        with lib_log_rich.runtime.bind(job_id="cli-bump", extra={"type": part.value}):
+            logger.info("Bumping %s version%s", part.value, alias_suffix)
+            _run_bump(part)
 
-    _cmd.help = help_text
+    _cmd.help = spec.help
     return _cmd
 
 
@@ -101,8 +117,8 @@ def _make_bump_group(name: str, help_text: str) -> click.Group:
 
     _group.help = help_text
 
-    for cmd_name, bump_type, cmd_help, is_alias in _SUBCOMMAND_SPECS:
-        _group.add_command(_make_bump_subcommand(cmd_name, bump_type, cmd_help, is_alias=is_alias))
+    for spec in _SUBCOMMAND_SPECS:
+        _group.add_command(_make_bump_subcommand(spec))
 
     return _group
 

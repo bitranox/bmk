@@ -105,6 +105,25 @@ class BumpPart(str, Enum):
     PATCH = "patch"
 
 
+class PipelineResult(str, Enum):
+    """Overall outcome of a pipeline run, carried in its machine-readable summary line.
+
+    Consumers grep the summary for ``"result":"pass"``, so the value is the wire string and
+    must stay stable. Only a passing run emits a summary; a failing one reports its failed
+    stages instead, so there is no failure member to emit.
+
+    Attributes:
+        PASSED: Every stage of every batch exited 0.
+
+    Example:
+        >>> PipelineResult.PASSED.value
+        'pass'
+    """
+
+    # Named PASSED, not PASS: ruff S105 reads a member called PASS as a hardcoded password.
+    PASSED = "pass"
+
+
 class DeployTarget(str, Enum):
     """Configuration deployment target layers.
 
@@ -173,6 +192,7 @@ __all__ = [
     "BumpPart",
     "DeployTarget",
     "OutputFormat",
+    "PipelineResult",
     "PyrightPlatform",
     "ToolOutputFormat",
     "VenvProvisioning",
