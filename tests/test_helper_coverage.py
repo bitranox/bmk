@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from bmk.adapters.stagerunner.helpers._coverage import (
     CoverageConfig,
@@ -119,6 +120,34 @@ def test_coverage_config_defaults_when_sections_absent(tmp_path: Path) -> None:
     assert config.pytest_verbosity == "-v"
     assert config.coverage_source == ["src"]
     assert config.exclude_markers == "integration"
+
+
+@pytest.mark.os_agnostic
+def test_coverage_sections_win_over_the_same_keys_in_scripts_test(tmp_path: Path) -> None:
+    """[tool.scripts.test] also accepts fail_under/source; coverage.py's own tables override them."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.scripts.test]\nfail_under = 11\nsource = ['a']\n[tool.coverage.report]\nfail_under = 22\n"
+    )
+
+    config = CoverageConfig.from_pyproject(tmp_path)
+
+    assert (config.fail_under, config.coverage_source) == (22, ["a"])
+
+
+@pytest.mark.os_agnostic
+def test_coverage_config_misshapen_tables_degrade_to_defaults(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool]\nscripts = 3\ncoverage = { run = 'src', report = [1] }\n")
+
+    assert CoverageConfig.from_pyproject(tmp_path) == CoverageConfig()
+
+
+@pytest.mark.os_agnostic
+def test_coverage_config_refuses_a_misshapen_value(tmp_path: Path) -> None:
+    """A fail_under that is not a number fails the run rather than gating at the default."""
+    (tmp_path / "pyproject.toml").write_text("[tool.coverage.report]\nfail_under = 'high'\n")
+
+    with pytest.raises(ValidationError):
+        CoverageConfig.from_pyproject(tmp_path)
 
 
 # ---------------------------------------------------------------------------

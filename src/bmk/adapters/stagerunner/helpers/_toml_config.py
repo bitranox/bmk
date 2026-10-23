@@ -4,7 +4,9 @@ Provides typed models for pyproject.toml sections, eliminating dict-based access
 patterns and their associated type issues. This parses project-authored config that is
 never fully trusted (a malformed or unusual value must not fail a build), so every
 model tolerates a wrong-shaped value for one of its own fields by falling back to that
-field's declared default - see the module-level `_coerce_*` helpers - and
+field's declared default - see the module-level `coerce_*` / `_coerce_*` helpers (the
+two public ones are shared with the other pyproject readers, ``project.py`` and
+``_coverage.py``, so a misshapen table degrades the same way everywhere) - and
 `PyprojectConfig.from_path` additionally never raises on a missing or unparsable file.
 """
 
@@ -23,10 +25,15 @@ __all__ = [
     "BashateConfig",
     "BuildSystemSection",
     "CleanConfig",
+    "GitConfig",
     "PSScriptAnalyzerConfig",
     "ProjectSection",
     "PyprojectConfig",
+    "ScriptsConfig",
+    "ScriptsTestAllConfig",
     "ToolConfig",
+    "coerce_str_tuple",
+    "coerce_table",
     "load_pyproject_config",
 ]
 
@@ -46,7 +53,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _coerce_table(v: Any) -> Any:
+def coerce_table(v: Any) -> Any:
     """A TOML sub-table is a dict; anything else (wrong type, or simply absent) becomes
     an empty table so the nested model below falls back to its all-default form
     instead of raising. An already-built BaseModel instance (direct keyword
@@ -75,7 +82,7 @@ def _coerce_str(v: Any) -> str:
     return str(v)
 
 
-def _coerce_str_tuple(v: Any) -> tuple[str, ...]:
+def coerce_str_tuple(v: Any) -> tuple[str, ...]:
     """A TOML array is a list; a tuple is also accepted as-is (direct keyword
     construction, e.g. `ProjectSection(dependencies=(...))` in tests, already hands in
     the field's own tuple type). Keep only non-None items and stringify anything that
@@ -96,7 +103,7 @@ _PSSCRIPT_RULE_RE = re.compile(r"^PS[A-Za-z0-9]+$")
 
 def _coerce_psscript_rules(v: Any) -> tuple[str, ...]:
     """Keep only well-formed PSScriptAnalyzer rule ids; silently drop anything else."""
-    return tuple(rule for rule in _coerce_str_tuple(v) if _PSSCRIPT_RULE_RE.match(rule))
+    return tuple(rule for rule in coerce_str_tuple(v) if _PSSCRIPT_RULE_RE.match(rule))
 
 
 def _coerce_str_tuple_dict(v: Any) -> dict[str, tuple[str, ...]]:
@@ -124,11 +131,12 @@ class CleanConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    patterns: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
+    patterns: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = ()
 
 
 # NOTE on what is deliberately NOT here: [tool.coverage.report], [tool.bandit],
-# [tool.pip-audit] and [tool.scripts.test]. Each once had a dataclass in this file, and
+# [tool.pip-audit] and [tool.scripts.test] (its sibling [tool.scripts.test-all] IS here, in
+# ScriptsConfig: the rule is one owner per key, not per table). Each once had a dataclass in this file, and
 # each was dead - parsed on every load, read by nobody, covered by no test. Worse, they
 # had drifted: the [tool.scripts.test] copy claimed pytest-verbosity defaults to "-vv"
 # while the reader that actually runs pytest uses "-v", so this file answered questions
@@ -141,6 +149,57 @@ class CleanConfig(BaseModel):
 #
 # Before adding a section here, check it will actually be consumed. A second parser for a
 # key another module already owns is how the "-vv" lie got in.
+
+
+def _coerce_stripped_str(v: Any) -> str:
+    """A string, stripped; anything that is not a string reads as unset (``""``).
+
+    Unlike `_coerce_str`, a number is NOT stringified: a value naming something by
+    identifier (a git remote) is a string or it is not set at all.
+    """
+    return v.strip() if isinstance(v, str) else ""
+
+
+def _coerce_optional_int(v: Any) -> int | None:
+    """A TOML integer, or None for anything else - including a bool (Python's bool is an
+    int subclass, but ``workers = true`` is no count) and a float or numeric string, which
+    a deliberate setting would not use. None lets the caller fall back to its default.
+    """
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    return None
+
+
+class GitConfig(BaseModel):
+    """[tool.git] - the remote ``release`` pushes to."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    # Empty means "not configured": the reader falls back to "origin".
+    default_remote: Annotated[str, BeforeValidator(_coerce_stripped_str)] = Field(
+        default="", validation_alias="default-remote"
+    )
+
+
+class ScriptsTestAllConfig(BaseModel):
+    """[tool.scripts.test-all] - how the version matrix (``test-all``) runs."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # None means "not set, or not an integer": the matrix then picks its own default.
+    workers: Annotated[int | None, BeforeValidator(_coerce_optional_int)] = None
+
+
+class ScriptsConfig(BaseModel):
+    """[tool.scripts] - only the tables this module owns; [tool.scripts.test] is read by
+    helpers/_coverage.py (see the NOTE above).
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    test_all: Annotated[ScriptsTestAllConfig, BeforeValidator(coerce_table)] = Field(
+        default_factory=ScriptsTestAllConfig, validation_alias="test-all"
+    )
 
 
 class PSScriptAnalyzerConfig(BaseModel):
@@ -180,7 +239,7 @@ class BashateConfig(BaseModel):
     max_line_length: Annotated[int, BeforeValidator(_coerce_bashate_max_line_length)] = Field(
         default=_DEFAULT_BASHATE_MAX_LINE_LENGTH, validation_alias="max-line-length"
     )
-    ignores: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
+    ignores: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = ()
 
 
 class PoetryVersionOperator(str, Enum):
@@ -225,7 +284,7 @@ def _parse_poetry_dep_entry(name: str, spec: Any) -> PoetryDepSpec:
         return PoetryDepSpec(
             name=name,
             version=_coerce_str(typed_spec.get("version")),
-            extras=_coerce_str_tuple(typed_spec.get("extras")),
+            extras=coerce_str_tuple(typed_spec.get("extras")),
         )
     return PoetryDepSpec(name=name)
 
@@ -306,11 +365,11 @@ class UvConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    dev_dependencies: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = Field(
+    dev_dependencies: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = Field(
         default=(), validation_alias="dev-dependencies"
     )
     exclude_newer: Any = Field(default=None, validation_alias="exclude-newer")
-    exclude_newer_package: Annotated[dict[str, Any], BeforeValidator(_coerce_table)] = Field(
+    exclude_newer_package: Annotated[dict[str, Any], BeforeValidator(coerce_table)] = Field(
         default_factory=lambda: {}, validation_alias="exclude-newer-package"
     )
 
@@ -320,14 +379,16 @@ class ToolConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    clean: Annotated[CleanConfig, BeforeValidator(_coerce_table)] = Field(default_factory=CleanConfig)
-    psscriptanalyzer: Annotated[PSScriptAnalyzerConfig, BeforeValidator(_coerce_table)] = Field(
+    clean: Annotated[CleanConfig, BeforeValidator(coerce_table)] = Field(default_factory=CleanConfig)
+    psscriptanalyzer: Annotated[PSScriptAnalyzerConfig, BeforeValidator(coerce_table)] = Field(
         default_factory=PSScriptAnalyzerConfig
     )
-    bashate: Annotated[BashateConfig, BeforeValidator(_coerce_table)] = Field(default_factory=BashateConfig)
-    poetry: Annotated[PoetryConfig, BeforeValidator(_coerce_table)] = Field(default_factory=PoetryConfig)
-    pdm: Annotated[PdmConfig, BeforeValidator(_coerce_table)] = Field(default_factory=PdmConfig)
-    uv: Annotated[UvConfig, BeforeValidator(_coerce_table)] = Field(default_factory=UvConfig)
+    bashate: Annotated[BashateConfig, BeforeValidator(coerce_table)] = Field(default_factory=BashateConfig)
+    poetry: Annotated[PoetryConfig, BeforeValidator(coerce_table)] = Field(default_factory=PoetryConfig)
+    pdm: Annotated[PdmConfig, BeforeValidator(coerce_table)] = Field(default_factory=PdmConfig)
+    uv: Annotated[UvConfig, BeforeValidator(coerce_table)] = Field(default_factory=UvConfig)
+    git: Annotated[GitConfig, BeforeValidator(coerce_table)] = Field(default_factory=GitConfig)
+    scripts: Annotated[ScriptsConfig, BeforeValidator(coerce_table)] = Field(default_factory=ScriptsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +407,7 @@ class ProjectSection(BaseModel):
     name: Annotated[str, BeforeValidator(_coerce_str)] = ""
     version: Annotated[str, BeforeValidator(_coerce_str)] = ""
     description: Annotated[str, BeforeValidator(_coerce_str)] = ""
-    dependencies: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
+    dependencies: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = ()
     optional_dependencies: Annotated[dict[str, tuple[str, ...]], BeforeValidator(_coerce_str_tuple_dict)] = Field(
         default_factory=dict, validation_alias="optional-dependencies"
     )
@@ -355,7 +416,7 @@ class ProjectSection(BaseModel):
     # already builds its test matrix from them. `requires-python` cannot serve that purpose
     # - it is a floor (`>=3.10`) with no upper bound, so it never names the newest supported
     # version. See `venv.desired_python_minor`.
-    classifiers: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
+    classifiers: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = ()
     # The floor, read where a dependency must still install on the OLDEST Python the project
     # supports: the dependency updater must not raise a floor past it.
     requires_python: Annotated[str, BeforeValidator(_coerce_str)] = Field(
@@ -396,7 +457,7 @@ class BuildSystemSection(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    requires: Annotated[tuple[str, ...], BeforeValidator(_coerce_str_tuple)] = ()
+    requires: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = ()
     build_backend: Annotated[str, BeforeValidator(_coerce_str)] = Field(default="", validation_alias="build-backend")
 
 
@@ -436,27 +497,34 @@ class PyprojectConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    project: Annotated[ProjectSection, BeforeValidator(_coerce_table)] = Field(default_factory=ProjectSection)
-    build_system: Annotated[BuildSystemSection, BeforeValidator(_coerce_table)] = Field(
+    project: Annotated[ProjectSection, BeforeValidator(coerce_table)] = Field(default_factory=ProjectSection)
+    build_system: Annotated[BuildSystemSection, BeforeValidator(coerce_table)] = Field(
         default_factory=BuildSystemSection, validation_alias="build-system"
     )
-    dependency_groups: Annotated[DependencyGroupsSection, BeforeValidator(_coerce_table)] = Field(
+    dependency_groups: Annotated[DependencyGroupsSection, BeforeValidator(coerce_table)] = Field(
         default_factory=DependencyGroupsSection, validation_alias="dependency-groups"
     )
-    tool: Annotated[ToolConfig, BeforeValidator(_coerce_table)] = Field(default_factory=ToolConfig)
-    raw_data: dict[str, Any] = Field(default_factory=dict)
+    tool: Annotated[ToolConfig, BeforeValidator(coerce_table)] = Field(default_factory=ToolConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PyprojectConfig:
-        """Build from an already-parsed TOML dict, capturing it verbatim in raw_data.
+        """Build from an already-parsed TOML dict.
 
-        raw_data is the escape hatch for keys with no dedicated model field - e.g.
-        [tool.git].default-remote, read straight out of it by _release.py - so it must
-        survive as the untouched top-level dict, not just this model's known fields.
-        Not a plain field default: direct keyword construction (`PyprojectConfig(project=...)`,
-        used by tests) intentionally leaves raw_data at its empty-dict default instead.
+        Every key bmk reads here has a typed field, and a key no model declares is
+        dropped: a reader that needs a new key adds a field rather than crawling the
+        raw document.
+
+        Args:
+            data: The parsed pyproject.toml document.
+
+        Returns:
+            The typed configuration.
+
+        Example:
+            >>> PyprojectConfig.from_dict({"tool": {"git": {"default-remote": " up "}}}).tool.git.default_remote
+            'up'
         """
-        return cls.model_validate({**data, "raw_data": data})
+        return cls.model_validate(data)
 
     @classmethod
     def from_path(cls, path: Path) -> PyprojectConfig:

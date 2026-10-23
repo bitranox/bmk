@@ -26,6 +26,7 @@ from pathlib import Path
 
 from packaging.version import InvalidVersion, Version
 
+from bmk.adapters.stagerunner.helpers._plugin_manifest import PluginManifest, PluginManifestError
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.adapters.stagerunner.project import derive_package_name as _derive
 
@@ -277,17 +278,16 @@ def sync_plugin_version(project_dir: Path) -> bool:
         return False
 
     try:
-        data = json.loads(plugin_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        manifest = PluginManifest.from_json(plugin_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, PluginManifestError) as exc:
         print(f"Warning: cannot read {plugin_path.name}: {exc}", file=sys.stderr)
         return False
 
-    current = str(data.get("version", ""))
+    current = manifest.version
     if not _may_raise_manifest(package_version, current):
         return False
 
-    data["version"] = package_version
-    plugin_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    plugin_path.write_text(manifest.with_version(package_version).to_json(), encoding="utf-8")
     print(f"Synced plugin.json version {current} -> {package_version}")
     return True
 

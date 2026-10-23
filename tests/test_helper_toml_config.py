@@ -82,3 +82,37 @@ def test_to_requirement_string_already_pep508_passes_through_verbatim() -> None:
     spec = PoetryDepSpec(name="requests", version=">=1.0,<2.0")
 
     assert spec.to_requirement_string() == "requests>=1.0,<2.0"
+
+
+# ---------------------------------------------------------------------------
+# [tool.scripts.test-all].workers and [tool.git].default-remote - typed, lenient
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(("value", "expected"), [(3, 3), (0, 0), (-1, -1), (True, None), (2.0, None), ("2", None)])
+def test_test_all_workers_keeps_only_a_real_integer(value: object, expected: int | None) -> None:
+    """A bool is no count and a float or string is no deliberate setting; both read as unset.
+
+    Zero and negatives ARE kept: they are instructions the matrix refuses, not shapes to drop.
+    """
+    config = PyprojectConfig.from_dict({"tool": {"scripts": {"test-all": {"workers": value}}}})
+
+    assert config.tool.scripts.test_all.workers == expected
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("scripts", [3, {"test-all": "x"}, {"test": {"pytest-verbosity": "-q"}}])
+def test_a_misshapen_or_absent_test_all_table_reads_as_unset(scripts: object) -> None:
+    config = PyprojectConfig.from_dict({"tool": {"scripts": scripts}})
+
+    assert config.tool.scripts.test_all.workers is None
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(("value", "expected"), [(" upstream ", "upstream"), ("  ", ""), (3, ""), (["x"], "")])
+def test_default_remote_is_a_stripped_string_or_unset(value: object, expected: str) -> None:
+    """A number is not stringified into a remote name: it is a string or it is not set."""
+    config = PyprojectConfig.from_dict({"tool": {"git": {"default-remote": value}}})
+
+    assert config.tool.git.default_remote == expected
