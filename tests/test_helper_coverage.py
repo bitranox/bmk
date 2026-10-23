@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -32,6 +33,9 @@ from bmk.adapters.stagerunner.helpers._coverage import (
     run_coverage_tests,
     upload_coverage_report,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -438,6 +442,278 @@ def test_run_coverage_tests_prints_commands(tmp_path: Path, capsys: pytest.Captu
     assert "[coverage] python -m coverage run" in captured.out
     assert "[coverage] python -m coverage report" in captured.out
     assert "[coverage] python -m coverage xml" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# run_coverage_tests - characterisation (exact argv, kwargs, output, ordering)
+# ---------------------------------------------------------------------------
+
+_RUN_PATCH = "bmk.adapters.stagerunner.helpers._coverage.subprocess.run"
+_WHICH_PATCH = "bmk.adapters.stagerunner.helpers._coverage.shutil.which"
+
+
+def _minimal_pyproject(project_dir: Path, extra: str = "") -> None:
+    (project_dir / "pyproject.toml").write_text('[project]\nname = "test"\n' + extra)
+
+
+def _returncodes_in_order(*codes: int) -> Callable[..., subprocess.CompletedProcess[str]]:
+    remaining: Iterator[int] = iter(codes)
+
+    def _side_effect(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return _make_completed(next(remaining))
+
+    return _side_effect
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_default_run_pins_argv_kwargs_and_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default (non-quiet) run issues three exact commands, each announced on stdout first."""
+    _minimal_pyproject(tmp_path)
+    output_before_each_call: list[str] = []
+
+    def _side_effect(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        output_before_each_call.append(capsys.readouterr().out)
+        return _make_completed(0)
+
+    with patch(_RUN_PATCH, side_effect=_side_effect) as mock_run:
+        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+
+    assert result == 0
+    calls = mock_run.call_args_list
+    assert [c.args[0] for c in calls] == [
+        [sys.executable, "-m", "coverage", "run", "--source=src", "-m", "pytest", "-m", "not integration", "-v"],
+        [sys.executable, "-m", "coverage", "report", "-m", "--fail-under=80"],
+        [sys.executable, "-m", "coverage", "xml", "-o", "coverage.xml"],
+    ]
+    assert set(calls[0].kwargs) == {"env", "cwd", "check"}
+    assert set(calls[1].kwargs) == {"env", "cwd", "check", "stdout", "stderr"}
+    assert set(calls[2].kwargs) == {"env", "cwd", "check"}
+    assert calls[1].kwargs["stdout"] is None
+    assert calls[1].kwargs["stderr"] is None
+    for call in calls:
+        assert call.kwargs["cwd"] == tmp_path
+        assert call.kwargs["check"] is False
+    coverage_files = {c.kwargs["env"]["COVERAGE_FILE"] for c in calls}
+    assert len(coverage_files) == 1
+    coverage_file = Path(coverage_files.pop())
+    assert coverage_file.name == ".coverage"
+    assert not coverage_file.parent.exists()  # the temporary directory is gone afterwards
+    assert calls[0].kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "src")
+    assert output_before_each_call == [
+        "[coverage] python -m coverage run --source=src -m pytest -m 'not integration' -v\n",
+        "[coverage] python -m coverage report -m --fail-under=80\n",
+        "[coverage] python -m coverage xml -o coverage.xml\n",
+    ]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_quiet_pins_argv_devnull_report_and_silence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Quiet mode swaps verbosity for short-traceback flags, silences the report, and prints nothing."""
+    _minimal_pyproject(tmp_path)
+
+    with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
+        result = run_coverage_tests(project_dir=tmp_path, quiet=True, python=sys.executable)
+
+    assert result == 0
+    calls = mock_run.call_args_list
+    assert [c.args[0] for c in calls] == [
+        [
+            sys.executable,
+            "-m",
+            "coverage",
+            "run",
+            "--source=src",
+            "-m",
+            "pytest",
+            "-m",
+            "not integration",
+            "--tb=short",
+            "-q",
+            "--no-header",
+        ],
+        [sys.executable, "-m", "coverage", "report", "-m", "--fail-under=80"],
+        [sys.executable, "-m", "coverage", "xml", "-o", "coverage.xml"],
+    ]
+    assert calls[1].kwargs["stdout"] is subprocess.DEVNULL
+    assert calls[1].kwargs["stderr"] is subprocess.DEVNULL
+    assert "stdout" not in calls[0].kwargs
+    assert "stdout" not in calls[2].kwargs
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_quiet_still_warns_when_xml_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The XML-failure warning is not gated by quiet; the run still succeeds."""
+    _minimal_pyproject(tmp_path)
+    with patch(_RUN_PATCH, side_effect=_returncodes_in_order(0, 0, 3)):
+        result = run_coverage_tests(project_dir=tmp_path, quiet=True, python=sys.executable)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "[coverage] warning: XML report generation failed (exit 3)\n"
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_pytest_failure_stops_before_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failing pytest returns its own code and runs neither report nor xml."""
+    _minimal_pyproject(tmp_path)
+
+    with patch(_RUN_PATCH, return_value=_make_completed(4)) as mock_run:
+        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+
+    assert result == 4
+    assert mock_run.call_count == 1
+    assert (
+        capsys.readouterr().out == "[coverage] python -m coverage run --source=src -m pytest -m 'not integration' -v\n"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_report_failure_skips_xml(tmp_path: Path) -> None:
+    """A failing report returns its own code and never runs the xml step."""
+    _minimal_pyproject(tmp_path)
+    with patch(_RUN_PATCH, side_effect=_returncodes_in_order(0, 7)) as mock_run:
+        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+
+    assert result == 7
+    assert mock_run.call_count == 2
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_without_interpreter_refuses_before_any_side_effect(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No interpreter: a 'Cannot run tests' line on stderr, exit 1, no cleanup, no subprocess."""
+    _minimal_pyproject(tmp_path)
+    stale_report = tmp_path / "coverage.xml"
+    stale_report.write_text("<coverage/>")
+
+    with patch(_RUN_PATCH) as mock_run:
+        result = run_coverage_tests(project_dir=tmp_path, python=None)
+
+    assert result == 1
+    mock_run.assert_not_called()
+    assert stale_report.exists()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "Cannot run tests: no project virtualenv found, so there is no environment to run the tests in.\n"
+        "bmk runs the suite in the project's own venv (the one it syncs from pyproject.toml),\n"
+        "never in its own tool env. Create it with `uv venv` (bmk normally provisions it\n"
+        "automatically), or unset BMK_NO_VENV_SYNC=1 if you set it.\n"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_with_missing_interpreter_path_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An interpreter path that does not exist is named on stderr and returns 1."""
+    _minimal_pyproject(tmp_path)
+    missing = str(tmp_path / "no-such-python")
+
+    with patch(_RUN_PATCH) as mock_run:
+        result = run_coverage_tests(project_dir=tmp_path, python=missing)
+
+    assert result == 1
+    mock_run.assert_not_called()
+    assert capsys.readouterr().err == f"Cannot run tests: the project's interpreter does not exist: {missing}\n"
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_cleans_stale_artifacts_before_the_first_command(tmp_path: Path) -> None:
+    """Stale coverage shards and reports are gone by the time pytest starts."""
+    _minimal_pyproject(tmp_path)
+    stale = [
+        tmp_path / ".coverage",
+        tmp_path / ".coverage.host.123",
+        tmp_path / "coverage.xml",
+        tmp_path / "codecov.xml",
+    ]
+    for path in stale:
+        path.write_text("stale")
+    present_at_first_call: list[bool] = []
+
+    def _side_effect(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if not present_at_first_call:
+            present_at_first_call.extend(p.exists() for p in stale)
+        return _make_completed(0)
+
+    with patch(_RUN_PATCH, side_effect=_side_effect):
+        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+
+    assert present_at_first_call == [False, False, False, False]
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_empty_exclude_markers_adds_no_marker_filter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty exclude-markers setting adds no -m filter, in argv or in the announced line."""
+    _minimal_pyproject(tmp_path, '\n[tool.scripts.test]\nexclude-markers = ""\n')
+
+    with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
+        run_coverage_tests(project_dir=tmp_path, generate_xml=False, python=sys.executable)
+
+    assert mock_run.call_args_list[0].args[0] == [
+        sys.executable,
+        "-m",
+        "coverage",
+        "run",
+        "--source=src",
+        "-m",
+        "pytest",
+        "-v",
+    ]
+    assert capsys.readouterr().out == (
+        "[coverage] python -m coverage run --source=src -m pytest -v\n"
+        "[coverage] python -m coverage report -m --fail-under=80\n"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_run_coverage_tests_uses_every_configured_value(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Each pyproject setting reaches its own argv slot and announced line."""
+    _minimal_pyproject(
+        tmp_path,
+        "\n[tool.scripts.test]\n"
+        'pytest-verbosity = "-vv"\n'
+        'coverage-report-file = "cov.xml"\n'
+        'src-path = "lib"\n'
+        'exclude-markers = "slow"\n'
+        '\n[tool.coverage.run]\nsource = ["lib/a", "lib/b"]\n'
+        "\n[tool.coverage.report]\nfail_under = 91\n",
+    )
+
+    with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
+        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+
+    calls = mock_run.call_args_list
+    assert [c.args[0] for c in calls] == [
+        [sys.executable, "-m", "coverage", "run", "--source=lib/a,lib/b", "-m", "pytest", "-m", "not slow", "-vv"],
+        [sys.executable, "-m", "coverage", "report", "-m", "--fail-under=91"],
+        [sys.executable, "-m", "coverage", "xml", "-o", "cov.xml"],
+    ]
+    assert calls[0].kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "lib")
+    assert capsys.readouterr().out == (
+        "[coverage] python -m coverage run --source=lib/a,lib/b -m pytest -m 'not slow' -vv\n"
+        "[coverage] python -m coverage report -m --fail-under=91\n"
+        "[coverage] python -m coverage xml -o cov.xml\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1426,3 +1702,241 @@ def test_main_runs_tests_then_uploads(tmp_path: Path, monkeypatch: pytest.Monkey
         result = main(project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
 
     assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# main - characterisation (quiet gating, exact warnings, forwarding, ordering)
+# ---------------------------------------------------------------------------
+
+_TOKEN_WARNING = (
+    "\033[33m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
+    "(set CODECOV_TOKEN in environment or .env)\033[0m\n"
+)
+_UPLOADER_WARNING = "\033[33m[codecov] warning: 'codecovcli' not installed; skipping upload\033[0m\n"
+
+
+def _upload_side_effect(upload_returncode: int) -> Callable[..., subprocess.CompletedProcess[str]]:
+    def _side_effect(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _make_completed(128)
+        return _make_completed(upload_returncode)
+
+    return _side_effect
+
+
+@pytest.mark.os_agnostic
+def test_main_with_neither_step_does_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """With run_tests and upload both off, main prints nothing and runs nothing."""
+    with patch(_RUN_PATCH) as mock_run, patch(_WHICH_PATCH) as mock_which:
+        result = main(project_dir=tmp_path, run_tests=False, upload=False)
+
+    assert result == 0
+    mock_run.assert_not_called()
+    mock_which.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_run_tests_pins_announce_lines_around_the_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The running line precedes the coverage commands and the passed line follows them."""
+    _minimal_pyproject(tmp_path)
+
+    with patch(_RUN_PATCH, return_value=_make_completed(0)):
+        result = main(project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == (
+        f"[coverage] Running tests with coverage in {tmp_path}...\n"
+        "[coverage] python -m coverage run --source=src -m pytest -m 'not integration' -v\n"
+        "[coverage] python -m coverage report -m --fail-under=80\n"
+        "[coverage] python -m coverage xml -o coverage.xml\n"
+        "[coverage] Tests passed\n"
+    )
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_quiet_run_tests_success_prints_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Quiet mode suppresses both announce lines on success."""
+    _minimal_pyproject(tmp_path)
+
+    with patch(_RUN_PATCH, return_value=_make_completed(0)):
+        result = main(project_dir=tmp_path, run_tests=True, upload=False, quiet=True, python=sys.executable)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_quiet_test_failure_still_reports_on_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Quiet does not hide a failure: the Tests failed line still reaches stderr, and no upload starts."""
+    _minimal_pyproject(tmp_path)
+    monkeypatch.setenv("CODECOV_TOKEN", "token123")
+
+    with patch(_RUN_PATCH, return_value=_make_completed(5)), patch(_WHICH_PATCH) as mock_which:
+        result = main(project_dir=tmp_path, run_tests=True, upload=True, quiet=True, python=sys.executable)
+
+    assert result == 5
+    mock_which.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "[coverage] Tests failed (exit 5)\n"
+
+
+@pytest.mark.os_agnostic
+def test_main_without_interpreter_returns_one_with_both_error_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A missing interpreter surfaces as exit 1: the refusal line, then the Tests failed line."""
+    _minimal_pyproject(tmp_path)
+    missing = str(tmp_path / "no-such-python")
+
+    result = main(project_dir=tmp_path, run_tests=True, upload=False, quiet=True, python=missing)
+
+    assert result == 1
+    assert capsys.readouterr().err == (
+        f"Cannot run tests: the project's interpreter does not exist: {missing}\n[coverage] Tests failed (exit 1)\n"
+    )
+
+
+@pytest.mark.os_agnostic
+def test_main_forwards_integration_and_quiet_to_the_run(tmp_path: Path) -> None:
+    """include_integration and quiet reach the pytest argv."""
+    _minimal_pyproject(tmp_path)
+
+    with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
+        main(
+            project_dir=tmp_path,
+            run_tests=True,
+            upload=False,
+            include_integration=True,
+            quiet=True,
+            python=sys.executable,
+        )
+
+    assert mock_run.call_args_list[0].args[0] == [
+        sys.executable,
+        "-m",
+        "coverage",
+        "run",
+        "--source=src",
+        "-m",
+        "pytest",
+        "--tb=short",
+        "-q",
+        "--no-header",
+    ]
+
+
+@pytest.mark.os_agnostic
+def test_main_missing_token_pins_exact_warning_and_skips_uploader_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No token: the exact yellow warning on stderr, exit 0, and codecovcli is never looked up."""
+    monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+    child = tmp_path / "project"
+    child.mkdir()
+
+    with patch(_WHICH_PATCH) as mock_which:
+        result = main(project_dir=child, run_tests=False, upload=True)
+
+    assert result == 0
+    mock_which.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == _TOKEN_WARNING
+
+
+@pytest.mark.os_agnostic
+def test_main_quiet_missing_token_prints_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Quiet suppresses the missing-token warning; the exit stays 0."""
+    monkeypatch.delenv("CODECOV_TOKEN", raising=False)
+    child = tmp_path / "project"
+    child.mkdir()
+
+    result = main(project_dir=child, run_tests=False, upload=True, quiet=True)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_missing_uploader_pins_exact_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No codecovcli: the exact yellow warning on stderr, nothing on stdout, exit 0."""
+    monkeypatch.setenv("CODECOV_TOKEN", "token123")
+
+    with patch(_WHICH_PATCH, return_value=None), patch(_RUN_PATCH) as mock_run:
+        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+
+    assert result == 0
+    mock_run.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == _UPLOADER_WARNING
+
+
+@pytest.mark.os_agnostic
+def test_main_quiet_missing_uploader_prints_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Quiet suppresses the missing-uploader warning; the exit stays 0."""
+    monkeypatch.setenv("CODECOV_TOKEN", "token123")
+
+    with patch(_WHICH_PATCH, return_value=None):
+        result = main(project_dir=tmp_path, run_tests=False, upload=True, quiet=True)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_quiet_upload_hides_only_the_uploading_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Quiet hides main's own Uploading line; the uploader's result line is not main's to gate."""
+    (tmp_path / "coverage.xml").write_text("<coverage/>")
+    monkeypatch.setenv("CODECOV_TOKEN", "token123")
+    monkeypatch.setenv("GITHUB_SHA", "abc123")
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+
+    with patch(_WHICH_PATCH, return_value="/usr/bin/codecovcli"), patch(_RUN_PATCH, side_effect=_upload_side_effect(0)):
+        result = main(project_dir=tmp_path, run_tests=False, upload=True, quiet=True)
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert captured.out == "[codecov] upload succeeded\n"
+    assert captured.err == ""
+
+
+@pytest.mark.os_agnostic
+def test_main_upload_failure_pins_uploading_line_and_exit_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The Uploading line names the project; a failed upload maps to exit 1 whatever the uploader returned."""
+    (tmp_path / "coverage.xml").write_text("<coverage/>")
+    monkeypatch.setenv("CODECOV_TOKEN", "token123")
+    monkeypatch.setenv("GITHUB_SHA", "abc123")
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+
+    with patch(_WHICH_PATCH, return_value="/usr/bin/codecovcli"), patch(_RUN_PATCH, side_effect=_upload_side_effect(2)):
+        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert captured.out == f"[codecov] Uploading coverage from {tmp_path}...\n"
+    assert captured.err == "[codecov] upload failed (exit 2)\n"
