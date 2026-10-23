@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.23.4] 2026-10-23 23:54:14
+
 ### Changed
 
 - `make test-all` type-checks every OS your CI runs on, in every Python cell, with the same runs as
@@ -13,6 +15,9 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   which neither gate saw before, now fails the cell that has it, and the failure names the run.
   Without `[tool.ci].os` a cell checks the host only, as before. Measured on bmk itself: 4.6-8.9 s
   per extra pyright run.
+- The `devops-bmk` skill says how an outdated (or newer) Makefile is handled per output mode and
+  that a text-mode gate with an unanswered terminal waits forever, that `release` run from a topic
+  branch pushes that branch, and states current behaviour only.
 
 ### Fixed
 
