@@ -91,9 +91,10 @@ Only entries with a dotted `X.Y` count, so the conventional bare `:: Python :: 3
 
 The same classifiers drive **`make test-all`**: it provisions one `.venv-<minor>` per declared
 version and runs pytest + pyright in each, in parallel, so you can reproduce CI's version matrix
-locally before you push. Like `make test`'s pyright stage, each cell runs pyright once per OS
-listed in `[tool.ci].os` (`--pythonplatform Linux|Windows|Darwin`; the host only when the key is
-absent), so a type error that shows only on one OS under one older Python is caught here too.
+locally before you push. Each cell runs the same pyright runs as `make test`'s pyright stage:
+every OS listed in `[tool.ci].os` (the host only when the key is absent), honouring a pinned
+`pythonPlatform` and `pyrightconfig.<platform>.json` arms (see `docs/pipelines.md`), so a type
+error that shows only on one OS under one older Python is caught here too.
 Plain `make test` stays on the newest version only. With no classifier, `test-all` tests the
 default interpreter once and warns.
 

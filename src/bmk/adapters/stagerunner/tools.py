@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from bmk.domain.enums import ToolOutputFormat
 
 from .context import resolve_test_python
-from .project import derive_package_name, pip_audit_ignore_flags, pyright_platforms
+from .project import derive_package_name, pip_audit_ignore_flags, pyright_runs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -126,15 +126,14 @@ def pyright_argv(ctx: StageContext) -> list[str]:
 
 
 def pyright_argvs(ctx: StageContext) -> list[list[str]]:
-    """One pyright run per platform ``[tool.ci].os`` declares, or a single host run.
+    """The pyright runs that cover every platform ``[tool.ci].os`` declares (see ``pyright_runs``).
 
     pyright checks ONE platform per run (``sys.platform`` branches, typeshed stubs), so a
     host-only run passes code whose types break on another OS the project ships for: a
     Windows-only error passed this gate and reddened every windows-latest CI cell.
     """
     base = pyright_argv(ctx)
-    platforms = pyright_platforms(ctx.project_dir / "pyproject.toml")
-    return [[*base, "--pythonplatform", platform.value] for platform in platforms] or [base]
+    return [[*base, *extra] for extra in pyright_runs(ctx.project_dir)]
 
 
 # --- makescripts .py helper subprocesses ------------------------------------

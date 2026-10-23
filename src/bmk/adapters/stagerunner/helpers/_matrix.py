@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
-from bmk.adapters.stagerunner.project import pyright_platforms
+from bmk.adapters.stagerunner.project import pyright_runs
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
     ensure_minors_installed,
@@ -136,19 +136,16 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[Ce
     if result.returncode != 0:
         return CellStatus.FAIL, _tail(result.stdout + result.stderr)
 
-    # One pyright run per OS [tool.ci].os declares, as in make test's pyright stage: pyright checks
-    # one platform per run, so a cell typed for the host alone passes a Windows-only error that
-    # only the older Python this cell exists for shows.
-    platforms = [platform.value for platform in pyright_platforms(project_dir / "pyproject.toml")]
-    for platform in platforms or [None]:
-        pyright_cmd = ["pyright", "--pythonpath", str(python)]
-        if platform is not None:
-            pyright_cmd += ["--pythonplatform", platform]
+    # The same runs as make test's pyright stage (pyright_runs): pyright checks one platform per
+    # run, so a cell typed for the host alone passes a Windows-only error that only the older Python
+    # this cell exists for shows.
+    for extra in pyright_runs(project_dir):
+        pyright_cmd = ["pyright", "--pythonpath", str(python), *extra]
         if quiet:
             pyright_cmd.append("--outputjson")
         checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
         if checked.returncode != 0:
-            header = f"pyright --pythonplatform {platform}:\n" if platform is not None else ""
+            header = f"pyright {' '.join(extra)}:\n" if extra else ""
             return CellStatus.FAIL, header + _tail(checked.stdout + checked.stderr)
     return CellStatus.PASSED, ""
 

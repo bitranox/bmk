@@ -155,3 +155,86 @@ def test_the_pyright_stage_passes_when_windows_is_not_declared(tmp_path: Path) -
     rc, out = _pyright_stage_output(_project(tmp_path, '["ubuntu-latest", "macos-latest"]'))
 
     assert rc == 0, out
+
+
+# --- a project that set its platforms up itself ------------------------------
+#
+# lsdsk pins pythonPlatform = "Linux" in [tool.pyright] and ships pyrightconfig.windows.json /
+# pyrightconfig.darwin.json arms over src only. Forcing --pythonplatform Windows over the main
+# config reported 159 errors there (Linux-only modules, POSIX-only tests) while CI, which runs
+# bare pyright per runner, stayed green.
+
+_ALL_THREE = '["ubuntu-latest", "windows-latest", "macos-latest"]'
+
+
+def _pin(project: Path, platform: str, *, in_pyrightconfig: bool = False) -> None:
+    if in_pyrightconfig:
+        (project / "pyrightconfig.json").write_text(f'{{"pythonPlatform": "{platform}"}}', encoding="utf-8")
+        return
+    pyproject = project / "pyproject.toml"
+    body = pyproject.read_text(encoding="utf-8") + f'\n[tool.pyright]\npythonPlatform = "{platform}"\n'
+    pyproject.write_text(body, encoding="utf-8")
+
+
+def _arm(project: Path, platform: str, config: str = "{}") -> str:
+    name = f"pyrightconfig.{platform.lower()}.json"
+    (project / name).write_text(config, encoding="utf-8")
+    return name
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("in_pyrightconfig", [False, True], ids=["tool.pyright", "pyrightconfig.json"])
+def test_a_pinned_platform_runs_the_main_config_once_and_each_declared_arm(
+    tmp_path: Path, in_pyrightconfig: bool
+) -> None:
+    project = _project(tmp_path, _ALL_THREE)
+    _pin(project, "Linux", in_pyrightconfig=in_pyrightconfig)
+    windows = _arm(project, "Windows")
+    ctx = _ctx(project, ToolOutputFormat.JSON)
+    base = tools.pyright_argv(ctx)
+
+    # No --pythonplatform anywhere: the pin decides the main run, each arm its own; Darwin has no
+    # arm, so the pinned main config is all CI checks there too.
+    assert tools.pyright_argvs(ctx) == [base, [*base, "--project", windows]]
+
+
+@pytest.mark.os_agnostic
+def test_without_a_pin_each_declared_platform_runs_and_so_does_its_arm(tmp_path: Path) -> None:
+    project = _project(tmp_path, '["ubuntu-latest", "windows-latest"]')
+    windows = _arm(project, "Windows")
+    ctx = _ctx(project, ToolOutputFormat.JSON)
+    base = tools.pyright_argv(ctx)
+
+    assert tools.pyright_argvs(ctx) == [
+        [*base, "--pythonplatform", "Linux"],
+        [*base, "--pythonplatform", "Windows"],
+        [*base, "--project", windows],
+    ]
+
+
+@pytest.mark.os_agnostic
+def test_an_arm_for_a_platform_ci_does_not_run_is_not_run(tmp_path: Path) -> None:
+    project = _project(tmp_path, '["ubuntu-latest"]')
+    _pin(project, "Linux")
+    _arm(project, "Windows")
+    ctx = _ctx(project, ToolOutputFormat.JSON)
+
+    assert tools.pyright_argvs(ctx) == [tools.pyright_argv(ctx)]
+
+
+@pytest.mark.os_agnostic
+def test_the_pyright_stage_respects_a_pinned_platform_and_its_arms(tmp_path: Path) -> None:
+    # Like lsdsk: a Linux-only module the Windows arm excludes, under a main config pinned to Linux.
+    project = _project(tmp_path, _ALL_THREE)
+    _pin(project, "Linux")
+    (project / "linux_only").mkdir()
+    (project / "linux_only" / "probe.py").write_text(_POSIX_ONLY_CALL, encoding="utf-8")
+    _arm(project, "Windows", '{"pythonPlatform": "Windows", "exclude": ["linux_only"]}')
+    (stage,) = [s for s in PIPELINES["test"] if s.name == "pyright"]
+    sink = CapturingSink()
+
+    rc = stage.action(_ctx(project), sink)
+
+    out = sink.getvalue()
+    assert rc == 0, out
+    assert "--project pyrightconfig.windows.json" in out, out

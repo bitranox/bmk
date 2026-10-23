@@ -8,6 +8,7 @@ remain during migration; this is their in-package port (canonical after Phase 5)
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -85,4 +86,50 @@ def pyright_platforms(pyproject: Path) -> tuple[PyrightPlatform, ...]:
     return tuple(dict.fromkeys(platform for platform in found if platform is not None))
 
 
-__all__ = ["derive_package_name", "pip_audit_ignore_flags", "pyright_platforms"]
+def _pinned_platform(project_dir: Path) -> PyrightPlatform | None:
+    """The ``pythonPlatform`` the project's own pyright config pins, or None.
+
+    pyright reads ``pyrightconfig.json`` when it exists and ``[tool.pyright]`` otherwise, so the
+    pin is looked up in that order. A value naming no single platform (``All``), and a
+    ``pyrightconfig.json`` that is not plain JSON (pyright also takes comments), read as no pin.
+    """
+    config_file = project_dir / "pyrightconfig.json"
+    if config_file.is_file():
+        try:
+            config: object = json.loads(config_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+    else:
+        config = _load(project_dir / "pyproject.toml").get("tool", {}).get("pyright", {})
+    value = cast("dict[str, object]", config).get("pythonPlatform") if isinstance(config, dict) else None
+    return next((p for p in PyrightPlatform if isinstance(value, str) and p.value.casefold() == value.casefold()), None)
+
+
+def pyright_runs(project_dir: Path) -> tuple[tuple[str, ...], ...]:
+    """The extra pyright arguments of each run that covers the platforms ``[tool.ci].os`` declares.
+
+    The main config runs the way CI runs it - bare ``pyright`` on each runner: once under the
+    platform the project pins (``pythonPlatform``), or once per declared platform
+    (``--pythonplatform``) when it pins none. A project that pinned its platform did it on purpose
+    (lsdsk keeps Linux-only modules in the main config), and forcing another platform over that
+    config reported 159 errors CI never shows. Each declared platform's own arm,
+    ``pyrightconfig.<platform>.json`` in the project root, runs too, through ``--project``.
+
+    With no declared platform it is one bare run, for the host.
+
+    Example:
+        >>> pyright_runs(Path("does-not-exist"))
+        ((),)
+    """
+    platforms = pyright_platforms(project_dir / "pyproject.toml")
+    if not platforms:
+        return ((),)
+    pinned = _pinned_platform(project_dir)
+    main: list[tuple[str, ...]] = (
+        [()] if pinned is not None else [("--pythonplatform", platform.value) for platform in platforms]
+    )
+    arms = [f"pyrightconfig.{platform.value.lower()}.json" for platform in platforms]
+    return (*main, *(("--project", arm) for arm in arms if (project_dir / arm).is_file()))
+
+
+__all__ = ["derive_package_name", "pip_audit_ignore_flags", "pyright_platforms", "pyright_runs"]

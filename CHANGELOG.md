@@ -8,12 +8,20 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Changed
 
-- `make test-all` type-checks every OS your CI runs on, in every Python cell: each cell runs
-  pyright once per OS family in `[tool.ci].os` (`--pythonplatform Linux|Windows|Darwin`), as
-  `make test`'s pyright stage has since 3.23.0. A type error that shows only on one OS under one
-  older Python, which neither gate saw before, now fails the cell that has it, and the failure
-  names the platform. Without `[tool.ci].os` a cell checks the host only, as before. Measured on
-  bmk itself: 4.6-8.9 s per extra pyright run.
+- `make test-all` type-checks every OS your CI runs on, in every Python cell, with the same runs as
+  `make test`'s pyright stage. A type error that shows only on one OS under one older Python,
+  which neither gate saw before, now fails the cell that has it, and the failure names the run.
+  Without `[tool.ci].os` a cell checks the host only, as before. Measured on bmk itself: 4.6-8.9 s
+  per extra pyright run.
+
+### Fixed
+
+- **The per-OS pyright check no longer overrides a project's own platform setup.** Since 3.23.0
+  it forced `--pythonplatform` for every declared OS over the main pyright config, even when the
+  project pins `pythonPlatform` there on purpose; a project keeping Linux-only modules in its
+  main config (and Windows/macOS arms over `src` only) got 159 errors `make test` reported and CI
+  never showed. A pinned main config now runs once, under its pin, as CI runs it, and each
+  declared platform's `pyrightconfig.<platform>.json` arm runs through `--project`.
 
 ## [3.23.3] 2026-10-23 22:56:09
 
