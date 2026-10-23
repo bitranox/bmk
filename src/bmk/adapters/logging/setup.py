@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import lib_log_rich.runtime
 from dotenv import dotenv_values
@@ -171,13 +171,26 @@ def _nearest_dotenv() -> Path | None:
     except OSError:
         return None
     for directory in (start, *start.parents):
-        found, stop = _dotenv_in(directory)
-        if found is not None or stop:
-            return found
+        probe = _dotenv_in(directory)
+        if probe.found is not None or probe.stop:
+            return probe.found
     return None
 
 
-def _dotenv_in(directory: Path) -> tuple[Path | None, bool]:
+class _DotenvProbe(NamedTuple):
+    """What one directory of the upward ``.env`` search answered.
+
+    Attributes:
+        found: The ``.env`` in that directory, or None when it has none.
+        stop: Whether the search ends there: a ``.env`` was found or the directory is a
+            project root.
+    """
+
+    found: Path | None
+    stop: bool
+
+
+def _dotenv_in(directory: Path) -> _DotenvProbe:
     """The ``.env`` in ``directory``, and whether the search stops there (a project root).
 
     A directory that cannot be read is passed over: Python before 3.14 raises for a path
@@ -186,10 +199,10 @@ def _dotenv_in(directory: Path) -> tuple[Path | None, bool]:
     try:
         candidate = directory / ".env"
         if candidate.is_file():
-            return candidate, True
-        return None, any((directory / marker).exists() for marker in _PROJECT_MARKERS)
+            return _DotenvProbe(candidate, stop=True)
+        return _DotenvProbe(None, stop=any((directory / marker).exists() for marker in _PROJECT_MARKERS))
     except OSError:
-        return None, False
+        return _DotenvProbe(None, stop=False)
 
 
 def _load_log_variables(dotenv_path: str | None) -> None:
