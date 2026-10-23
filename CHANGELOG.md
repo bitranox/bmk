@@ -6,6 +6,40 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bmk test` and `bmk custom` stop with exit 78 on a refused `[bmk.supply_chain]` value.** They
+  read the section themselves and did not catch its error, so a cooldown such as `"14 Days"`
+  crashed them with exit 1, while every other pipeline command stopped with CONFIG_ERROR (78)
+  and one line naming the key. All pipeline commands now read `[bmk]` in one place.
+- **`[bmk].show_warnings` applies to every pipeline command.** Only `test` and `custom` passed it
+  on; every other command ran with warnings shown whatever was configured.
+- **The dependency report prints a row's status as `[outdated]` on every Python.** On 3.11 and
+  later it printed `[DependencyStatus.OUTDATED]`: a str-mixin enum interpolated into an f-string
+  renders its name there, its value only on 3.10.
+- A pyproject.toml with a wrong-shaped table (`tool = 3`, a list `project.scripts`, a string
+  `[tool.coverage.run]`, a scalar `[tool.hatch].build`) reads as "not configured" instead of
+  crashing a stage with AttributeError or TypeError. A non-array `[tool.pip-audit].ignore-vulns`
+  gives no ignore flags (a string used to give one flag per character, a table one per key), and
+  a non-array wheel `packages` falls through to the scripts and name rules instead of taking a
+  string's first character as the package name.
+- A `.claude-plugin/plugin.json` that is valid JSON but not an object is reported ("cannot read
+  plugin.json: not a JSON object") by the version sync and skipped by the release gate, instead
+  of crashing both. A PyPI answer that is JSON but not an object reads as "package unavailable".
+
+### Changed
+
+- An invalid `fail_under` or `source` in `[tool.scripts.test]` is refused even when
+  `[tool.coverage.report]` / `[tool.coverage.run]` supplies a valid value; the valid one used to
+  mask it. Coverage-config validation errors name the nested key (for example
+  `tool.coverage.report.fail_under`).
+- A `[bmk].show_warnings` value that is not a boolean is refused with exit 78 instead of being
+  used by its truthiness.
+- Internal: every pyproject.toml, uv.lock, PyPI, `uv pip list`, pyrightconfig.json and
+  plugin.json read is parsed into a typed model at the point it enters, bump kinds, tool names
+  and pipeline results are enums end to end, and the `adapters.email.sender` re-export module is
+  gone (import from `bmk.adapters.email`).
+
 ## [3.24.0] 2026-10-24 00:03:08
 
 ### Changed
