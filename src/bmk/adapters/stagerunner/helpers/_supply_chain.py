@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import rtoml
 from packaging.requirements import InvalidRequirement, Requirement
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._pypi_models import PypiFile, PypiReleases, parse_moment
@@ -126,36 +126,48 @@ def normalize(name: str) -> str:
     return _RE_SEPARATOR.sub("-", name).lower()
 
 
-@dataclass(frozen=True)
-class SupplyChainSettings:
-    """What bmk writes into a project's ``[tool.uv]`` when the project has not chosen itself.
+class SupplyChainSettings(BaseModel):
+    """``[bmk.supply_chain]``: what bmk writes into a project's ``[tool.uv]`` when it has not chosen.
+
+    Validated once where the configuration is read; a missing key keeps its default and an
+    unknown key is ignored, as the section has always been read. The validators raise the
+    refusal text a caller shows verbatim (see :mod:`bmk.adapters.stagerunner.settings`).
 
     Attributes:
         cooldown: The ``exclude-newer`` value for a project that has none.
-        own_packages: Names exempted from the cooldown when a project reaches them.
+        own_packages: Names exempted from the cooldown when a project reaches them, in PEP 503 form.
+
+    Example:
+        >>> SupplyChainSettings.model_validate({"own_packages": ["My_Lib"]}).own_packages
+        frozenset({'my-lib'})
     """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     cooldown: str = DEFAULT_COOLDOWN
     own_packages: frozenset[str] = DEFAULT_OWN_PACKAGES
 
+    @field_validator("cooldown", mode="before")
     @classmethod
-    def from_config(cls, section: Mapping[str, Any]) -> SupplyChainSettings:
-        """Read ``[bmk.supply_chain]``; a missing key keeps its default.
-
-        Raises:
-            SupplyChainConfigError: When ``cooldown`` is not a value uv accepts, or
-                ``own_packages`` is not a list of names.
-        """
-        cooldown = section.get("cooldown", DEFAULT_COOLDOWN)
-        if not isinstance(cooldown, str) or not _RE_WRITABLE_COOLDOWN.fullmatch(cooldown):
-            raise SupplyChainConfigError(
-                f"bmk.supply_chain.cooldown {cooldown!r} is not one bmk may write: use '<N> days', "
+    def _writable_cooldown(cls, value: object) -> str:
+        # Before-mode so a non-string is refused with its own repr, not coerced or reported as a type.
+        if not isinstance(value, str) or not _RE_WRITABLE_COOLDOWN.fullmatch(value):
+            raise ValueError(
+                f"bmk.supply_chain.cooldown {value!r} is not one bmk may write: use '<N> days', "
                 "'<N> weeks', '<N> hours' (lowercase) or an ISO 8601 span such as 'P7D'"
             )
-        own = section.get("own_packages", sorted(DEFAULT_OWN_PACKAGES))
-        if not isinstance(own, (list, tuple)) or not all(isinstance(n, str) for n in cast("list[Any]", own)):
-            raise SupplyChainConfigError(f"bmk.supply_chain.own_packages must be a list of names, got {own!r}")
-        return cls(cooldown=cooldown, own_packages=frozenset(normalize(n) for n in cast("list[str]", own)))
+        return value
+
+    @field_validator("own_packages", mode="before")
+    @classmethod
+    def _package_names(cls, value: object) -> frozenset[str]:
+        # A bare string is iterable but is one name, not a list of characters: refuse it.
+        if not isinstance(value, (list, tuple, set, frozenset)):
+            raise ValueError(f"bmk.supply_chain.own_packages must be a list of names, got {value!r}")
+        names: list[object] = list(cast("Iterable[object]", value))
+        if not all(isinstance(name, str) for name in names):
+            raise ValueError(f"bmk.supply_chain.own_packages must be a list of names, got {value!r}")
+        return frozenset(normalize(cast("str", name)) for name in names)
 
 
 # --- the exclude-newer grammar -------------------------------------------------------------------

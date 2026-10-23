@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import lib_log_rich.runtime
 import rich_click as click
@@ -22,38 +21,25 @@ from ..context import get_cli_context
 from ..typed_click import argument, option
 from ._shared import resolve_output_format, run_command
 
-if TYPE_CHECKING:
-    from lib_layered_config import Config
-
 logger = logging.getLogger(__name__)
 
 
-def _run_test(args: tuple[str, ...], config: Config, *, human: bool = False) -> None:
+def _run_test(args: tuple[str, ...], *, human: bool = False) -> None:
     """Shared implementation for test commands.
 
     Args:
         args: Arguments forwarded to the pipeline's stages.
-        config: Loaded layered configuration (with profile and overrides applied).
         human: Use human-readable text output instead of JSON.
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
             or the pipeline's exit code on failure.
     """
-    # Deferred like run_command's own imports: `bmk --version` must not load the stage runner.
-    from bmk.adapters.stagerunner.helpers._supply_chain import SupplyChainSettings  # noqa: PLC0415
-
-    cwd = Path.cwd()
-    bmk_config = config.as_dict().get("bmk", {})
-
     exit_code = run_command(
-        cwd,
+        Path.cwd(),
         args,
         command_prefix="test",
-        package_name=bmk_config.get("package_name", ""),
-        show_warnings=bmk_config.get("show_warnings", True),
         output_format=resolve_output_format(human=human),
-        supply_chain=SupplyChainSettings.from_config(bmk_config.get("supply_chain", {})),
     )
 
     if exit_code != 0:
@@ -78,10 +64,11 @@ def cli_test(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
         >>> result.exit_code in (0, 2)  # 0 on success
         True
     """
-    config = require_config(ctx, get_cli_context(ctx))
+    # Read only to stop with exit 78 when it failed to load; run_command reads [bmk] itself.
+    require_config(ctx, get_cli_context(ctx))
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "test"}):
         logger.info("Executing test command - this will take some minutes")
-        _run_test(args, config, human=human)
+        _run_test(args, human=human)
 
 
 @click.command("t", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)
@@ -100,10 +87,11 @@ def cli_t(ctx: click.Context, human: bool, args: tuple[str, ...]) -> None:
         >>> result.exit_code in (0, 2)  # 0 on success
         True
     """
-    config = require_config(ctx, get_cli_context(ctx))
+    # Read only to stop with exit 78 when it failed to load; run_command reads [bmk] itself.
+    require_config(ctx, get_cli_context(ctx))
     with lib_log_rich.runtime.bind(job_id="cli-test", extra={"command": "t"}):
         logger.info("Executing test command - this will take some minutes")
-        _run_test(args, config, human=human)
+        _run_test(args, human=human)
 
 
 __all__ = [

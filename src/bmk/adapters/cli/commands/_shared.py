@@ -2,14 +2,14 @@
 
 Runs a command's staged pipeline via the in-process Python stage runner
 (:mod:`bmk.adapters.stagerunner`). The prefix's stages come from the built-in
-registry, a project ``[tool.bmk.pipelines]`` overlay (in pyproject.toml or
-override.
+registry, which a project ``[tool.bmk.pipelines]`` overlay (in pyproject.toml or
+``bmk_makescripts/stages.toml``) may override.
 """
 
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import rich_click as click
 
@@ -22,10 +22,9 @@ from ..context import CLIContext
 from ..exit_codes import ExitCode
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
 
-    from bmk.adapters.stagerunner.helpers._supply_chain import SupplyChainSettings
+    from bmk.adapters.stagerunner.settings import BmkSettings
 
 # Pipelines whose stages read or write the project's Python environment, and so
 # need it provisioned and synced first. Everything else (clean, bump, commit,
@@ -39,9 +38,6 @@ def run_command(
     *,
     command_prefix: str,
     output_format: ToolOutputFormat | None = None,
-    show_warnings: bool = True,
-    package_name: str = "",
-    supply_chain: SupplyChainSettings | None = None,
 ) -> int:
     """Resolve and run the pipeline for ``command_prefix`` via the stage runner.
 
@@ -51,17 +47,13 @@ def run_command(
         command_prefix: Pipeline to run (e.g. ``"test"``, ``"clean"``).
         output_format: TEXT (verbose) or JSON (machine-readable, quiet). When
             ``None``, resolved from ``BMK_OUTPUT_FORMAT`` (default JSON).
-        show_warnings: Show warnings from passing parallel stages.
-        package_name: Import package name override; empty reads ``[bmk].package_name``
-            from the CLI's configuration (else derived from pyproject).
-        supply_chain: The cooldown settings; None reads ``[bmk.supply_chain]`` from the CLI's
-            configuration, so no command can silently run under the built-in defaults.
 
     Returns:
         Exit code from the pipeline.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the prefix.
+        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the prefix, or
+            CONFIG_ERROR (78) when the ``[bmk]`` section holds a value bmk refuses.
     """
     # Deferred: the stagerunner subsystem (pipeline engine, registry, venv provisioning)
     # is expensive to import and only every command that actually RUNS a pipeline needs
@@ -72,11 +64,9 @@ def run_command(
 
     if output_format is None:
         output_format = resolve_output_format(human=False)
-    configured = _configured_bmk_section()
-    if not package_name:
-        package_name = str(configured.get("package_name", ""))
-    if supply_chain is None:
-        supply_chain = _supply_chain_from(configured)
+    # Read here, not by each command: a key that only some commands passed on silently fell back
+    # to its default in all the others.
+    settings = _configured_bmk_settings()
 
     stages = resolve_python_pipeline(cwd, command_prefix)
     if stages is None:
@@ -97,9 +87,9 @@ def run_command(
         extra_args,
         command_prefix=command_prefix,
         output_format=output_format,
-        show_warnings=show_warnings,
-        package_name=package_name,
-        supply_chain=supply_chain,
+        show_warnings=settings.show_warnings,
+        package_name=settings.package_name,
+        supply_chain=settings.supply_chain,
         venv_provisioning=provisioning,
     )
     return run_pipeline(stages, ctx)
@@ -121,28 +111,27 @@ def _provision_venv(cwd: Path, command_prefix: str, *, quiet: bool) -> VenvProvi
     return VenvProvisioning.FAILED if venv is None else VenvProvisioning.PROVISIONED
 
 
-def _configured_bmk_section() -> dict[str, Any]:
-    """The ``[bmk]`` section of the configuration the running CLI loaded; empty outside the CLI."""
+def _configured_bmk_settings() -> BmkSettings:
+    """The ``[bmk]`` section the running CLI loaded, validated; defaults outside the CLI.
+
+    A value bmk must not use stops the command with CONFIG_ERROR (78) and one stderr line per
+    problem, rather than running under a setting nobody chose.
+    """
+    from bmk.adapters.stagerunner.settings import (  # noqa: PLC0415 - see run_command
+        BmkSettings,
+        BmkSettingsError,
+        parse_bmk_settings,
+    )
+
     ctx = click.get_current_context(silent=True)
     obj = ctx.find_root().obj if ctx is not None else None
     if not isinstance(obj, CLIContext):
-        return {}
-    section = obj.config.as_dict().get("bmk", {})
-    return cast("dict[str, Any]", section) if isinstance(section, dict) else {}
-
-
-def _supply_chain_from(section: Mapping[str, Any]) -> SupplyChainSettings:
-    """``[bmk.supply_chain]`` as settings; a value bmk must not write stops the command with why."""
-    from bmk.adapters.stagerunner.helpers._supply_chain import (  # noqa: PLC0415 - see run_command
-        SupplyChainConfigError,
-        SupplyChainSettings,
-    )
-
-    raw = section.get("supply_chain", {})
+        return BmkSettings()
     try:
-        return SupplyChainSettings.from_config(cast("dict[str, Any]", raw) if isinstance(raw, dict) else {})
-    except SupplyChainConfigError as exc:
-        safe_console.echo(f"Error: {exc}", err=True)
+        return parse_bmk_settings(obj.config.get("bmk", default={}))
+    except BmkSettingsError as exc:
+        for problem in exc.problems:
+            safe_console.echo(f"Error: {problem}", err=True)
         raise SystemExit(ExitCode.CONFIG_ERROR) from exc
 
 

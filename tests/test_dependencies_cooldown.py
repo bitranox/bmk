@@ -35,6 +35,7 @@ from bmk.adapters.stagerunner.helpers._supply_chain import (
     ensure_uv_cooldown,
     own_closure,
 )
+from bmk.adapters.stagerunner.settings import BmkSettingsError, parse_bmk_settings
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
@@ -1458,9 +1459,14 @@ def test_a_standard_pin_table_left_empty_is_removed(tmp_path: Path, pypi: _FakeI
 # --- [bmk.supply_chain] ------------------------------------------------------------------------------
 
 
+def _supply_chain_of(section: object) -> SupplyChainSettings:
+    """The section read the way every pipeline command reads it: through the [bmk] boundary."""
+    return parse_bmk_settings({"supply_chain": section}).supply_chain
+
+
 @pytest.mark.os_agnostic
 def test_an_empty_section_keeps_the_defaults() -> None:
-    settings = SupplyChainSettings.from_config({})
+    settings = _supply_chain_of({})
 
     # User decision 2026-10-19: seven days, raised from the one day chosen 2026-10-12 once the
     # fleet's own projects had moved to it.
@@ -1474,12 +1480,12 @@ def test_the_shipped_section_sets_the_same_cooldown() -> None:
     shipped = get_default_config_path().parent / "defaultconfig.d" / "10-bmk.toml"
     section = rtoml.load(shipped)["bmk"]["supply_chain"]
 
-    assert SupplyChainSettings.from_config(section).cooldown == "7 days"
+    assert _supply_chain_of(section).cooldown == "7 days"
 
 
 @pytest.mark.os_agnostic
 def test_a_configured_own_list_replaces_the_default_and_is_normalized() -> None:
-    settings = SupplyChainSettings.from_config({"cooldown": "7 days", "own_packages": ["My_Lib"]})
+    settings = _supply_chain_of({"cooldown": "7 days", "own_packages": ["My_Lib"]})
 
     assert settings == SupplyChainSettings(cooldown="7 days", own_packages=frozenset({"my-lib"}))
 
@@ -1487,8 +1493,8 @@ def test_a_configured_own_list_replaces_the_default_and_is_normalized() -> None:
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("section", [{"cooldown": "1 month"}, {"own_packages": "lib_log_rich"}])
 def test_a_misconfigured_section_is_refused(section: dict[str, object]) -> None:
-    with pytest.raises(SupplyChainConfigError):
-        SupplyChainSettings.from_config(section)
+    with pytest.raises(BmkSettingsError):
+        _supply_chain_of(section)
 
 
 # Each of these was accepted by bmk and written into projects, while uv 0.13 refuses it and then
@@ -1499,8 +1505,8 @@ def test_a_misconfigured_section_is_refused(section: dict[str, object]) -> None:
     [False, True, 14, "14 Days", "14 DAYS", "1 WEEK", "14D", "2W", " 14 days ", "\t14 days", "14 days,", "P14DT"],
 )
 def test_a_cooldown_uv_would_refuse_is_never_accepted_for_writing(cooldown: object) -> None:
-    with pytest.raises(SupplyChainConfigError):
-        SupplyChainSettings.from_config({"cooldown": cooldown})
+    with pytest.raises(BmkSettingsError):
+        _supply_chain_of({"cooldown": cooldown})
 
 
 @pytest.mark.os_agnostic
@@ -1508,4 +1514,23 @@ def test_a_cooldown_uv_would_refuse_is_never_accepted_for_writing(cooldown: obje
     "cooldown", ["2 days", "1 day", "7 days", "2 weeks", "1 week", "36 hours", "P7D", "P2W", "PT36H"]
 )
 def test_a_cooldown_both_uv_and_bmk_read_is_accepted(cooldown: str) -> None:
-    assert SupplyChainSettings.from_config({"cooldown": cooldown}).cooldown == cooldown
+    assert _supply_chain_of({"cooldown": cooldown}).cooldown == cooldown
+
+
+@pytest.mark.os_agnostic
+def test_a_refused_cooldown_names_the_key_and_quotes_the_value() -> None:
+    with pytest.raises(BmkSettingsError) as caught:
+        _supply_chain_of({"cooldown": "14 Days"})
+
+    assert caught.value.problems == [
+        "bmk.supply_chain.cooldown '14 Days' is not one bmk may write: use '<N> days', "
+        "'<N> weeks', '<N> hours' (lowercase) or an ISO 8601 span such as 'P7D'"
+    ]
+
+
+@pytest.mark.os_agnostic
+def test_a_bare_string_own_list_is_refused_rather_than_split_into_characters() -> None:
+    with pytest.raises(BmkSettingsError) as caught:
+        _supply_chain_of({"own_packages": "lib_log_rich"})
+
+    assert caught.value.problems == ["bmk.supply_chain.own_packages must be a list of names, got 'lib_log_rich'"]

@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import lib_log_rich.runtime
 import rich_click as click
@@ -24,9 +23,6 @@ from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
 from ..typed_click import argument
 from ._shared import run_command
-
-if TYPE_CHECKING:
-    from lib_layered_config import Config
 
 _RE_COMMAND_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
@@ -54,31 +50,18 @@ def validate_command_name(name: str) -> None:
         raise click.BadParameter(msg, param_hint="'COMMAND_NAME'")
 
 
-def _run_custom(command_name: str, args: tuple[str, ...], config: Config) -> None:
+def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
     """Run the named custom pipeline.
 
     Args:
         command_name: Pipeline name, already checked by :func:`validate_command_name`.
         args: Arguments to forward to the pipeline's stages.
-        config: Loaded layered configuration (with profile and overrides applied).
 
     Raises:
         SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the
             name, or the pipeline's exit code on failure.
     """
-    # Deferred like run_command's own imports: `bmk --version` must not load the stage runner.
-    from bmk.adapters.stagerunner.helpers._supply_chain import SupplyChainSettings  # noqa: PLC0415
-
-    cwd = Path.cwd()
-
-    exit_code = run_command(
-        cwd,
-        args,
-        command_prefix=command_name,
-        package_name=config.get("bmk.package_name", default=""),
-        show_warnings=config.get("bmk.show_warnings", default=True),
-        supply_chain=SupplyChainSettings.from_config(config.get("bmk.supply_chain", default={})),
-    )
+    exit_code = run_command(Path.cwd(), args, command_prefix=command_name)
 
     if exit_code != 0:
         raise SystemExit(exit_code)
@@ -102,11 +85,11 @@ def cli_custom(ctx: click.Context, command_name: str, args: tuple[str, ...]) -> 
     # A malformed name is a usage error (exit 2) whether or not the configuration loaded,
     # so it is judged first; the pipeline then never starts on a configuration that failed.
     validate_command_name(command_name)
-    cli_ctx = get_cli_context(ctx)
-    config = require_config(ctx, cli_ctx)
+    # Read only to stop with exit 78 when it failed to load; run_command reads [bmk] itself.
+    require_config(ctx, get_cli_context(ctx))
     with lib_log_rich.runtime.bind(job_id="cli-custom", extra={"command": "custom", "prefix": command_name}):
         logger.info("Executing custom command '%s'", command_name)
-        _run_custom(command_name, args, config)
+        _run_custom(command_name, args)
 
 
 __all__ = ["cli_custom"]
