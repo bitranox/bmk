@@ -137,6 +137,10 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   main config (and Windows/macOS arms over `src` only) got 159 errors `make test` reported and CI
   never showed. A pinned main config now runs once, under its pin, as CI runs it, and each
   declared platform's `pyrightconfig.<platform>.json` arm runs through `--project`.
+- In JSON mode, `deps --update`'s notices now appear in the stage's own report instead of
+  printing past it: another bmk holding the project's `uv lock`, uv refusing `--refresh-package`,
+  `[tool.uv] left as it is`, `floor pins left as they are`, a pin kept that no floor demands, and
+  a rewritten spec refused as invalid.
 
 ### Security
 

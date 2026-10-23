@@ -16,6 +16,7 @@ silently defeat.
 
 from __future__ import annotations
 
+import io
 import shutil
 import subprocess
 import sys
@@ -25,7 +26,12 @@ from venv import EnvBuilder
 
 import pytest
 
-from bmk.adapters.stagerunner.venv import ensure_project_venv_at, sync_lock_path, uv_lock_guard_path
+from bmk.adapters.stagerunner.venv import (
+    ensure_project_venv_at,
+    lock_project_reporting,
+    sync_lock_path,
+    uv_lock_guard_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -141,6 +147,27 @@ def test_a_timed_out_uv_lock_reports_no_exit_code_and_no_reason_because_uv_never
         f"[venv] another bmk is still locking {project}; waited {_SHORT_WAIT}s and gave up\n"
         f"[venv] uv lock failed in {project}; provisioning .venv from pyproject.toml instead\n"
     )
+
+
+@pytest.mark.os_posix
+def test_the_lock_contention_notice_reaches_the_stream_it_is_given(
+    tmp_path: Path,
+    stub_uv: StubUv,
+    lock_holder: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The deps_update stage passes its sink: in JSON mode a line on stderr goes past its report."""
+    project = _project(tmp_path)
+    monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
+    lock_holder(uv_lock_guard_path(project))  # type: ignore[operator]
+    out = io.StringIO()
+
+    assert not lock_project_reporting(project, quiet=True, upgrade=True, stream=out)
+
+    assert not stub_uv.commands()
+    assert out.getvalue() == f"[venv] another bmk is still locking {project}; waited {_SHORT_WAIT}s and gave up\n"
+    assert capfd.readouterr().err == ""
 
 
 @pytest.mark.os_posix

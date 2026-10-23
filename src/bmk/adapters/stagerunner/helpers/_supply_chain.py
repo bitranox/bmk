@@ -54,6 +54,8 @@ from bmk.adapters.stagerunner.helpers._pypi_models import PypiFile, PypiReleases
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from bmk.adapters.stagerunner.output import SupportsWrite
+
 __all__ = [
     "DEFAULT_COOLDOWN",
     "DEFAULT_OWN_PACKAGES",
@@ -693,6 +695,7 @@ def reconcile_floor_pins(
     pins: Mapping[str, str],
     is_floor_pin: Callable[[str, object], bool],
     cutoff: datetime | None,
+    out: SupportsWrite | None = None,
 ) -> list[str]:
     """Make bmk's floor pins in ``[tool.uv] exclude-newer-package`` exactly ``pins``.
 
@@ -701,7 +704,8 @@ def reconcile_floor_pins(
     only once ``cutoff`` admits the release it serves: recognition is by value, so a pin the project
     placed by hand at the same second reads as bmk's, and removing it while the cooldown still
     excludes that release would take away what it was placed for (a security fix in a transitive
-    dependency). Kept, it is named on stderr; a stale pin of bmk's own goes within one cooldown.
+    dependency). Kept, it is named on ``out`` (None: stderr, looked up now); a stale pin of bmk's
+    own goes within one cooldown.
 
     Returns:
         One line per change; empty when the file is left untouched.
@@ -710,7 +714,12 @@ def reconcile_floor_pins(
     uv = _subtable(_subtable(document, "tool", super_table=True), "uv")
     current: dict[str, object] = {str(name): value for name, value in uv.get("exclude-newer-package", {}).items()}
     wanted = {normalize(name): pin for name, pin in pins.items()}
-    reconciled = _reconciled_pins(current, pyproject=pyproject, wanted=wanted, is_floor_pin=is_floor_pin, cutoff=cutoff)
+    reconciled = _reconciled_pins(current, wanted=wanted, is_floor_pin=is_floor_pin, cutoff=cutoff)
+    for key in reconciled.kept:
+        (sys.stderr if out is None else out).write(
+            f"{pyproject}: [tool.uv] exclude-newer-package: {key} pin kept: no declared floor demands it, "
+            "and the cooldown does not admit its release yet\n"
+        )
     if not reconciled.changes:
         return []
     _store_entries(uv, current=current, entries=reconciled.entries)
@@ -724,16 +733,17 @@ class _ReconciledPins(NamedTuple):
     Attributes:
         entries: The entries in write order, by the key spelling the file uses.
         changes: One line per change, in the order they are reported.
+        kept: Keys of pins kept although no declared floor demands them (the caller says so).
     """
 
     entries: dict[str, object]
     changes: list[str]
+    kept: list[str]
 
 
 def _reconciled_pins(
     current: Mapping[str, object],
     *,
-    pyproject: Path,
     wanted: Mapping[str, str],
     is_floor_pin: Callable[[str, object], bool],
     cutoff: datetime | None,
@@ -745,27 +755,24 @@ def _reconciled_pins(
 
     Args:
         current: The table as written, by its own key spelling.
-        pyproject: The file, named in the stderr line about a kept pin.
         wanted: bmk's floor pins, by normalized name.
         is_floor_pin: Whether an entry is one bmk wrote.
         cutoff: The default cutoff, which decides when a pin nothing demands may go.
 
     Returns:
-        The entries in write order, and the change lines in the order they are reported.
+        The entries in write order, the change lines in the order they are reported, and the keys
+        of pins kept although no declared floor demands them (the caller says so).
     """
     entries: dict[str, object] = {}
     changes: list[str] = []
+    kept: list[str] = []
     for name, value in current.items():
         key = normalize(name)
         if not is_floor_pin(key, value):
             entries[name] = value
         elif key not in wanted and _admits_beyond(value, cutoff):
             entries[name] = value
-            print(
-                f"{pyproject}: [tool.uv] exclude-newer-package: {key} pin kept: no declared floor demands it, "
-                "and the cooldown does not admit its release yet",
-                file=sys.stderr,
-            )
+            kept.append(key)
         elif key not in wanted:
             changes.append(f"[tool.uv] exclude-newer-package: {key} pin removed, the cooldown admits it")
         else:
@@ -776,7 +783,7 @@ def _reconciled_pins(
     for key in sorted(set(wanted) - listed):
         entries[key] = wanted[key]
         changes.append(f'[tool.uv] exclude-newer-package: {key} = "{wanted[key]}" (floor younger than the cooldown)')
-    return _ReconciledPins(entries=entries, changes=changes)
+    return _ReconciledPins(entries=entries, changes=changes, kept=kept)
 
 
 def _store_entries(uv: Any, *, current: Mapping[str, object], entries: Mapping[str, object]) -> None:

@@ -9,6 +9,7 @@ upload times relative to the real clock, and the tests drive ``check_dependencie
 
 from __future__ import annotations
 
+import io
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
@@ -644,6 +645,47 @@ def test_an_exemption_list_is_not_written_while_an_own_package_cannot_be_read(
 
     assert "exclude-newer-package" not in pyproject.read_text(encoding="utf-8")
     assert "lib-x" in capsys.readouterr().err
+
+
+# The deps_update stage hands its sink in as LockedProject.out: in JSON mode only what reaches it is
+# shown, so a notice printed to the process's stderr went past the stage's own report.
+
+
+@pytest.mark.os_agnostic
+def test_the_left_as_it_is_notice_reaches_the_stages_stream(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pypi.packages["lib-log-rich"] = _doc("6.5.1", {"6.5.1": _uploaded(40)}, requires=["lib-x>=1"])
+    pypi.versions["lib-log-rich/6.5.1"] = []
+    pyproject = _write(tmp_path, deps='"lib_log_rich>=6.5.1"')
+    settings = SupplyChainSettings(cooldown="14 days", own_packages=frozenset({"lib-log-rich", "lib-x"}))
+    uv, out = _Uv(tmp_path), io.StringIO()
+    locked = _dependencies.LockedProject(upgrade=uv.upgrade, sync=uv.sync, out=out)
+
+    _dependencies.main(
+        update=True, quiet=True, pyproject=pyproject, python="/venv/bin/python", supply_chain=settings, locked=locked
+    )
+
+    assert "[tool.uv] left as it is" in out.getvalue()
+    assert "left as it is" not in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_the_floor_pins_left_notice_reaches_the_stages_stream(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # PyPI does not answer for gadget, so no floor pin can be judged.
+    pyproject = _write(tmp_path, deps='"gadget>=1.0"', tool_uv='exclude-newer = "14 days"')
+    _ = pypi
+    uv, out = _Uv(tmp_path), io.StringIO()
+    locked = _dependencies.LockedProject(upgrade=uv.upgrade, sync=uv.sync, out=out)
+
+    _dependencies.main(
+        update=True, quiet=True, pyproject=pyproject, python="/venv/bin/python", supply_chain=_NO_OWN, locked=locked
+    )
+
+    assert "floor pins left as they are" in out.getvalue()
+    assert "floor pins left" not in capsys.readouterr().err
 
 
 # --- a young floor is pinned at its own upload, never lowered --------------------------------------

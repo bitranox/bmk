@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
@@ -1842,6 +1843,19 @@ def test_update_dependencies_mixed_run_exact_output(tmp_path: Path, capsys: pyte
     )
     assert captured.err == _REFUSED_LINE
     assert pyproject.read_text(encoding="utf-8") == _MIXED_PYPROJECT.replace("alpha>=1.0", "alpha>=2.0")
+
+
+@pytest.mark.os_agnostic
+def test_a_refused_spec_is_named_on_the_stream_it_is_given(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The deps_update stage passes its sink: in JSON mode a line on stderr goes past its report."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_MIXED_PYPROJECT, encoding="utf-8")
+    out = io.StringIO()
+
+    update_dependencies(_mixed_deps(), pyproject, quiet=True, out=out)
+
+    assert out.getvalue() == _REFUSED_LINE
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.os_agnostic

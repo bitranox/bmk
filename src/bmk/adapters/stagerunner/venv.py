@@ -1073,7 +1073,7 @@ def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool, stream: 
         must surface rather than be covered by a manifest install; None when no lock could be
         made, so the caller may fall back to the manifest.
     """
-    lock = _lock(cwd, quiet=quiet, upgrade=False)
+    lock = _lock(cwd, quiet=quiet, upgrade=False, stream=stream)
     if lock is None:
         # No uv ran (another bmk held the project's lock and said so): there is no exit code or
         # reason to add, only where provisioning goes next.
@@ -1209,12 +1209,13 @@ def lock_project_reporting(cwd: Path, *, quiet: bool, upgrade: bool, stream: Sup
     For a caller whose own failure line would otherwise be all a JSON-mode stage shows: uv's
     stderr is captured there, and :func:`lock_project` returns only the verdict. ``stream`` None
     is the process's stderr, looked up at call time. In text mode uv's stderr already streamed
-    live, so only the header is written. Lock contention is reported by :func:`_lock` itself.
+    live, so only the header is written. Lock contention and a refused refresh are reported to
+    ``stream`` by :func:`_lock` itself.
 
     Returns:
         Whether ``uv lock`` succeeded.
     """
-    lock = _lock(cwd, quiet=quiet, upgrade=upgrade)
+    lock = _lock(cwd, quiet=quiet, upgrade=upgrade, stream=stream)
     if lock is None:
         return False
     if lock.rc != 0:
@@ -1228,11 +1229,11 @@ def uv_lock_guard_path(cwd: Path) -> Path:
     return _lock_dir() / f"{hashlib.sha256(str(cwd.resolve()).encode('utf-8')).hexdigest()[:16]}.uvlock"
 
 
-def _lock(cwd: Path, *, quiet: bool, upgrade: bool) -> _UvRun | None:
+def _lock(cwd: Path, *, quiet: bool, upgrade: bool, stream: SupportsWrite | None = None) -> _UvRun | None:
     """:func:`lock_project` with uv's exit code and the reason for a failure report.
 
     None when uv never ran because another bmk held the project's lock past the timeout; that case
-    has already said so on stderr.
+    has already said so on ``stream`` (None: the process's stderr, looked up now).
     """
     argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
     refresh = _lock_argv(cwd, upgrade=upgrade)[len(argv) :]
@@ -1240,13 +1241,13 @@ def _lock(cwd: Path, *, quiet: bool, upgrade: bool) -> _UvRun | None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(path), timeout=_lock_timeout()):
-            return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
+            return _lock_with_refresh(argv, refresh, cwd, quiet=quiet, stream=stream)
     except Timeout:
-        print(f"[venv] another bmk is still locking {cwd}; waited {_lock_timeout():g}s and gave up", file=sys.stderr)
+        _emit(f"[venv] another bmk is still locking {cwd}; waited {_lock_timeout():g}s and gave up\n", stream)
         return None
     except OSError:
         # An unlockable location must not make bmk unusable there; lock unguarded instead.
-        return _lock_with_refresh(argv, refresh, cwd, quiet=quiet)
+        return _lock_with_refresh(argv, refresh, cwd, quiet=quiet, stream=stream)
 
 
 def _lock_argv(cwd: Path, *, upgrade: bool) -> list[str]:
@@ -1298,7 +1299,9 @@ def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping
     return _UvRun(done.returncode, done.stderr, shown_live=not quiet)
 
 
-def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool) -> _UvRun:
+def _lock_with_refresh(
+    argv: list[str], refresh: list[str], cwd: Path, *, quiet: bool, stream: SupportsWrite | None = None
+) -> _UvRun:
     """Lock with the own-package refresh, and once more without it only if uv refused the refresh.
 
     The plain lock is the old behaviour, so the refresh may only ever add, never break a gate. Any
@@ -1312,9 +1315,9 @@ def _lock_with_refresh(argv: list[str], refresh: list[str], cwd: Path, *, quiet:
     run = _run_keeping_stderr([*argv, *refresh], cwd, quiet=quiet)
     if not _refresh_refused(run.rc, run.stderr):
         return run
-    print(
+    _emit(
         "[venv] uv refused --refresh-package (offline is configured, or a package name it rejects); "
-        "locking without refreshing our own packages",
-        file=sys.stderr,
+        "locking without refreshing our own packages\n",
+        stream,
     )
     return _run_for_report(argv, cwd, quiet=quiet)

@@ -8,6 +8,7 @@ the whole stderr, not a parsed view of them.
 
 from __future__ import annotations
 
+import io
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -212,3 +213,15 @@ def test_without_a_cutoff_a_pin_nothing_demands_is_removed_silently(
         _HEAD + '\n[tool.uv.exclude-newer-package]\nhand = "2026-03-03T00:00:00Z"\n'
     )
     assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.os_agnostic
+def test_the_kept_pin_notice_reaches_the_stream_it_is_given(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The deps_update stage passes its sink: in JSON mode a line on stderr goes past its report."""
+    pyproject = _project(tmp_path, _HEAD + '\n[tool.uv.exclude-newer-package]\nbmk-kept = "2026-12-01T00:00:01Z"\n')
+    out = io.StringIO()
+
+    reconcile_floor_pins(pyproject, pins={}, is_floor_pin=_ours, cutoff=_CUTOFF, out=out)
+
+    assert out.getvalue() == _kept_line(pyproject, "bmk-kept")
+    assert capsys.readouterr().err == ""

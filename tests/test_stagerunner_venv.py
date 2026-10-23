@@ -35,6 +35,7 @@ from bmk.adapters.stagerunner.venv import (
     ensure_venv_ignored,
     is_venv,
     lock_project,
+    lock_project_reporting,
     resolve_project_venv,
     venv_python,
 )
@@ -1108,6 +1109,27 @@ def test_offline_upgrade_lock_succeeds_for_real(
     assert lock_project(tmp_path, upgrade=True)
     assert (tmp_path / "uv.lock").is_file()
     assert "refused --refresh-package" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_the_refused_refresh_notice_reaches_the_stream_it_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The deps_update stage passes its sink: in JSON mode a line on stderr goes past its report."""
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\nrequires-python = ">=3.10"\ndependencies = []\n\n'
+        "[tool.uv]\nexclude-newer-package = {lib-cli-exit-tools = false}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    out = io.StringIO()
+
+    assert lock_project_reporting(tmp_path, quiet=True, upgrade=True, stream=out)
+
+    assert "refused --refresh-package" in out.getvalue()
+    assert "refused --refresh-package" not in capsys.readouterr().err
 
 
 # uv missing from PATH (or not executable) is a provisioning failure too, and the header alone names

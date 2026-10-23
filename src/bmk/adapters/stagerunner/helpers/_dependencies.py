@@ -1715,14 +1715,17 @@ class LockedProject:
     out: SupportsWrite | None = None
 
 
-def _complete_block(pyproject: Path, supply_chain: SupplyChainSettings, *, quiet: bool) -> bool:
+def _complete_block(
+    pyproject: Path, supply_chain: SupplyChainSettings, *, quiet: bool, out: SupportsWrite | None = None
+) -> bool:
     """Write the cooldown and the own-package exemptions into ``[tool.uv]``; True when it changed.
 
     The caller re-locks and re-syncs on every update anyway, so it does not branch on the answer;
     the return value states what happened for a reader and a test.
 
     Runs before anything is locked or judged: the lock resolves under this block, and the floors
-    are judged against the cutoff that lock records.
+    are judged against the cutoff that lock records. ``out`` takes the notices (None: stderr);
+    the deps_update stage passes its sink, or in JSON mode they would go past its report.
     """
     config = load_pyproject_config(pyproject)
     try:
@@ -1733,24 +1736,25 @@ def _complete_block(pyproject: Path, supply_chain: SupplyChainSettings, *, quiet
             project=config.project.name,
         )
     except OwnPackageUnreadableError as exc:
-        print(
+        _say(
             f"{pyproject}: [tool.uv] left as it is: PyPI did not answer for {exc}, so the exemptions would be incomplete",
-            file=sys.stderr,
+            out,
         )
         return False
     changes = ensure_uv_cooldown(pyproject, cooldown=supply_chain.cooldown, exempt=exempt)
-    changes += _pin_young_floors(pyproject)
+    changes += _pin_young_floors(pyproject, out=out)
     if not quiet:
         for change in changes:
             print(f"  {change}")
     return bool(changes)
 
 
-def _pin_young_floors(pyproject: Path) -> list[str]:
+def _pin_young_floors(pyproject: Path, *, out: SupportsWrite | None = None) -> list[str]:
     """Keep bmk's floor pins in ``[tool.uv]`` exactly what the declared floors need today.
 
     Nothing is changed when PyPI does not answer: a pin judged on missing data could be dropped
-    while its floor still needs it, and ``uv lock`` would then fail on that floor.
+    while its floor still needs it, and ``uv lock`` would then fail on that floor. Notices go to
+    ``out`` (None: stderr).
 
     Raises:
         SupplyChainConfigError: When uv refuses the project's ``exclude-newer``.
@@ -1761,9 +1765,9 @@ def _pin_young_floors(pyproject: Path) -> list[str]:
     try:
         pins = _demanded_pins(config, cutoff, uv.exclude_newer_package)
     except _UnjudgeableError as exc:
-        print(f"{pyproject}: floor pins left as they are: {exc}", file=sys.stderr)
+        _say(f"{pyproject}: floor pins left as they are: {exc}", out)
         return []
-    return reconcile_floor_pins(pyproject, pins=pins, is_floor_pin=_is_floor_pin, cutoff=cutoff)
+    return reconcile_floor_pins(pyproject, pins=pins, is_floor_pin=_is_floor_pin, cutoff=cutoff, out=out)
 
 
 def _default_cutoff(exclude_newer: object) -> datetime | None:
@@ -2261,6 +2265,7 @@ def update_dependencies(
     *,
     dry_run: bool = False,
     quiet: bool = False,
+    out: SupportsWrite | None = None,
 ) -> int:
     """Update outdated dependencies in pyproject.toml to latest versions.
 
@@ -2269,6 +2274,8 @@ def update_dependencies(
         pyproject: Path to pyproject.toml file
         dry_run: If True, only show what would be changed without modifying
         quiet: Suppress informational output
+        out: Where a spec refused as invalid is named; None is the process's stderr. The
+            deps_update stage passes its sink, or in JSON mode the line goes past its report.
 
     Returns:
         Number of dependencies updated
@@ -2286,20 +2293,23 @@ def update_dependencies(
         print(f"\n{'[DRY RUN] ' if dry_run else ''}Updating {len(outdated)} dependencies:\n")
 
     for dep in outdated:
-        if _apply_update(document, dep, quiet=quiet):
+        if _apply_update(document, dep, quiet=quiet, out=out):
             updated_count += 1
 
     _finish_update(document, pyproject, updated_count=updated_count, dry_run=dry_run, quiet=quiet)
     return updated_count
 
 
-def _apply_update(document: MutableMapping[str, Any], dep: DependencyInfo, *, quiet: bool) -> bool:
+def _apply_update(
+    document: MutableMapping[str, Any], dep: DependencyInfo, *, quiet: bool, out: SupportsWrite | None = None
+) -> bool:
     """Rewrite ``dep``'s spec to its latest version inside ``document``, in place.
 
     Args:
         document: The parsed pyproject.toml, edited in memory only.
         dep: An outdated dependency.
         quiet: Suppress the per-dependency progress lines on stdout.
+        out: Where a refused spec is named; None is the process's stderr.
 
     Returns:
         True when the spec was found and replaced; False when it was skipped.
@@ -2315,10 +2325,7 @@ def _apply_update(document: MutableMapping[str, Any], dep: DependencyInfo, *, qu
         # can splice the new version into the old suffix. Never write that, whatever the cause:
         # the dependency stays outdated, so the gate stays red and names the spec to fix.
         # Printed even under quiet: it is the only explanation of that red gate.
-        print(
-            f"  {dep.name}: {dep.original_spec} -> {new_spec} is not a valid requirement, not written",
-            file=sys.stderr,
-        )
+        _say(f"  {dep.name}: {dep.original_spec} -> {new_spec} is not a valid requirement, not written", out)
         return False
 
     if _replace_spec(document, dep.original_spec, new_spec):
@@ -2389,21 +2396,22 @@ def main(
     """
     if not quiet:
         print(f"Checking dependencies in {pyproject}...")
+    # Into the stage's capture when deps_update runs as a JSON-mode stage, so its block says why
+    # instead of reading '(no output captured)', and no notice prints past its report.
+    out = locked.out if locked is not None else None
     try:
         with _one_fetch_per_package():
             if update and not dry_run and supply_chain is not None:
-                _complete_block(pyproject, supply_chain, quiet=quiet)
+                _complete_block(pyproject, supply_chain, quiet=quiet, out=out)
             deps = check_dependencies(pyproject)
     except SupplyChainConfigError as exc:
-        # Into the stage's capture when deps_update runs as a JSON-mode stage, so its failed block
-        # says why instead of reading '(no output captured)'.
-        _say(f"{pyproject}: {exc}", locked.out if locked is not None else None)
+        _say(f"{pyproject}: {exc}", out)
         return 1
     exit_code = int(_check_fails(deps)) if quiet else print_report(deps, verbose=verbose)
 
     if update:
         # Update pyproject.toml with latest versions
-        updated = update_dependencies(deps, pyproject, dry_run=dry_run, quiet=quiet)
+        updated = update_dependencies(deps, pyproject, dry_run=dry_run, quiet=quiet, out=out)
 
         if locked is not None:
             return 0 if dry_run else _upgrade_and_sync(locked, pyproject)
