@@ -1352,6 +1352,45 @@ def test_a_requirement_no_longer_reached_never_admits_a_young_release(tmp_path: 
 
 
 @pytest.mark.os_agnostic
+def test_a_requirement_no_longer_reached_never_moves_a_forward_pin_further(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # helper>=2.0 (reached only at gadget's first pin) brings widget>=1.0 on 3.11, where 2.5 is cut
+    # at widget 2.0's pin. Once gadget is held at 1.0 neither is reached, yet that requirement
+    # skipped pin(5) and moved widget to pin(4), so uv would lock the four-day-old 3.0.
+    pypi.packages["gadget"] = _doc(
+        "3.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(30),
+            "2.5": [*_uploaded(31, requires_python=">=3.11"), *_uploaded(14.5, requires_python=">=3.11")],
+            "3.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pypi.versions["gadget/2.0"] = ["helper>=2.0"]
+    pypi.packages["helper"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": _uploaded(6)})
+    pypi.versions["helper/2.0"] = ["widget>=1.0; python_version >= '3.11'"]
+    pypi.packages["tool"] = _doc("1.0", {"1.0": _uploaded(4)})
+    pypi.versions["tool/1.0"] = ["tool2>=1.0"]
+    pypi.packages["tool2"] = _doc("1.0", {"1.0": _uploaded(4.5)})
+    pypi.versions["tool2/1.0"] = ["gadget>=1.0; python_version >= '3.11'"]
+    pypi.packages["widget"] = _doc(
+        "3.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(5),
+            "2.5": [*_uploaded(6, requires_python=">=3.11"), *_uploaded(3, requires_python=">=3.11")],
+            "3.0": _uploaded(4),
+        },
+    )
+    pyproject = _write_two_pythons(tmp_path, '"gadget>=1.0", "tool>=1.0", "widget>=2.0"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    pins = _pins(pyproject)
+    assert pins["gadget"] == _pin_of(90)
+    assert pins["widget"] == _pin_of(5)
+
+
+@pytest.mark.os_agnostic
 def test_a_release_whose_installable_file_has_no_upload_time_leaves_the_pins_alone(
     tmp_path: Path, pypi: _FakeIndex
 ) -> None:

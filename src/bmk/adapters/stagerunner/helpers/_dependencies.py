@@ -1841,21 +1841,34 @@ def _package_pin(needs: list[tuple[_Need, bool]], *, cutoff: datetime) -> str | 
     once the cut release clears the cooldown. Failing that it goes FORWARD to the earliest safe
     candidate past the cutoff, where a floor release too young or itself cut is admitted whole.
     Each candidate is one second after a release's newest file, which is how bmk recognises the pin
-    as its own. ``needs`` pairs each requirement with whether this pass reached it; one not reached
-    only has to be tolerated (:meth:`_Need.tolerates`).
+    as its own.
+
+    ``needs`` pairs each requirement with whether this pass reached it. One not reached is not in
+    the tree uv resolves; it is kept only so the passes settle (see :class:`_FloorDemand`), so it may
+    hold a pin BACK (:meth:`_Need.tolerates`) but never decide one FORWARD: a forward pin admits
+    young files, and only a reached requirement may ask for that.
     """
+    reached = [need for need, was_reached in needs if was_reached]
+    unreached = [need for need, was_reached in needs if not was_reached]
+
+    def settles(moment: datetime) -> bool:
+        return all(need.settles(moment) for need in reached)
 
     def safe(moment: datetime) -> bool:
-        return all(need.settles(moment) if reached else need.tolerates(moment) for need, reached in needs)
+        return settles(moment) and all(need.tolerates(moment) for need in unreached)
 
     if safe(cutoff):
         return None
     candidates = sorted(
         {pin for need, _ in needs for files in need.releases.values() if (pin := floor_pin(files)) is not None}
     )
-    back = [c for c in candidates if _as_moment(c) <= cutoff]
+    back = [c for c in reversed(candidates) if _as_moment(c) <= cutoff]
     forward = [c for c in candidates if _as_moment(c) > cutoff]
-    return next((c for c in [*reversed(back), *forward] if safe(_as_moment(c))), None)
+    pin = next((c for c in back if safe(_as_moment(c))), None)
+    if pin is not None or settles(cutoff):
+        return pin  # only an unreached requirement objects to the cutoff: it decides nothing more
+    pin = next((c for c in back if settles(_as_moment(c))), None)
+    return pin or next((c for c in forward if settles(_as_moment(c))), None)
 
 
 def _as_moment(pin: str) -> datetime:
