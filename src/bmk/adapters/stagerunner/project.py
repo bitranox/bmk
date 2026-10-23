@@ -9,9 +9,11 @@ remain during migration; this is their in-package port (canonical after Phase 5)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import rtoml
+
+from bmk.domain.enums import PyrightPlatform
 
 
 def _load(pyproject: Path) -> dict[str, Any]:
@@ -49,4 +51,38 @@ def pip_audit_ignore_flags(pyproject: Path) -> list[str]:
     return [f"--ignore-vuln={vuln}" for vuln in ignores if isinstance(vuln, str)]
 
 
-__all__ = ["derive_package_name", "pip_audit_ignore_flags"]
+# GitHub-hosted runner labels name their OS family as a prefix (ubuntu-24.04, windows-latest,
+# macos-14). A label naming no family (self-hosted, a custom runner group) adds no platform.
+_RUNNER_FAMILIES: tuple[tuple[str, PyrightPlatform], ...] = (
+    ("ubuntu", PyrightPlatform.LINUX),
+    ("windows", PyrightPlatform.WINDOWS),
+    ("macos", PyrightPlatform.DARWIN),
+)
+
+
+def _runner_platform(label: str) -> PyrightPlatform | None:
+    folded = label.strip().casefold()
+    return next((platform for prefix, platform in _RUNNER_FAMILIES if folded.startswith(prefix)), None)
+
+
+def pyright_platforms(pyproject: Path) -> tuple[PyrightPlatform, ...]:
+    """The pyright platforms ``[tool.ci].os`` declares, once each, in first-seen order.
+
+    The CI workflow builds its OS matrix from this same key, so the local type check covers
+    exactly the platforms CI will. Empty when the key is absent or holds no recognisable
+    runner, which leaves pyright on the host platform.
+
+    Example:
+        >>> pyright_platforms(Path("does-not-exist/pyproject.toml"))
+        ()
+    """
+    declared: object = _load(pyproject).get("tool", {}).get("ci", {}).get("os", [])
+    if not isinstance(declared, list):
+        return ()
+    # A TOML array may hold anything; each entry is checked below, so object is its honest type.
+    labels = cast("list[object]", declared)
+    found = (_runner_platform(label) for label in labels if isinstance(label, str))
+    return tuple(dict.fromkeys(platform for platform in found if platform is not None))
+
+
+__all__ = ["derive_package_name", "pip_audit_ignore_flags", "pyright_platforms"]

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
 
 from . import git_ops, tools
-from .actions import HelperAction, PipAuditAction, PipelineAction, ToolAction
+from .actions import HelperAction, PipAuditAction, PipelineAction, ToolAction, ToolRunsAction
 from .context import resolve_audit_python
 from .helpers import _clean, _dependencies, _matrix
 from .model import Stage, StageContext
@@ -155,7 +155,7 @@ _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("bandit", 40, ToolAction(tools.bandit_argv)),
     Stage("lint_imports", 40, ToolAction(tools.lint_imports_argv)),
     Stage("pip_audit", 40, PipAuditAction(resolve_audit_python, tools.ensure_audit_pip_argv, tools.pip_audit_argv)),
-    Stage("pyright", 40, ToolAction(tools.pyright_argv)),
+    Stage("pyright", 40, ToolRunsAction(tools.pyright_argvs)),
     Stage("pytest", 40, ToolAction(tools.pytest_cov_argv)),
     Stage("ruff_format_check", 40, ToolAction(tools.ruff_format_check_argv)),
     Stage("ruff_lint", 40, ToolAction(tools.ruff_lint_argv)),

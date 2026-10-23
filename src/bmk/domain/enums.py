@@ -152,10 +152,28 @@ class VenvProvisioning(Enum):
     NOT_ATTEMPTED = "not_attempted"
 
 
+class PyrightPlatform(str, Enum):
+    """A value pyright's ``--pythonplatform`` accepts.
+
+    pyright evaluates ``sys.platform`` checks and picks typeshed stubs for ONE platform per run,
+    so an error only one platform's stubs show (``os.geteuid`` on Windows) is invisible to a run
+    for another.
+
+    Example:
+        >>> PyrightPlatform.WINDOWS.value
+        'Windows'
+    """
+
+    LINUX = "Linux"
+    WINDOWS = "Windows"
+    DARWIN = "Darwin"
+
+
 __all__ = [
     "BumpPart",
     "DeployTarget",
     "OutputFormat",
+    "PyrightPlatform",
     "ToolOutputFormat",
     "VenvProvisioning",
 ]

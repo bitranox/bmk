@@ -93,6 +93,27 @@ class ToolAction:
         return run_argv(self._build_argv(ctx), ctx, sink)
 
 
+class ToolRunsAction:
+    """Run one tool several times in turn; the stage fails if any run does.
+
+    Every run executes even after one fails, so a single stage reports every failing variant
+    (pyright for Linux AND Windows) rather than the first. Each run's output is headed by its
+    argv, because the variants print the same diagnostics format and the failure output alone
+    would not say which run produced it.
+    """
+
+    def __init__(self, build_argvs: Callable[[StageContext], list[list[str]]]) -> None:
+        self._build_argvs = build_argvs
+
+    def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
+        first_failure = 0
+        for argv in self._build_argvs(ctx):
+            sink.write(f"$ {' '.join(argv)}\n")
+            rc = run_argv(argv, ctx, sink)
+            first_failure = first_failure or rc
+        return first_failure
+
+
 class PipAuditAction:
     """Run pip-audit against a run-time-resolved, self-healing interpreter.
 

@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- **The `pyright` stage type-checks every OS the project's CI runs on.** pyright checks one
+  platform per run, so `make test` on Linux passed code whose types break under Windows' stubs
+  (`os.geteuid()`, `signal.SIGHUP`), and every windows-latest CI cell went red; this cost bmk two
+  extra CI rounds on releases. The stage now runs `pyright --pythonplatform` once per OS family in
+  `[tool.ci].os` (`ubuntu-*` -> Linux, `windows-*` -> Windows, `macos-*` -> Darwin), the key the CI
+  workflow builds its OS matrix from, and fails if any run does; each run's output is headed by its
+  command line. A project with no `[tool.ci].os` is checked for the host only, as before. A project
+  that declares Windows and carries a Windows-only type error goes red on its next `make test`.
+
 ## [3.22.7] 2026-10-23 13:02:17
 
 ### Fixed
