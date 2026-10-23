@@ -18,6 +18,7 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
     DependencyInfo,
     DependencyStatus,
     PendingInstall,
+    SyncOutcome,
     _build_updated_spec,
     _extract_all_dependencies,
     _extract_dependencies_from_list,
@@ -115,12 +116,12 @@ def test_parse_version_constraint_strips_extras() -> None:
     """Extras in brackets are removed before parsing the constraint."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    name, constraint, min_version, upper_bound = _parse_version_constraint("package[extra]>=1.0")
+    parsed = _parse_version_constraint("package[extra]>=1.0")
 
-    assert name == "package"
-    assert min_version == "1.0"
-    assert constraint == ">=1.0"
-    assert upper_bound == ""
+    assert parsed.name == "package"
+    assert parsed.min_version == "1.0"
+    assert parsed.constraint == ">=1.0"
+    assert parsed.upper_bound == ""
 
 
 @pytest.mark.os_agnostic
@@ -128,10 +129,10 @@ def test_parse_version_constraint_strips_multiple_extras() -> None:
     """Multiple extras in brackets are removed."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    name, _constraint, min_version, _ = _parse_version_constraint("pkg[foo,bar]>=2.0")
+    parsed = _parse_version_constraint("pkg[foo,bar]>=2.0")
 
-    assert name == "pkg"
-    assert min_version == "2.0"
+    assert parsed.name == "pkg"
+    assert parsed.min_version == "2.0"
 
 
 @pytest.mark.os_agnostic
@@ -139,12 +140,12 @@ def test_parse_version_constraint_fallback_for_unparseable_spec() -> None:
     """Unparseable spec falls back to returning the spec as name with empty fields."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    name, constraint, min_version, upper_bound = _parse_version_constraint("!!!invalid!!!")
+    parsed = _parse_version_constraint("!!!invalid!!!")
 
-    assert name == "!!!invalid!!!"
-    assert constraint == ""
-    assert min_version == ""
-    assert upper_bound == ""
+    assert parsed.name == "!!!invalid!!!"
+    assert parsed.constraint == ""
+    assert parsed.min_version == ""
+    assert parsed.upper_bound == ""
 
 
 @pytest.mark.os_agnostic
@@ -152,7 +153,9 @@ def test_parse_version_constraint_empty_spec() -> None:
     """Empty spec returns all empty strings."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    assert _parse_version_constraint("") == ("", "", "", "")
+    parsed = _parse_version_constraint("")
+
+    assert (parsed.name, parsed.constraint, parsed.min_version, parsed.upper_bound) == ("", "", "", "")
 
 
 @pytest.mark.os_agnostic
@@ -160,10 +163,10 @@ def test_parse_version_constraint_with_marker_and_extras() -> None:
     """Markers and extras are both stripped correctly."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    name, _constraint, min_version, _ = _parse_version_constraint("tomli[extra]>=2.0.0; python_version<'3.11'")
+    parsed = _parse_version_constraint("tomli[extra]>=2.0.0; python_version<'3.11'")
 
-    assert name == "tomli"
-    assert min_version == "2.0.0"
+    assert parsed.name == "tomli"
+    assert parsed.min_version == "2.0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -1178,9 +1181,9 @@ def test_sync_installed_packages_dry_run(
     """Dry run shows what would be installed but does not install."""
     mock_find.return_value = [PendingInstall("requests", None, "2.31.0", "")]
 
-    count, code = sync_installed_packages([], python="/p/bin/python", dry_run=True)
+    outcome = sync_installed_packages([], python="/p/bin/python", dry_run=True)
 
-    assert (count, code) == (1, 0)
+    assert outcome == SyncOutcome(pending=1, exit_code=0)
     mock_pip.assert_not_called()
     captured = capsys.readouterr()
     assert "[DRY RUN]" in captured.out
@@ -1196,9 +1199,9 @@ def test_sync_installed_packages_actual_run(
     """Actual run installs and reports success."""
     mock_find.return_value = [PendingInstall("requests", "1.0.0", "2.31.0", "")]
 
-    count, code = sync_installed_packages([], python="/p/bin/python")
+    outcome = sync_installed_packages([], python="/p/bin/python")
 
-    assert (count, code) == (1, 0)
+    assert outcome == SyncOutcome(pending=1, exit_code=0)
     mock_pip.assert_called_once()
     captured = capsys.readouterr()
     assert "Successfully installed/updated" in captured.out
@@ -1230,9 +1233,9 @@ def test_sync_installed_packages_reports_install_failure(
     """Returns and reports a non-zero install exit code."""
     mock_find.return_value = [PendingInstall("requests", None, "2.31.0", "")]
 
-    _count, code = sync_installed_packages([], python="/p/bin/python")
+    outcome = sync_installed_packages([], python="/p/bin/python")
 
-    assert code == 1
+    assert outcome.exit_code == 1
     captured = capsys.readouterr()
     assert "install failed" in captured.err
 
@@ -1246,7 +1249,7 @@ def test_sync_installed_packages_no_updates_needed(
     """Returns 0 when all installed packages match requirements."""
     mock_find.return_value = []
 
-    assert sync_installed_packages([], python="/p/bin/python") == (0, 0)
+    assert sync_installed_packages([], python="/p/bin/python") == SyncOutcome(pending=0, exit_code=0)
     captured = capsys.readouterr()
     assert "All installed packages match" in captured.out
 
@@ -1441,7 +1444,10 @@ def test_update_dependencies_with_single_quoted_spec(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=0, exit_code=0),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1466,7 +1472,10 @@ def test_main_without_update(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=0, exit_code=0),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1492,7 +1501,10 @@ def test_main_with_update(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=0, exit_code=0),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1520,7 +1532,10 @@ def test_main_with_update_skips_sync_without_a_target(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(1, 1))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=1, exit_code=1),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1540,7 +1555,10 @@ def test_main_with_update_propagates_install_failure(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=0, exit_code=0),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=2)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1564,7 +1582,10 @@ def test_main_with_update_re_checks_after_changes(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=0, exit_code=0),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=2)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1588,7 +1609,10 @@ def test_main_with_update_dry_run_does_not_recheck(
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages", return_value=(0, 0))
+@patch(
+    "bmk.adapters.stagerunner.helpers._dependencies.sync_installed_packages",
+    return_value=SyncOutcome(pending=0, exit_code=0),
+)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.update_dependencies", return_value=0)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.print_report", return_value=1)
 @patch("bmk.adapters.stagerunner.helpers._dependencies.check_dependencies")
@@ -1645,11 +1669,11 @@ def test_parse_version_constraint_unclosed_bracket() -> None:
     """Unclosed bracket in extras is left as-is (bracket found, no close bracket)."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    name, _constraint, _min_version, _ = _parse_version_constraint("pkg[extra>=1.0")
+    parsed = _parse_version_constraint("pkg[extra>=1.0")
 
     # The bracket is not stripped because close_bracket == -1
     # The regex still parses what it can
-    assert name is not None
+    assert parsed.name is not None
 
 
 @pytest.mark.os_agnostic
@@ -1657,12 +1681,12 @@ def test_parse_version_constraint_only_upper_bound() -> None:
     """Constraint with only upper bound (no >=) leaves min_version empty."""
     from bmk.adapters.stagerunner.helpers._dependencies import _parse_version_constraint
 
-    name, constraint, min_version, upper_bound = _parse_version_constraint("pkg<2.0.0")
+    parsed = _parse_version_constraint("pkg<2.0.0")
 
-    assert name == "pkg"
-    assert constraint == "<2.0.0"
-    assert min_version == ""
-    assert upper_bound == "2.0.0"
+    assert parsed.name == "pkg"
+    assert parsed.constraint == "<2.0.0"
+    assert parsed.min_version == ""
+    assert parsed.upper_bound == "2.0.0"
 
 
 @pytest.mark.os_agnostic

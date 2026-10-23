@@ -34,6 +34,7 @@ from bmk.adapters.stagerunner.helpers._supply_chain import (
     admitted_releases,
     ensure_uv_cooldown,
     own_closure,
+    read_lock_options,
 )
 from bmk.adapters.stagerunner.settings import BmkSettingsError, parse_bmk_settings
 
@@ -266,12 +267,12 @@ _PLACEHOLDER = '"0001-01-01T00:00:00Z"'
 def test_a_locked_span_is_counted_back_from_now(span: str, age: timedelta) -> None:
     options = {"exclude-newer": "0001-01-01T00:00:00Z", "exclude-newer-span": span}
 
-    assert ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW).default == _NOW - age
+    assert ReleasePolicy.from_lock(LockOptions.model_validate(options), now=_NOW).default == _NOW - age
 
 
 @pytest.mark.os_agnostic
 def test_a_locked_timestamp_is_an_absolute_cutoff() -> None:
-    policy = ReleasePolicy.from_lock(LockOptions.from_table({"exclude-newer": "2026-10-01T22:00:00Z"}), now=_NOW)
+    policy = ReleasePolicy.from_lock(LockOptions.model_validate({"exclude-newer": "2026-10-01T22:00:00Z"}), now=_NOW)
 
     assert policy.default == datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc)
 
@@ -288,7 +289,7 @@ def test_locked_per_package_values_exempt_pin_or_span() -> None:
         },
     }
 
-    policy = ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW)
+    policy = ReleasePolicy.from_lock(LockOptions.model_validate(options), now=_NOW)
 
     assert policy.cutoff_for("Lib_Log_Rich") is None
     assert policy.cutoff_for("orjson") == datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc)
@@ -314,7 +315,7 @@ def test_no_locked_cutoff_means_none() -> None:
 )
 def test_a_locked_value_bmk_cannot_read_is_refused_not_guessed(options: dict[str, object]) -> None:
     with pytest.raises(SupplyChainConfigError):
-        ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW)
+        ReleasePolicy.from_lock(LockOptions.model_validate(options), now=_NOW)
 
 
 @pytest.mark.os_agnostic
@@ -322,13 +323,61 @@ def test_a_locked_span_wins_over_the_placeholder_beside_it_whatever_that_holds()
     # Only a cutoff that is used is judged: uv writes a placeholder timestamp next to every span.
     options = {"exclude-newer": "not a timestamp", "exclude-newer-span": "P14D"}
 
-    assert ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW).default == _NOW - timedelta(days=14)
+    assert ReleasePolicy.from_lock(LockOptions.model_validate(options), now=_NOW).default == _NOW - timedelta(days=14)
 
 
 @pytest.mark.os_agnostic
 def test_a_locked_package_table_bmk_cannot_read_is_refused_naming_it() -> None:
     with pytest.raises(SupplyChainConfigError, match="exclude-newer-package bmk cannot read: 5"):
-        ReleasePolicy.from_lock(LockOptions.from_table({"exclude-newer-package": 5}), now=_NOW)
+        ReleasePolicy.from_lock(LockOptions.model_validate({"exclude-newer-package": 5}), now=_NOW)
+
+
+@pytest.mark.os_agnostic
+def test_a_locked_package_table_with_neither_key_is_refused_naming_the_missing_timestamp() -> None:
+    with pytest.raises(SupplyChainConfigError, match="exclude-newer timestamp bmk cannot read: None"):
+        ReleasePolicy.from_lock(LockOptions.model_validate({"exclude-newer-package": {"x": {}}}), now=_NOW)
+
+
+@pytest.mark.os_agnostic
+def test_an_unreadable_locked_value_is_kept_until_the_cutoff_is_used() -> None:
+    # Reading the lock never raises: from_project names the package uv refused first.
+    options = LockOptions.model_validate({"exclude-newer": "yesterday", "exclude-newer-package": 5})
+
+    assert options.states_exclude_newer
+    assert options.per_package == {}
+    with pytest.raises(SupplyChainConfigError, match="widget"):
+        ReleasePolicy.from_project(exclude_newer="2 days", packages={"widget": "x"}, lock_options=options, now=_NOW)
+    with pytest.raises(SupplyChainConfigError, match="timestamp bmk cannot read: 'yesterday'"):
+        ReleasePolicy.from_lock(options, now=_NOW)
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('version = 1\n\n[options]\nexclude-newer = "2026-10-01T22:00:00Z"\n', True),
+        ("version = 1\noptions = 5\n", False),
+        ("version = 1\n", False),
+    ],
+)
+def test_read_lock_options_reads_only_a_table_of_options(tmp_path: Path, text: str, *, expected: bool) -> None:
+    lock = tmp_path / "uv.lock"
+    lock.write_text(text, encoding="utf-8")
+
+    options = read_lock_options(lock)
+
+    assert options is not None
+    assert options.states_exclude_newer is expected
+
+
+@pytest.mark.os_agnostic
+def test_read_lock_options_without_a_lock_is_none_and_refuses_one_that_is_not_toml(tmp_path: Path) -> None:
+    lock = tmp_path / "uv.lock"
+    assert read_lock_options(lock) is None
+
+    lock.write_text("[options\n", encoding="utf-8")
+    with pytest.raises(SupplyChainConfigError, match="is not valid TOML"):
+        read_lock_options(lock)
 
 
 @pytest.mark.os_agnostic
@@ -344,7 +393,10 @@ def test_a_per_package_value_uv_refused_is_an_error_naming_the_package() -> None
 
     with pytest.raises(SupplyChainConfigError, match="widget"):
         ReleasePolicy.from_project(
-            exclude_newer="2 days", packages={"widget": "1 dya"}, lock_options=LockOptions.from_table(options), now=_NOW
+            exclude_newer="2 days",
+            packages={"widget": "1 dya"},
+            lock_options=LockOptions.model_validate(options),
+            now=_NOW,
         )
 
 

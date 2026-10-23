@@ -77,6 +77,7 @@ __all__ = [
     "DependencyInfo",
     "DependencyStatus",
     "PendingInstall",
+    "SyncOutcome",
     "check_dependencies",
     "compare_versions",
     "fetch_latest_version",
@@ -177,8 +178,24 @@ def _normalize_name(name: str) -> str:
     return _RE_NAME_SEPARATOR.sub("-", name).lower()
 
 
-def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
-    """Parse a dependency spec into (name, constraint, minimum_version, upper_bound).
+class _ParsedConstraint(NamedTuple):
+    """The parts of a dependency spec the report reads; each is empty when the spec has none.
+
+    Attributes:
+        name: The package name, extras and markers removed.
+        constraint: The version constraint as written, such as ``>=8.4.2,<9``.
+        min_version: The version a ``>=`` / ``==`` / ``~=`` clause sets as the floor.
+        upper_bound: The version a ``<`` / ``<=`` clause caps it at.
+    """
+
+    name: str
+    constraint: str
+    min_version: str
+    upper_bound: str
+
+
+def _parse_version_constraint(spec: str) -> _ParsedConstraint:
+    """Parse a dependency spec into its name, constraint, minimum version and upper bound.
 
     Examples:
         "rich-click>=1.9.4" -> ("rich-click", ">=1.9.4", "1.9.4", "")
@@ -188,7 +205,7 @@ def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
     """
     spec = spec.strip()
     if not spec:
-        return "", "", "", ""
+        return _ParsedConstraint(name="", constraint="", min_version="", upper_bound="")
 
     # Remove environment markers (e.g., "; python_version<'3.11'")
     marker_idx = spec.find(";")
@@ -207,7 +224,7 @@ def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
     match = _RE_VERSION_SPEC.match(spec)
     if not match:
         # Fallback: just return the spec as name
-        return spec, "", "", ""
+        return _ParsedConstraint(name=spec, constraint="", min_version="", upper_bound="")
 
     name = match.group(1).strip()
     constraint = match.group(2).strip() if match.group(2) else ""
@@ -226,7 +243,7 @@ def _parse_version_constraint(spec: str) -> tuple[str, str, str, str]:
         if upper_match:
             upper_bound = upper_match.group(1)
 
-    return name, constraint, min_version, upper_bound
+    return _ParsedConstraint(name=name, constraint=constraint, min_version=min_version, upper_bound=upper_bound)
 
 
 # One check reads each package's PyPI document once. The latest lookup, the upper-bound lookup and
@@ -334,9 +351,21 @@ def _ceiling_of_spec(spec: str, upper_bound: str) -> SpecifierSet:
     return SpecifierSet(f"<{upper_bound}") if upper_bound else SpecifierSet()
 
 
-def _judge_against_ceiling(
-    name: str, *, min_version: str, ceiling: SpecifierSet, latest: str
-) -> tuple[DependencyStatus, str, str]:
+class _CeilingVerdict(NamedTuple):
+    """How a floor whose newest release its ceiling excludes is reported.
+
+    Attributes:
+        status: PINNED when nothing inside the ceiling is newer than the floor, else OUTDATED.
+        proposed: The release the report proposes.
+        note: The report note naming the ceiling.
+    """
+
+    status: DependencyStatus
+    proposed: str
+    note: str
+
+
+def _judge_against_ceiling(name: str, *, min_version: str, ceiling: SpecifierSet, latest: str) -> _CeilingVerdict:
     """Status, proposed release and note for a floor whose newest release ``ceiling`` excludes.
 
     Judged on the whole ceiling, so ``<=`` and ``!=`` bound the suggestion as ``<`` does: a floor
@@ -344,8 +373,10 @@ def _judge_against_ceiling(
     """
     in_range = _fetch_latest_version_within(name, ceiling)
     if in_range is None or _version_gte(min_version, in_range):
-        return DependencyStatus.PINNED, latest, f"pinned {ceiling}"
-    return DependencyStatus.OUTDATED, in_range, f"max {ceiling}, absolute: {latest}"
+        return _CeilingVerdict(status=DependencyStatus.PINNED, proposed=latest, note=f"pinned {ceiling}")
+    return _CeilingVerdict(
+        status=DependencyStatus.OUTDATED, proposed=in_range, note=f"max {ceiling}, absolute: {latest}"
+    )
 
 
 def _version_or_none(text: str) -> Version | None:
@@ -408,7 +439,8 @@ def _extract_dependencies_from_list(
             continue
 
         original_spec = dep.strip()
-        name, constraint, min_version, upper_bound = _parse_version_constraint(dep)
+        parsed = _parse_version_constraint(dep)
+        name, min_version, upper_bound = parsed.name, parsed.min_version, parsed.upper_bound
         if not name:
             continue
 
@@ -422,10 +454,8 @@ def _extract_dependencies_from_list(
         elif not min_version:
             status = DependencyStatus.UNKNOWN
         elif not ceiling.contains(latest_absolute, prereleases=True):
-            status, latest_version, note = _judge_against_ceiling(
-                name, min_version=min_version, ceiling=ceiling, latest=latest_absolute
-            )
-            notes = (note,)
+            verdict = _judge_against_ceiling(name, min_version=min_version, ceiling=ceiling, latest=latest_absolute)
+            status, latest_version, notes = verdict.status, verdict.proposed, (verdict.note,)
         else:
             # No upper bound constraint or latest is within range
             status = compare_versions(min_version, latest_absolute)
@@ -434,7 +464,7 @@ def _extract_dependencies_from_list(
             DependencyInfo(
                 name=name,
                 source=source,
-                constraint=constraint,
+                constraint=parsed.constraint,
                 current_min=min_version,
                 latest_version=latest_version,
                 status=status,
@@ -2037,6 +2067,18 @@ def _run_pip_install(needs_install: list[PendingInstall], python: str, *, projec
         return 1
 
 
+class SyncOutcome(NamedTuple):
+    """What :func:`sync_installed_packages` found and did.
+
+    Attributes:
+        pending: How many packages the environment did not meet the floor of.
+        exit_code: The install's exit code; 0 when nothing was installed (none pending, or a dry run).
+    """
+
+    pending: int
+    exit_code: int
+
+
 def sync_installed_packages(
     deps: list[DependencyInfo],
     *,
@@ -2044,7 +2086,7 @@ def sync_installed_packages(
     dry_run: bool = False,
     quiet: bool = False,
     project_dir: Path | None = None,
-) -> tuple[int, int]:
+) -> SyncOutcome:
     """Ensure packages installed in ``python``'s env match pyproject.toml.
 
     Compares each dependency's required minimum against the version installed in
@@ -2058,7 +2100,7 @@ def sync_installed_packages(
         project_dir: The project whose ``[tool.uv]`` cooldown the install must honour.
 
     Returns:
-        (number of packages that needed updating, exit code of the install).
+        How many packages needed updating, and the exit code of the install.
         The exit code is reported rather than swallowed so a failed install
         cannot be mistaken for a successful sync.
     """
@@ -2067,7 +2109,7 @@ def sync_installed_packages(
     if not needs_install:
         if not quiet:
             print("\nAll installed packages match pyproject.toml requirements!")
-        return 0, 0
+        return SyncOutcome(pending=0, exit_code=0)
 
     if not quiet:
         _print_install_report(needs_install, dry_run=dry_run)
@@ -2075,7 +2117,7 @@ def sync_installed_packages(
     if dry_run:
         if not quiet:
             print(f"\n[DRY RUN] Would install/update {len(needs_install)} packages")
-        return len(needs_install), 0
+        return SyncOutcome(pending=len(needs_install), exit_code=0)
 
     if not quiet:
         print("\nInstalling/updating packages...")
@@ -2087,7 +2129,7 @@ def sync_installed_packages(
     else:
         print(f"\ninstall failed with exit code {exit_code}", file=sys.stderr)
 
-    return len(needs_install), exit_code
+    return SyncOutcome(pending=len(needs_install), exit_code=exit_code)
 
 
 def _replace_spec(node: Any, original: str, new: str) -> bool:
@@ -2285,10 +2327,10 @@ def main(
             return 0
 
         # Sync installed packages with pyproject.toml requirements
-        _, install_code = sync_installed_packages(
+        outcome = sync_installed_packages(
             deps, python=python, dry_run=dry_run, quiet=quiet, project_dir=pyproject.parent
         )
-        return install_code
+        return outcome.exit_code
 
     return exit_code
 

@@ -42,11 +42,11 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import rtoml
 from packaging.requirements import InvalidRequirement, Requirement
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._pypi_models import PypiFile, PypiReleases, parse_moment
@@ -244,53 +244,149 @@ def _span_of(match: re.Match[str]) -> timedelta:
     )
 
 
-class LockOptions(BaseModel):
-    """The cooldown part of a ``uv.lock`` ``[options]`` table, read into typed cutoffs.
+class _UnreadablePackages(BaseModel):
+    """An ``exclude-newer-package`` that is not a table, kept as the reason it cannot be read.
 
     Attributes:
-        states_exclude_newer: Whether the lock carries ``exclude-newer``: its absence is how uv says
-            it refused a stated cooldown.
-        default: ``exclude-newer`` / ``exclude-newer-span`` as one cutoff; None when uv wrote neither.
-        per_package: ``exclude-newer-package`` by normalized name; None means exempt.
-        package_refusal: Why bmk cannot read ``exclude-newer-package``; None when it can.
+        refusal: The message raised when the per-package cutoffs are USED.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    states_exclude_newer: bool = False
-    default: LockedCutoff | None = None
-    per_package: dict[str, LockedCutoff | None] = {}
-    package_refusal: str | None = None
+    refusal: str
 
+
+class _UvPackageCutoff(BaseModel):
+    """One ``exclude-newer-package`` entry uv wrote as a ``{timestamp, span}`` table.
+
+    Each half is read on its own, so an unreadable one is kept as its refusal and judged only when
+    :attr:`cutoff` picks it: uv writes a placeholder timestamp beside every span.
+
+    Attributes:
+        timestamp: The ``timestamp`` key, read; None when uv wrote none.
+        span: The ``span`` key, read; None when uv wrote none.
+    """
+
+    # Every other key is uv's own business.
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    timestamp: LockedCutoff | None = None
+    span: LockedCutoff | None = None
+
+    @field_validator("timestamp", mode="before")
     @classmethod
-    def from_table(cls, options: Mapping[str, object]) -> LockOptions:
-        """Read the ``[options]`` table uv wrote.
+    def _read_timestamp(cls, value: object) -> LockedCutoff:
+        return LockedCutoff.read(value, None)
 
-        Only ``exclude-newer``, ``exclude-newer-span`` and ``exclude-newer-package`` are read; every
-        other key is uv's own business.
-        """
-        states = "exclude-newer" in options
-        default = None
-        if states or "exclude-newer-span" in options:
-            default = LockedCutoff.read(options.get("exclude-newer"), options.get("exclude-newer-span"))
-        packages = options.get("exclude-newer-package", {})
-        if not isinstance(packages, dict):
-            refusal = f"uv.lock holds an exclude-newer-package bmk cannot read: {packages!r}"
-            return cls(states_exclude_newer=states, default=default, package_refusal=refusal)
-        per_package = {
-            normalize(str(name)): _locked_package_cutoff(value)
-            for name, value in cast("dict[object, object]", packages).items()
-        }
-        return cls(states_exclude_newer=states, default=default, per_package=per_package)
+    @field_validator("span", mode="before")
+    @classmethod
+    def _read_span(cls, value: object) -> LockedCutoff:
+        return LockedCutoff.read(None, value)
+
+    @property
+    def cutoff(self) -> LockedCutoff:
+        """The span when uv wrote one, else the timestamp; a refusal when it wrote neither."""
+        if self.span is not None:
+            return self.span
+        if self.timestamp is not None:
+            return self.timestamp
+        return LockedCutoff.read(None, None)
 
 
 def _locked_package_cutoff(value: object) -> LockedCutoff | None:
+    """One ``exclude-newer-package`` value: ``false`` exempts, a table or a timestamp is a cutoff."""
     if value is False:
         return None
     if isinstance(value, dict):
-        entry = cast("dict[str, object]", value)
-        return LockedCutoff.read(entry.get("timestamp"), entry.get("span"))
+        return _UvPackageCutoff.model_validate(value).cutoff
     return LockedCutoff.read(value, None)
+
+
+class LockOptions(BaseModel):
+    """The cooldown part of a ``uv.lock`` ``[options]`` table, read into typed cutoffs.
+
+    Validated from the table as uv wrote it, keyed by uv's own names. Only ``exclude-newer``,
+    ``exclude-newer-span`` and ``exclude-newer-package`` are read; every other key is uv's own
+    business. Nothing here raises while the lock is read: a value bmk cannot read is kept as its
+    refusal and raised when the cutoff is used (see :class:`LockedCutoff`).
+
+    Attributes:
+        exclude_newer: ``exclude-newer``, read as a timestamp; None when uv wrote none.
+        exclude_newer_span: ``exclude-newer-span``, read as a span; None when uv wrote none.
+        exclude_newer_package: ``exclude-newer-package`` by normalized name (None means exempt), or
+            why it cannot be read.
+
+    Example:
+        >>> LockOptions.model_validate({"exclude-newer-package": {"Lib_X": False}}).per_package
+        {'lib-x': None}
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    exclude_newer: LockedCutoff | None = Field(default=None, alias="exclude-newer")
+    exclude_newer_span: LockedCutoff | None = Field(default=None, alias="exclude-newer-span")
+    exclude_newer_package: dict[str, LockedCutoff | None] | _UnreadablePackages = Field(
+        default={}, alias="exclude-newer-package"
+    )
+
+    @field_validator("exclude_newer", mode="before")
+    @classmethod
+    def _read_timestamp(cls, value: object) -> LockedCutoff:
+        return LockedCutoff.read(value, None)
+
+    @field_validator("exclude_newer_span", mode="before")
+    @classmethod
+    def _read_span(cls, value: object) -> LockedCutoff:
+        return LockedCutoff.read(None, value)
+
+    @field_validator("exclude_newer_package", mode="before")
+    @classmethod
+    def _read_packages(cls, value: object) -> dict[str, LockedCutoff | None] | _UnreadablePackages:
+        # Not raised here: from_project names a package uv refused before this refusal is reached.
+        if not isinstance(value, dict):
+            return _UnreadablePackages(refusal=f"uv.lock holds an exclude-newer-package bmk cannot read: {value!r}")
+        entries = cast("dict[object, object]", value)
+        return {normalize(str(name)): _locked_package_cutoff(entry) for name, entry in entries.items()}
+
+    @property
+    def states_exclude_newer(self) -> bool:
+        """Whether the lock carries ``exclude-newer``: its absence is how uv says it refused a cooldown."""
+        return self.exclude_newer is not None
+
+    @property
+    def default(self) -> LockedCutoff | None:
+        """``exclude-newer`` / ``exclude-newer-span`` as one cutoff; the span wins, None for neither."""
+        return self.exclude_newer_span if self.exclude_newer_span is not None else self.exclude_newer
+
+    @property
+    def per_package(self) -> dict[str, LockedCutoff | None]:
+        """``exclude-newer-package`` by normalized name, None meaning exempt; empty when unreadable."""
+        return {} if isinstance(self.exclude_newer_package, _UnreadablePackages) else self.exclude_newer_package
+
+    @property
+    def package_refusal(self) -> str | None:
+        """Why bmk cannot read ``exclude-newer-package``; None when it can."""
+        packages = self.exclude_newer_package
+        return packages.refusal if isinstance(packages, _UnreadablePackages) else None
+
+
+class _UvLockDocument(BaseModel):
+    """A ``uv.lock`` document, of which bmk reads only the ``[options]`` table.
+
+    Attributes:
+        options: The cooldown part of ``[options]``; empty when uv wrote none.
+    """
+
+    # The packages and every other table are uv's own business.
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    options: LockOptions = LockOptions()
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _table_or_empty(cls, value: object) -> object:
+        # An [options] that is not a table carries no cutoff uv would apply: read as empty, not refused.
+        return cast("dict[object, object]", value) if isinstance(value, dict) else {}
 
 
 # --- the policy a project states in [tool.uv] ------------------------------------------------------
@@ -421,8 +517,7 @@ def read_lock_options(lock: Path) -> LockOptions | None:
         document = rtoml.loads(text)
     except rtoml.TomlParsingError as exc:
         raise SupplyChainConfigError(f"{lock} is not valid TOML: {exc}") from exc
-    options = document.get("options", {})
-    return LockOptions.from_table(cast("dict[str, object]", options)) if isinstance(options, dict) else LockOptions()
+    return _UvLockDocument.model_validate(document).options
 
 
 def admitted_releases(releases: PypiReleases, cutoff: datetime | None) -> dict[str, tuple[PypiFile, ...]]:
@@ -501,8 +596,8 @@ def ensure_uv_cooldown(pyproject: Path, *, cooldown: str, exempt: Iterable[str])
     text = pyproject.read_text(encoding="utf-8")
     appended = _appended_block(text, cooldown=cooldown, exempt=exempt)
     if appended is not None:
-        pyproject.write_text(appended[0], encoding="utf-8")
-        return appended[1]
+        pyproject.write_text(appended.text, encoding="utf-8")
+        return appended.changes
     document = _typed_tomlkit.parse(text)
     tool = _subtable(document, "tool", super_table=True)
     uv = _subtable(tool, "uv")
@@ -524,7 +619,19 @@ def ensure_uv_cooldown(pyproject: Path, *, cooldown: str, exempt: Iterable[str])
     return changes
 
 
-def _appended_block(text: str, *, cooldown: str, exempt: Iterable[str]) -> tuple[str, list[str]] | None:
+class _AppendedUvBlock(NamedTuple):
+    """A pyproject with ``[tool.uv]`` appended as text, and the change lines that append makes.
+
+    Attributes:
+        text: The whole file, the block appended at its end.
+        changes: One line per entry the block adds.
+    """
+
+    text: str
+    changes: list[str]
+
+
+def _appended_block(text: str, *, cooldown: str, exempt: Iterable[str]) -> _AppendedUvBlock | None:
     """A project with no ``[tool.uv]`` gets the block appended at the end, as text.
 
     tomlkit would group a new table after the FIRST ``[tool.*]`` table, which in a file that
@@ -549,7 +656,7 @@ def _appended_block(text: str, *, cooldown: str, exempt: Iterable[str]) -> tuple
         f'[tool.uv] exclude-newer = "{cooldown}"',
         *(f"[tool.uv] exclude-newer-package: {n} = false" for n in names),
     ]
-    return candidate, changes
+    return _AppendedUvBlock(text=candidate, changes=changes)
 
 
 def _subtable(parent: Any, key: str, *, super_table: bool = False) -> Any:
@@ -603,14 +710,24 @@ def reconcile_floor_pins(
     uv = _subtable(_subtable(document, "tool", super_table=True), "uv")
     current: dict[str, object] = {str(name): value for name, value in uv.get("exclude-newer-package", {}).items()}
     wanted = {normalize(name): pin for name, pin in pins.items()}
-    entries, changes = _reconciled_pins(
-        current, pyproject=pyproject, wanted=wanted, is_floor_pin=is_floor_pin, cutoff=cutoff
-    )
-    if not changes:
+    reconciled = _reconciled_pins(current, pyproject=pyproject, wanted=wanted, is_floor_pin=is_floor_pin, cutoff=cutoff)
+    if not reconciled.changes:
         return []
-    _store_entries(uv, current=current, entries=entries)
+    _store_entries(uv, current=current, entries=reconciled.entries)
     pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
-    return changes
+    return reconciled.changes
+
+
+class _ReconciledPins(NamedTuple):
+    """What ``exclude-newer-package`` should hold after reconciling bmk's floor pins.
+
+    Attributes:
+        entries: The entries in write order, by the key spelling the file uses.
+        changes: One line per change, in the order they are reported.
+    """
+
+    entries: dict[str, object]
+    changes: list[str]
 
 
 def _reconciled_pins(
@@ -620,7 +737,7 @@ def _reconciled_pins(
     wanted: Mapping[str, str],
     is_floor_pin: Callable[[str, object], bool],
     cutoff: datetime | None,
-) -> tuple[dict[str, object], list[str]]:
+) -> _ReconciledPins:
     """The entries ``exclude-newer-package`` should hold, and one line per change from ``current``.
 
     ``current`` keeps the spelling of its names, so a project that wrote ``Foo_Bar`` still finds
@@ -659,7 +776,7 @@ def _reconciled_pins(
     for key in sorted(set(wanted) - listed):
         entries[key] = wanted[key]
         changes.append(f'[tool.uv] exclude-newer-package: {key} = "{wanted[key]}" (floor younger than the cooldown)')
-    return entries, changes
+    return _ReconciledPins(entries=entries, changes=changes)
 
 
 def _store_entries(uv: Any, *, current: Mapping[str, object], entries: Mapping[str, object]) -> None:
