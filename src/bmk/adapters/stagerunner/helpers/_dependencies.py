@@ -1697,11 +1697,14 @@ class _FloorDemand:
     A requirement once reached is kept for every later pass, even when the new pins no longer lead
     to it. Dropping it let a cycle oscillate (gadget's pin reaches helper, whose requirement on gadget
     moves the pin so helper is no longer reached, which moves it back), and refusing then left the
-    cut release unpinned. Kept, the requirements only grow, so the passes always settle; the price
-    is a pin that may be stricter than the final tree strictly needs, never a half-visible release.
+    cut release unpinned. A kept requirement the current pass did NOT reach may only TIGHTEN a pin
+    (:meth:`_Need.tolerates`): one with a young floor would otherwise force a pin past the cutoff
+    and let uv lock a young release no reached floor asks for. The price is a pin that may be
+    stricter than the final tree strictly needs, never a looser one and never a half-visible release.
     """
 
-    _MAX_PASSES = 20
+    # One pass per level of a chain of young packages each reached only through the previous pin.
+    _MAX_PASSES = 50
 
     def __init__(self, *, cutoff: datetime, exempt: frozenset[str], kept: frozenset[str]) -> None:
         self._cutoff = cutoff
@@ -1709,6 +1712,7 @@ class _FloorDemand:
         self._kept = kept
         self._walked: set[_ReleaseKey] = set()
         self._needs: dict[str, dict[_NeedKey, _Need]] = {}
+        self._reached: set[tuple[str, _NeedKey]] = set()
         self.pins: dict[str, str] = {}
 
     def resolve(self, declared: list[tuple[Requirement, str | None]]) -> dict[str, str]:
@@ -1720,12 +1724,18 @@ class _FloorDemand:
         """
         for _ in range(self._MAX_PASSES):
             self._walked = set()
+            self._reached = set()
             for requirement, python in declared:
                 self.add(requirement, python=python)
             pins = {
                 name: pin
                 for name, needs in self._needs.items()
-                if (pin := _package_pin(list(needs.values()), cutoff=self._cutoff)) is not None
+                if (
+                    pin := _package_pin(
+                        [(need, (name, key) in self._reached) for key, need in needs.items()], cutoff=self._cutoff
+                    )
+                )
+                is not None
             }
             if pins == self.pins:
                 return pins
@@ -1747,9 +1757,9 @@ class _FloorDemand:
             self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
             return
         exact = _exact_pin(requirement.specifier)
-        need = self._needs.setdefault(name, {}).setdefault(
-            (str(requirement.specifier), python, exact), _Need(releases=satisfying, python=python, exact=exact)
-        )
+        key: _NeedKey = (str(requirement.specifier), python, exact)
+        need = self._needs.setdefault(name, {}).setdefault(key, _Need(releases=satisfying, python=python, exact=exact))
+        self._reached.add((name, key))
         pin = self.pins.get(name)
         if pin is None:
             return
@@ -1803,13 +1813,20 @@ class _Need:
         release BELOW the one locked on the oldest Python is never taken and does not count.
         """
         chosen = self.chosen(moment)
-        if chosen is None:
-            return False
+        return chosen is not None and not self._cut_from(chosen, moment)
+
+    def tolerates(self, moment: datetime) -> bool:
+        """The weaker test for a requirement no longer reached: it must not see a cut release it could
+        lock, but it may see nothing at all - a young floor here must never force a pin forward."""
+        chosen = self.chosen(moment)
+        return chosen is None or not self._cut_from(chosen, moment)
+
+    def _cut_from(self, chosen: str, moment: datetime) -> bool:
         floor = Version(chosen)
-        return not _cuts_at({v: f for v, f in self.releases.items() if Version(v) >= floor}, moment)
+        return _cuts_at({v: f for v, f in self.releases.items() if Version(v) >= floor}, moment)
 
 
-def _package_pin(needs: list[_Need], *, cutoff: datetime) -> str | None:
+def _package_pin(needs: list[tuple[_Need, bool]], *, cutoff: datetime) -> str | None:
     """The pin a package needs under the default ``cutoff``, given every requirement on it; None for none.
 
     uv locks, per requirement, the highest release a file before the cutoff makes visible, with only
@@ -1824,19 +1841,21 @@ def _package_pin(needs: list[_Need], *, cutoff: datetime) -> str | None:
     once the cut release clears the cooldown. Failing that it goes FORWARD to the earliest safe
     candidate past the cutoff, where a floor release too young or itself cut is admitted whole.
     Each candidate is one second after a release's newest file, which is how bmk recognises the pin
-    as its own.
+    as its own. ``needs`` pairs each requirement with whether this pass reached it; one not reached
+    only has to be tolerated (:meth:`_Need.tolerates`).
     """
-    if all(need.settles(cutoff) for need in needs):
+
+    def safe(moment: datetime) -> bool:
+        return all(need.settles(moment) if reached else need.tolerates(moment) for need, reached in needs)
+
+    if safe(cutoff):
         return None
     candidates = sorted(
-        {pin for need in needs for files in need.releases.values() if (pin := floor_pin(files)) is not None}
+        {pin for need, _ in needs for files in need.releases.values() if (pin := floor_pin(files)) is not None}
     )
     back = [c for c in candidates if _as_moment(c) <= cutoff]
     forward = [c for c in candidates if _as_moment(c) > cutoff]
-    for candidate in [*reversed(back), *forward]:
-        if all(need.settles(_as_moment(candidate)) for need in needs):
-            return candidate
-    return None
+    return next((c for c in [*reversed(back), *forward] if safe(_as_moment(c))), None)
 
 
 def _as_moment(pin: str) -> datetime:

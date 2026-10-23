@@ -1326,6 +1326,32 @@ def test_a_dependency_cycle_settles_on_a_safe_pin(
 
 
 @pytest.mark.os_agnostic
+def test_a_requirement_no_longer_reached_never_admits_a_young_release(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # gadget's first pin reaches 2.0, which needs helper>=2.0 (five days old); tool's 3.11
+    # requirement then holds gadget at 1.0, which needs no helper. Kept but no longer reached,
+    # helper>=2.0 pinned helper forward, and uv would lock the young 2.0 for the project's own
+    # helper>=1.0, whose 90-day 1.0 the default cutoff already admits whole.
+    pypi.packages["gadget"] = _doc(
+        "3.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(30),
+            "2.5": [*_uploaded(31, requires_python=">=3.11"), *_uploaded(14.5, requires_python=">=3.11")],
+            "3.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pypi.versions["gadget/2.0"] = ["helper>=2.0"]
+    pypi.packages["helper"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": _uploaded(5)})
+    pypi.packages["tool"] = _doc("1.0", {"1.0": _uploaded(4)})
+    pypi.versions["tool/1.0"] = ["gadget>=1.0; python_version >= '3.11'"]
+    pyproject = _write_two_pythons(tmp_path, '"gadget>=1.0", "tool>=1.0", "helper>=1.0"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(90), "tool": _pin_of(4)}
+
+
+@pytest.mark.os_agnostic
 def test_a_release_whose_installable_file_has_no_upload_time_leaves_the_pins_alone(
     tmp_path: Path, pypi: _FakeIndex
 ) -> None:
