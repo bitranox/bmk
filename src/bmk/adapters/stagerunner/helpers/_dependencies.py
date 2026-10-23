@@ -62,7 +62,7 @@ from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
 from bmk.domain.enums import ToolOutputFormat
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterable
+    from collections.abc import Callable, Generator, Iterable, MutableMapping
 
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
     from bmk.adapters.stagerunner.output import SupportsWrite
@@ -2003,41 +2003,73 @@ def update_dependencies(
         print(f"\n{'[DRY RUN] ' if dry_run else ''}Updating {len(outdated)} dependencies:\n")
 
     for dep in outdated:
-        if not dep.original_spec:
-            continue
-
-        new_spec = _build_updated_spec(dep)
-        if new_spec == dep.original_spec:
-            continue
-        if _specifier_of(new_spec) is None:
-            # The rewriter reads normalized PEP 440 spellings; on any other ("1.0c1", "1.0RC1") it
-            # can splice the new version into the old suffix. Never write that, whatever the cause:
-            # the dependency stays outdated, so the gate stays red and names the spec to fix.
-            print(
-                f"  {dep.name}: {dep.original_spec} -> {new_spec} is not a valid requirement, not written",
-                file=sys.stderr,
-            )
-            continue
-
-        if _replace_spec(document, dep.original_spec, new_spec):
-            if not quiet:
-                print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")
+        if _apply_update(document, dep, quiet=quiet):
             updated_count += 1
-        elif not quiet:
-            print(f"  {dep.name}: Could not locate in file (manual update needed)")
 
-    if updated_count > 0:
-        if dry_run:
-            if not quiet:
-                print(f"\n[DRY RUN] Would update {updated_count} dependencies")
-        else:
-            pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
-            if not quiet:
-                print(f"\nUpdated {updated_count} dependencies in {pyproject}")
-    elif not quiet:
-        print("\nNo dependencies were updated")
-
+    _finish_update(document, pyproject, updated_count=updated_count, dry_run=dry_run, quiet=quiet)
     return updated_count
+
+
+def _apply_update(document: MutableMapping[str, Any], dep: DependencyInfo, *, quiet: bool) -> bool:
+    """Rewrite ``dep``'s spec to its latest version inside ``document``, in place.
+
+    Args:
+        document: The parsed pyproject.toml, edited in memory only.
+        dep: An outdated dependency.
+        quiet: Suppress the per-dependency progress lines on stdout.
+
+    Returns:
+        True when the spec was found and replaced; False when it was skipped.
+    """
+    if not dep.original_spec:
+        return False
+
+    new_spec = _build_updated_spec(dep)
+    if new_spec == dep.original_spec:
+        return False
+    if _specifier_of(new_spec) is None:
+        # The rewriter reads normalized PEP 440 spellings; on any other ("1.0c1", "1.0RC1") it
+        # can splice the new version into the old suffix. Never write that, whatever the cause:
+        # the dependency stays outdated, so the gate stays red and names the spec to fix.
+        # Printed even under quiet: it is the only explanation of that red gate.
+        print(
+            f"  {dep.name}: {dep.original_spec} -> {new_spec} is not a valid requirement, not written",
+            file=sys.stderr,
+        )
+        return False
+
+    if _replace_spec(document, dep.original_spec, new_spec):
+        if not quiet:
+            print(f"  {dep.name}: {dep.original_spec} -> {new_spec}")
+        return True
+    if not quiet:
+        print(f"  {dep.name}: Could not locate in file (manual update needed)")
+    return False
+
+
+def _finish_update(
+    document: MutableMapping[str, Any], pyproject: Path, *, updated_count: int, dry_run: bool, quiet: bool
+) -> None:
+    """Write ``document`` back unless this is a dry run, and report the outcome.
+
+    Args:
+        document: The parsed pyproject.toml carrying every replaced spec.
+        pyproject: Where ``document`` came from and is written back to.
+        updated_count: How many specs ``_apply_update`` replaced.
+        dry_run: Report what would change without writing the file.
+        quiet: Suppress the summary line on stdout.
+    """
+    if updated_count <= 0:
+        if not quiet:
+            print("\nNo dependencies were updated")
+        return
+    if dry_run:
+        if not quiet:
+            print(f"\n[DRY RUN] Would update {updated_count} dependencies")
+        return
+    pyproject.write_text(_typed_tomlkit.dumps(document), encoding="utf-8")
+    if not quiet:
+        print(f"\nUpdated {updated_count} dependencies in {pyproject}")
 
 
 def main(
