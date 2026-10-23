@@ -11,7 +11,8 @@ pipeline stages - it provisions and runs each cell itself, here.
 Each cell provisions ``.venv-<minor>`` (by minor, not patch: the dir name stays stable while
 uv auto-follows patch upgrades), installs the project into it, then runs
 ``python -m pytest`` and ``pyright --pythonpath <venv-python>`` (pyright does not honour
-``VIRTUAL_ENV``, so the pin is what makes per-version type-checking real). ruff/bandit/
+``VIRTUAL_ENV``, so the pin is what makes per-version type-checking real), once per OS
+``[tool.ci].os`` declares (``--pythonplatform``), as ``make test``'s pyright stage does. ruff/bandit/
 import-linter are version-independent and pip-audit is env-based, so they are not repeated.
 """
 
@@ -27,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.adapters.stagerunner.project import pyright_platforms
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
     ensure_minors_installed,
@@ -134,12 +136,20 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> tuple[Ce
     if result.returncode != 0:
         return CellStatus.FAIL, _tail(result.stdout + result.stderr)
 
-    pyright_cmd = ["pyright", "--pythonpath", str(python)]
-    if quiet:
-        pyright_cmd.append("--outputjson")
-    checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
-    if checked.returncode != 0:
-        return CellStatus.FAIL, _tail(checked.stdout + checked.stderr)
+    # One pyright run per OS [tool.ci].os declares, as in make test's pyright stage: pyright checks
+    # one platform per run, so a cell typed for the host alone passes a Windows-only error that
+    # only the older Python this cell exists for shows.
+    platforms = [platform.value for platform in pyright_platforms(project_dir / "pyproject.toml")]
+    for platform in platforms or [None]:
+        pyright_cmd = ["pyright", "--pythonpath", str(python)]
+        if platform is not None:
+            pyright_cmd += ["--pythonplatform", platform]
+        if quiet:
+            pyright_cmd.append("--outputjson")
+        checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
+        if checked.returncode != 0:
+            header = f"pyright --pythonplatform {platform}:\n" if platform is not None else ""
+            return CellStatus.FAIL, header + _tail(checked.stdout + checked.stderr)
     return CellStatus.PASSED, ""
 
 

@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- `make test-all` type-checks every OS your CI runs on, in every Python cell: each cell runs
+  pyright once per OS family in `[tool.ci].os` (`--pythonplatform Linux|Windows|Darwin`), as
+  `make test`'s pyright stage has since 3.23.0. A type error that shows only on one OS under one
+  older Python, which neither gate saw before, now fails the cell that has it, and the failure
+  names the platform. Without `[tool.ci].os` a cell checks the host only, as before. Measured on
+  bmk itself: 4.6-8.9 s per extra pyright run.
+
 ## [3.23.3] 2026-10-23 22:56:09
 
 ### Fixed

@@ -197,6 +197,50 @@ def test_e2e_a_version_specific_failure_fails_the_run(tmp_path: Path) -> None:
     assert main(project_dir=tmp_path, quiet=True) == 1
 
 
+# A type error only Windows sees: on any other platform pyright treats the branch as unreachable,
+# and os.getuid does not exist in the Windows stubs. The test itself passes everywhere.
+_WINDOWS_ONLY_TYPE_ERROR = (
+    "import os\nimport sys\n\n\n"
+    "def test_ok() -> None:\n"
+    '    if sys.platform == "win32":\n'
+    "        assert os.getuid() >= 0\n"
+)
+
+
+def _make_platform_project(project: Path, *, declared_os: list[str] | None) -> None:
+    """A one-cell project holding ``_WINDOWS_ONLY_TYPE_ERROR``, with ``[tool.ci].os`` when given."""
+    _make_project(project, _E2E_MINORS[:1], _WINDOWS_ONLY_TYPE_ERROR)
+    if declared_os is not None:
+        pyproject = project / "pyproject.toml"
+        listed = ", ".join(f'"{label}"' for label in declared_os)
+        pyproject.write_text(pyproject.read_text(encoding="utf-8") + f"[tool.ci]\nos = [{listed}]\n", encoding="utf-8")
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_a_declared_platforms_type_error_fails_the_cell(tmp_path: Path) -> None:
+    """Each cell types the code for every OS ``[tool.ci].os`` declares, as ``make test`` does.
+
+    Host-only, a Windows-only type error on an older Python passed test-all and reached CI.
+    """
+    _make_platform_project(tmp_path, declared_os=["ubuntu-latest", "windows-latest"])
+
+    assert main(project_dir=tmp_path, quiet=True) == 1
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_without_declared_platforms_a_cell_types_for_the_host_only(tmp_path: Path) -> None:
+    """The control: the same code with no ``[tool.ci].os`` passes, so the failure above is Windows-only."""
+    if os.name == "nt":
+        pytest.skip("the host is Windows, where the error is the host's own")
+    _make_platform_project(tmp_path, declared_os=None)
+
+    assert main(project_dir=tmp_path, quiet=True) == 0
+
+
 _MARKED_FAILURE = (
     "import pytest\n\n\n"
     "def test_ok() -> None:\n    assert True\n\n\n"
