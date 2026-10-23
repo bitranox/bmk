@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.23.2] 2026-10-23 21:24:19
+
 ### Changed
 
 - bmk's own lint enforces cyclomatic complexity at most 10 (ruff `C90`, the CLI template's rule).
