@@ -787,6 +787,87 @@ def _handle_codecov_result(exit_code: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _warn(line: str, *, quiet: bool) -> None:
+    """Print a skip warning to stderr unless quiet.
+
+    Args:
+        line: The complete warning line, colour codes included.
+        quiet: When True, print nothing.
+    """
+    if not quiet:
+        print(line, file=sys.stderr)
+
+
+def _run_tests_step(
+    project_dir: Path,
+    *,
+    verbose: bool,
+    include_integration: bool,
+    quiet: bool,
+    python: str | None,
+) -> int:
+    """Run the suite under coverage, reporting the outcome.
+
+    A failure is reported even in quiet mode: quiet trims progress noise, it must
+    never make a red run look silent.
+
+    Args:
+        project_dir: Project directory.
+        verbose: Enable verbose output.
+        include_integration: Include integration tests (excluded by default).
+        quiet: Minimize output (short tracebacks, no per-test lines).
+        python: Interpreter to run the suite under - the project's own venv python.
+
+    Returns:
+        The test exit code (0 when the suite and the coverage floor passed).
+    """
+    _announce(f"[coverage] Running tests with coverage in {project_dir}...", quiet=quiet)
+    exit_code = run_coverage_tests(
+        project_dir=project_dir,
+        verbose=verbose,
+        include_integration=include_integration,
+        quiet=quiet,
+        python=python,
+    )
+    if exit_code != 0:
+        print(f"[coverage] Tests failed (exit {exit_code})", file=sys.stderr)
+        return exit_code
+    _announce("[coverage] Tests passed", quiet=quiet)
+    return 0
+
+
+def _upload_step(project_dir: Path, *, quiet: bool) -> int:
+    """Upload the coverage report to Codecov when a token and the uploader exist.
+
+    Args:
+        project_dir: Project directory containing the coverage report.
+        quiet: Suppress the skip warnings and the uploading line.
+
+    Returns:
+        0 when the upload succeeded or was skipped, 1 when a real upload failed.
+    """
+    token = ensure_codecov_token(project_dir)
+    if not token:
+        _warn(
+            "\033[33m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
+            "(set CODECOV_TOKEN in environment or .env)\033[0m",
+            quiet=quiet,
+        )
+        return 0
+
+    # An absent uploader is a missing optional tool, not a coverage failure:
+    # skip it the same way a missing token is skipped. Only a real upload
+    # attempt that fails is worth failing the run over.
+    if shutil.which("codecovcli") is None:
+        _warn("\033[33m[codecov] warning: 'codecovcli' not installed; skipping upload\033[0m", quiet=quiet)
+        return 0
+
+    _announce(f"[codecov] Uploading coverage from {project_dir}...", quiet=quiet)
+    if not upload_coverage_report(project_dir=project_dir, codecov_token=token):
+        return 1
+    return 0
+
+
 def main(
     *,
     project_dir: Path | None = None,
@@ -809,56 +890,25 @@ def main(
         python: Interpreter to run the suite under - the project's own venv python.
 
     Returns:
-        Exit code (0 for success, 1 for failure).
+        Exit code: the test run's own code when it fails, 1 when an upload fails,
+        otherwise 0 (a skipped upload counts as success).
     """
     if project_dir is None:
         project_dir = Path.cwd()
 
-    # Run tests with coverage if requested
     if run_tests:
-        if not quiet:
-            print(f"[coverage] Running tests with coverage in {project_dir}...")
-        exit_code = run_coverage_tests(
-            project_dir=project_dir,
+        exit_code = _run_tests_step(
+            project_dir,
             verbose=verbose,
             include_integration=include_integration,
             quiet=quiet,
             python=python,
         )
         if exit_code != 0:
-            print(f"[coverage] Tests failed (exit {exit_code})", file=sys.stderr)
             return exit_code
-        if not quiet:
-            print("[coverage] Tests passed")
 
-    # Upload coverage if requested
     if upload:
-        token = ensure_codecov_token(project_dir)
-        if not token:
-            if not quiet:
-                print(
-                    "\033[33m[codecov] warning: CODECOV_TOKEN not found; skipping upload "
-                    "(set CODECOV_TOKEN in environment or .env)\033[0m",
-                    file=sys.stderr,
-                )
-            return 0
-
-        # An absent uploader is a missing optional tool, not a coverage failure:
-        # skip it the same way a missing token is skipped. Only a real upload
-        # attempt that fails is worth failing the run over.
-        if shutil.which("codecovcli") is None:
-            if not quiet:
-                print(
-                    "\033[33m[codecov] warning: 'codecovcli' not installed; skipping upload\033[0m",
-                    file=sys.stderr,
-                )
-            return 0
-
-        if not quiet:
-            print(f"[codecov] Uploading coverage from {project_dir}...")
-        success = upload_coverage_report(project_dir=project_dir, codecov_token=token)
-        if not success:
-            return 1
+        return _upload_step(project_dir, quiet=quiet)
 
     return 0
 
