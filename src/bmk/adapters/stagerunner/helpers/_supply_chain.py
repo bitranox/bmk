@@ -20,6 +20,7 @@ in milliseconds and cannot fail on a floor.
 
 Contents
 --------
+* ``LockOptions`` / ``LockedCutoff`` - the ``uv.lock`` ``[options]`` table, read into typed cutoffs.
 * ``ReleasePolicy`` - the project's cutoff per package, as uv resolved it into ``uv.lock``.
 * ``uv_resolved_options`` - asks uv to resolve ``[tool.uv]`` values into that canonical form.
 * ``admitted_releases`` - a PyPI ``releases`` map reduced to the files uploaded before a cutoff.
@@ -45,8 +46,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import rtoml
 from packaging.requirements import InvalidRequirement, Requirement
+from pydantic import BaseModel, ConfigDict
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
+from bmk.adapters.stagerunner.helpers._pypi_models import PypiFile, PypiReleases, parse_moment
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -54,6 +57,8 @@ if TYPE_CHECKING:
 __all__ = [
     "DEFAULT_COOLDOWN",
     "DEFAULT_OWN_PACKAGES",
+    "LockOptions",
+    "LockedCutoff",
     "OwnPackageUnreadableError",
     "ReleasePolicy",
     "SupplyChainConfigError",
@@ -169,14 +174,54 @@ _RE_LOCKED_SPAN = re.compile(
     r"-?P(?=\d|T\d)(?:(?P<w>\d+)W)?(?:(?P<d>\d+)D)?"
     r"(?:T(?=\d)(?:(?P<h>\d+)H)?(?:(?P<m>\d+)M)?(?:(?P<s>\d+(?:\.\d+)?)S)?)?"
 )
-# RFC 3339 allows any number of fraction digits; datetime parses at most six.
-_RE_LONG_FRACTION = re.compile(r"(\.\d{6})\d+")
 
 
-def _locked_span(text: object) -> timedelta:
-    match = _RE_LOCKED_SPAN.fullmatch(text) if isinstance(text, str) else None
-    if match is None:
-        raise SupplyChainConfigError(f"uv.lock holds an exclude-newer span bmk cannot read: {text!r}")
+class LockedCutoff(BaseModel):
+    """One cutoff as uv locked it: a span counted back from now, or a fixed moment.
+
+    A value bmk cannot read is kept as its ``refusal`` rather than raised while the lock is read: it
+    is refused when the cutoff is USED, so a placeholder timestamp uv writes beside a span is never
+    judged, and a check that refuses the project's settings first still names that reason.
+
+    Attributes:
+        span: The span uv wrote; it wins over the placeholder timestamp written beside it.
+        timestamp: The fixed cutoff, when uv wrote no span.
+        refusal: Why bmk cannot read the locked value; None when it can.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    span: timedelta | None = None
+    timestamp: datetime | None = None
+    refusal: str | None = None
+
+    @classmethod
+    def read(cls, timestamp: object, span: object) -> LockedCutoff:
+        """The cutoff a ``timestamp`` / ``span`` pair locks, as uv wrote them (either may be None)."""
+        if span is not None:
+            match = _RE_LOCKED_SPAN.fullmatch(span) if isinstance(span, str) else None
+            if match is None:
+                return cls(refusal=f"uv.lock holds an exclude-newer span bmk cannot read: {span!r}")
+            return cls(span=_span_of(match))
+        moment = parse_moment(timestamp) if isinstance(timestamp, str) else None
+        if moment is None:
+            return cls(refusal=f"uv.lock holds an exclude-newer timestamp bmk cannot read: {timestamp!r}")
+        return cls(timestamp=moment)
+
+    def at(self, now: datetime) -> datetime:
+        """The cutoff as a moment, a span counted back from ``now``.
+
+        Raises:
+            SupplyChainConfigError: For a value outside the canonical form uv writes.
+        """
+        if self.span is not None:
+            return now - self.span
+        if self.timestamp is not None:
+            return self.timestamp
+        raise SupplyChainConfigError(self.refusal or "uv.lock holds an exclude-newer value bmk cannot read")
+
+
+def _span_of(match: re.Match[str]) -> timedelta:
     parts = {key: float(value) for key, value in match.groupdict().items() if value is not None}
     return timedelta(
         weeks=parts.get("w", 0),
@@ -187,36 +232,53 @@ def _locked_span(text: object) -> timedelta:
     )
 
 
-def _locked_timestamp(text: object) -> datetime:
-    moment = _moment(text) if isinstance(text, str) else None
-    if moment is None:
-        raise SupplyChainConfigError(f"uv.lock holds an exclude-newer timestamp bmk cannot read: {text!r}")
-    return moment
+class LockOptions(BaseModel):
+    """The cooldown part of a ``uv.lock`` ``[options]`` table, read into typed cutoffs.
+
+    Attributes:
+        states_exclude_newer: Whether the lock carries ``exclude-newer``: its absence is how uv says
+            it refused a stated cooldown.
+        default: ``exclude-newer`` / ``exclude-newer-span`` as one cutoff; None when uv wrote neither.
+        per_package: ``exclude-newer-package`` by normalized name; None means exempt.
+        package_refusal: Why bmk cannot read ``exclude-newer-package``; None when it can.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    states_exclude_newer: bool = False
+    default: LockedCutoff | None = None
+    per_package: dict[str, LockedCutoff | None] = {}
+    package_refusal: str | None = None
+
+    @classmethod
+    def from_table(cls, options: Mapping[str, object]) -> LockOptions:
+        """Read the ``[options]`` table uv wrote.
+
+        Only ``exclude-newer``, ``exclude-newer-span`` and ``exclude-newer-package`` are read; every
+        other key is uv's own business.
+        """
+        states = "exclude-newer" in options
+        default = None
+        if states or "exclude-newer-span" in options:
+            default = LockedCutoff.read(options.get("exclude-newer"), options.get("exclude-newer-span"))
+        packages = options.get("exclude-newer-package", {})
+        if not isinstance(packages, dict):
+            refusal = f"uv.lock holds an exclude-newer-package bmk cannot read: {packages!r}"
+            return cls(states_exclude_newer=states, default=default, package_refusal=refusal)
+        per_package = {
+            normalize(str(name)): _locked_package_cutoff(value)
+            for name, value in cast("dict[object, object]", packages).items()
+        }
+        return cls(states_exclude_newer=states, default=default, per_package=per_package)
 
 
-def _locked_cutoff(timestamp: object, span: object, *, now: datetime) -> datetime:
-    """A span, when uv wrote one, wins over the placeholder timestamp written beside it."""
-    if span is not None:
-        return now - _locked_span(span)
-    return _locked_timestamp(timestamp)
-
-
-def _locked_package_cutoff(value: object, *, now: datetime) -> datetime | None:
+def _locked_package_cutoff(value: object) -> LockedCutoff | None:
     if value is False:
         return None
     if isinstance(value, dict):
         entry = cast("dict[str, object]", value)
-        return _locked_cutoff(entry.get("timestamp"), entry.get("span"), now=now)
-    return _locked_timestamp(value)
-
-
-def _moment(text: str) -> datetime | None:
-    try:
-        moment = datetime.fromisoformat(_RE_LONG_FRACTION.sub(r"\1", text.replace("Z", "+00:00")))
-    except ValueError:
-        return None
-    # An upload time and a locked cutoff are UTC; a naive one would silently mean this machine's zone.
-    return moment if moment.tzinfo is not None else None
+        return LockedCutoff.read(entry.get("timestamp"), entry.get("span"))
+    return LockedCutoff.read(value, None)
 
 
 # --- the policy a project states in [tool.uv] ------------------------------------------------------
@@ -235,21 +297,17 @@ class ReleasePolicy:
     per_package: Mapping[str, datetime | None] = field(default_factory=lambda: {})
 
     @classmethod
-    def from_lock(cls, options: Mapping[str, Any], *, now: datetime) -> ReleasePolicy:
+    def from_lock(cls, options: LockOptions, *, now: datetime) -> ReleasePolicy:
         """The cutoffs uv resolved, from a ``uv.lock`` ``[options]`` table.
 
         Raises:
             SupplyChainConfigError: For a value outside the canonical form uv writes.
         """
-        default = None
-        if "exclude-newer" in options or "exclude-newer-span" in options:
-            default = _locked_cutoff(options.get("exclude-newer"), options.get("exclude-newer-span"), now=now)
-        packages = options.get("exclude-newer-package", {})
-        if not isinstance(packages, dict):
-            raise SupplyChainConfigError(f"uv.lock holds an exclude-newer-package bmk cannot read: {packages!r}")
+        default = options.default.at(now) if options.default is not None else None
+        if options.package_refusal is not None:
+            raise SupplyChainConfigError(options.package_refusal)
         per_package = {
-            normalize(str(name)): _locked_package_cutoff(value, now=now)
-            for name, value in cast("dict[str, object]", packages).items()
+            name: cutoff.at(now) if cutoff is not None else None for name, cutoff in options.per_package.items()
         }
         return cls(default=default, per_package=per_package)
 
@@ -259,7 +317,7 @@ class ReleasePolicy:
         *,
         exclude_newer: object,
         packages: Mapping[str, object],
-        lock_options: Mapping[str, Any] | None,
+        lock_options: LockOptions | None,
         now: datetime,
     ) -> ReleasePolicy:
         """The policy for a project whose ``[tool.uv]`` states ``exclude_newer`` and ``packages``.
@@ -275,10 +333,8 @@ class ReleasePolicy:
             return cls()
         if lock_options is None:
             raise SupplyChainConfigError("[tool.uv] states a cooldown but there is no uv.lock to read it from")
-        locked: object = lock_options.get("exclude-newer-package", {})
-        locked_table: dict[str, object] = cast("dict[str, object]", locked) if isinstance(locked, dict) else {}
-        locked_names = {normalize(name) for name in locked_table}
-        if exclude_newer is not None and "exclude-newer" not in lock_options:
+        locked_names = set(lock_options.per_package)
+        if exclude_newer is not None and not lock_options.states_exclude_newer:
             raise SupplyChainConfigError(
                 f"uv did not accept [tool.uv] exclude-newer = {exclude_newer!r} (uv.lock carries no cutoff); "
                 "run 'uv lock' to see uv's warning"
@@ -295,7 +351,7 @@ class ReleasePolicy:
         return self.per_package.get(normalize(name), self.default)
 
 
-def uv_resolved_options(exclude_newer: object, packages: Mapping[str, object]) -> dict[str, Any]:
+def uv_resolved_options(exclude_newer: object, packages: Mapping[str, object]) -> LockOptions:
     """The ``[options]`` uv resolves ``[tool.uv]`` values into; empty when uv refused them.
 
     Runs ``uv lock --offline`` in a scratch project that carries only these values and no
@@ -334,10 +390,10 @@ def uv_resolved_options(exclude_newer: object, packages: Mapping[str, object]) -
         if result.returncode != 0:
             raise SupplyChainConfigError(f"uv could not resolve the cooldown: {result.stderr.strip()}")
         options = read_lock_options(root / "uv.lock")
-    return options if options is not None else {}
+    return options if options is not None else LockOptions()
 
 
-def read_lock_options(lock: Path) -> dict[str, Any] | None:
+def read_lock_options(lock: Path) -> LockOptions | None:
     """The ``[options]`` table of ``lock``: empty when uv wrote none, None when there is no lock.
 
     Raises:
@@ -354,10 +410,10 @@ def read_lock_options(lock: Path) -> dict[str, Any] | None:
     except rtoml.TomlParsingError as exc:
         raise SupplyChainConfigError(f"{lock} is not valid TOML: {exc}") from exc
     options = document.get("options", {})
-    return cast("dict[str, Any]", options) if isinstance(options, dict) else {}
+    return LockOptions.from_table(cast("dict[str, object]", options)) if isinstance(options, dict) else LockOptions()
 
 
-def admitted_releases(releases: Mapping[str, Any], cutoff: datetime | None) -> dict[str, Any]:
+def admitted_releases(releases: PypiReleases, cutoff: datetime | None) -> dict[str, tuple[PypiFile, ...]]:
     """``releases`` holding only the files uploaded before ``cutoff``, as uv filters them.
 
     uv judges each FILE, not the version: a release stays available through any file uploaded in
@@ -366,24 +422,12 @@ def admitted_releases(releases: Mapping[str, Any], cutoff: datetime | None) -> d
     """
     if cutoff is None:
         return dict(releases)
-    admitted: dict[str, Any] = {}
+    admitted: dict[str, tuple[PypiFile, ...]] = {}
     for version, files in releases.items():
-        if not isinstance(files, list):
-            continue
-        kept = [f for f in cast("list[Any]", files) if _uploaded_before(f, cutoff)]
+        kept = tuple(f for f in files if f.uploaded is not None and f.uploaded < cutoff)
         if kept:
             admitted[version] = kept
     return admitted
-
-
-def _uploaded_before(entry: object, cutoff: datetime) -> bool:
-    if not isinstance(entry, dict):
-        return False
-    stamp = cast("dict[str, Any]", entry).get("upload_time_iso_8601")
-    if not isinstance(stamp, str):
-        return False
-    moment = _moment(stamp)
-    return moment is not None and moment < cutoff
 
 
 # --- keeping [tool.uv] in the project --------------------------------------------------------------
@@ -512,23 +556,16 @@ def _subtable(parent: Any, key: str, *, super_table: bool = False) -> Any:
 # the default cutoff for its package and would otherwise hold the package back for good.
 
 
-def floor_pin(files: Iterable[object]) -> str | None:
+def floor_pin(files: Iterable[PypiFile]) -> str | None:
     """The cutoff that admits every file of a release: the next whole second after the newest one.
 
     Returns None when no file carries an upload time.
     """
-    moments = [m for m in (_upload_moment(f) for f in files) if m is not None]
+    moments = [f.uploaded for f in files if f.uploaded is not None]
     if not moments:
         return None
     pin = max(moments).astimezone(timezone.utc).replace(microsecond=0) + timedelta(seconds=1)
     return pin.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _upload_moment(entry: object) -> datetime | None:
-    if not isinstance(entry, dict):
-        return None
-    stamp = cast("dict[str, Any]", entry).get("upload_time_iso_8601")
-    return _moment(stamp) if isinstance(stamp, str) else None
 
 
 def reconcile_floor_pins(
@@ -641,7 +678,7 @@ def _admits_beyond(pin: object, cutoff: datetime | None) -> bool:
 
     A pin at or before the cutoff admits nothing more, and would hold its package back.
     """
-    moment = _moment(pin) if isinstance(pin, str) else None
+    moment = parse_moment(pin) if isinstance(pin, str) else None
     return cutoff is not None and moment is not None and moment > cutoff
 
 

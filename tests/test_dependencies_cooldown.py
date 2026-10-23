@@ -25,7 +25,9 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
     check_dependencies,
     update_dependencies,
 )
+from bmk.adapters.stagerunner.helpers._pypi_models import PypiFile
 from bmk.adapters.stagerunner.helpers._supply_chain import (
+    LockOptions,
     ReleasePolicy,
     SupplyChainConfigError,
     SupplyChainSettings,
@@ -44,6 +46,11 @@ _NOW = datetime.now(timezone.utc)
 def _uploaded(days_ago: float, *, requires_python: str | None = ">=3.10") -> list[dict[str, Any]]:
     stamp = (_NOW - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     return [{"requires_python": requires_python, "yanked": False, "upload_time_iso_8601": stamp}]
+
+
+def _files(raw: list[dict[str, Any]]) -> tuple[PypiFile, ...]:
+    """File records as the PyPI boundary reads them."""
+    return tuple(PypiFile.model_validate(entry) for entry in raw)
 
 
 def _doc(version: str, releases: dict[str, list[dict[str, Any]]], requires: list[str] | None = None) -> dict[str, Any]:
@@ -164,7 +171,7 @@ def test_a_floor_at_the_newest_cooled_release_is_up_to_date_not_outdated(tmp_pat
 
     # The deps gate fails on OUTDATED, so a release still inside the cooldown must not count.
     assert dep.status is DependencyStatus.UP_TO_DATE
-    assert "cooldown" in dep.latest
+    assert "cooldown" in dep.latest_display
 
 
 @pytest.mark.os_agnostic
@@ -177,7 +184,7 @@ def test_a_floor_younger_than_the_cooldown_is_kept_never_lowered(tmp_path: Path)
     [dep] = check_dependencies(pyproject)
 
     assert dep.status is DependencyStatus.ERROR
-    assert "cooldown" in dep.latest
+    assert "cooldown" in dep.latest_display
     assert '"widget>=1.2"' in _raise(pyproject)
 
 
@@ -191,7 +198,7 @@ def test_a_floor_no_release_outside_the_cooldown_satisfies_is_an_error_not_ok(tm
     [dep] = check_dependencies(pyproject)
 
     assert dep.status is DependencyStatus.ERROR
-    assert "cooldown" in dep.latest
+    assert "cooldown" in dep.latest_display
 
 
 @pytest.mark.os_agnostic
@@ -206,7 +213,7 @@ def test_the_report_names_the_release_the_cooldown_holds_back_not_the_absolute_l
     [dep] = check_dependencies(pyproject)
 
     assert dep.status is DependencyStatus.UP_TO_DATE
-    assert dep.latest.startswith("1.1 ")
+    assert dep.latest_display.startswith("1.1 ")
 
 
 @pytest.mark.os_agnostic
@@ -222,7 +229,7 @@ def test_a_stale_project_lock_does_not_decide_the_cutoff(tmp_path: Path, pypi: _
 
     # The stale lock exempted widget, which would read [ok]; the cutoff uv resolves today holds it.
     assert dep.status is DependencyStatus.ERROR
-    assert "cooldown" in dep.latest
+    assert "cooldown" in dep.latest_display
 
 
 @pytest.mark.os_agnostic
@@ -258,12 +265,12 @@ _PLACEHOLDER = '"0001-01-01T00:00:00Z"'
 def test_a_locked_span_is_counted_back_from_now(span: str, age: timedelta) -> None:
     options = {"exclude-newer": "0001-01-01T00:00:00Z", "exclude-newer-span": span}
 
-    assert ReleasePolicy.from_lock(options, now=_NOW).default == _NOW - age
+    assert ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW).default == _NOW - age
 
 
 @pytest.mark.os_agnostic
 def test_a_locked_timestamp_is_an_absolute_cutoff() -> None:
-    policy = ReleasePolicy.from_lock({"exclude-newer": "2026-10-01T22:00:00Z"}, now=_NOW)
+    policy = ReleasePolicy.from_lock(LockOptions.from_table({"exclude-newer": "2026-10-01T22:00:00Z"}), now=_NOW)
 
     assert policy.default == datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc)
 
@@ -280,7 +287,7 @@ def test_locked_per_package_values_exempt_pin_or_span() -> None:
         },
     }
 
-    policy = ReleasePolicy.from_lock(options, now=_NOW)
+    policy = ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW)
 
     assert policy.cutoff_for("Lib_Log_Rich") is None
     assert policy.cutoff_for("orjson") == datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc)
@@ -290,7 +297,7 @@ def test_locked_per_package_values_exempt_pin_or_span() -> None:
 
 @pytest.mark.os_agnostic
 def test_no_locked_cutoff_means_none() -> None:
-    assert ReleasePolicy.from_lock({}, now=_NOW) == ReleasePolicy()
+    assert ReleasePolicy.from_lock(LockOptions(), now=_NOW) == ReleasePolicy()
 
 
 @pytest.mark.os_agnostic
@@ -306,14 +313,28 @@ def test_no_locked_cutoff_means_none() -> None:
 )
 def test_a_locked_value_bmk_cannot_read_is_refused_not_guessed(options: dict[str, object]) -> None:
     with pytest.raises(SupplyChainConfigError):
-        ReleasePolicy.from_lock(options, now=_NOW)
+        ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW)
+
+
+@pytest.mark.os_agnostic
+def test_a_locked_span_wins_over_the_placeholder_beside_it_whatever_that_holds() -> None:
+    # Only a cutoff that is used is judged: uv writes a placeholder timestamp next to every span.
+    options = {"exclude-newer": "not a timestamp", "exclude-newer-span": "P14D"}
+
+    assert ReleasePolicy.from_lock(LockOptions.from_table(options), now=_NOW).default == _NOW - timedelta(days=14)
+
+
+@pytest.mark.os_agnostic
+def test_a_locked_package_table_bmk_cannot_read_is_refused_naming_it() -> None:
+    with pytest.raises(SupplyChainConfigError, match="exclude-newer-package bmk cannot read: 5"):
+        ReleasePolicy.from_lock(LockOptions.from_table({"exclude-newer-package": 5}), now=_NOW)
 
 
 @pytest.mark.os_agnostic
 def test_a_cooldown_uv_refused_is_an_error_naming_the_value() -> None:
     # uv only warns about "14 Days" and then locks with NO [options]: the cooldown is silently off.
     with pytest.raises(SupplyChainConfigError, match="14 Days"):
-        ReleasePolicy.from_project(exclude_newer="14 Days", packages={}, lock_options={}, now=_NOW)
+        ReleasePolicy.from_project(exclude_newer="14 Days", packages={}, lock_options=LockOptions(), now=_NOW)
 
 
 @pytest.mark.os_agnostic
@@ -321,7 +342,9 @@ def test_a_per_package_value_uv_refused_is_an_error_naming_the_package() -> None
     options = {"exclude-newer": "0001-01-01T00:00:00Z", "exclude-newer-span": "P2D"}
 
     with pytest.raises(SupplyChainConfigError, match="widget"):
-        ReleasePolicy.from_project(exclude_newer="2 days", packages={"widget": "1 dya"}, lock_options=options, now=_NOW)
+        ReleasePolicy.from_project(
+            exclude_newer="2 days", packages={"widget": "1 dya"}, lock_options=LockOptions.from_table(options), now=_NOW
+        )
 
 
 @pytest.mark.os_agnostic
@@ -337,8 +360,8 @@ def test_a_project_with_a_cooldown_but_no_lock_is_an_error() -> None:
 
 @pytest.mark.os_agnostic
 def test_a_release_is_admitted_through_any_file_uploaded_before_the_cutoff() -> None:
-    late_wheel = _uploaded(30) + _uploaded(1)
-    releases = {"1.0": late_wheel, "1.1": _uploaded(2), "1.2": []}
+    late_wheel = _files(_uploaded(30) + _uploaded(1))
+    releases = {"1.0": late_wheel, "1.1": _files(_uploaded(2)), "1.2": ()}
 
     admitted = admitted_releases(releases, _NOW - timedelta(days=14))
 
@@ -590,12 +613,12 @@ _NO_OWN = SupplyChainSettings(cooldown="14 days", own_packages=frozenset())
 
 @pytest.mark.os_agnostic
 def test_a_pin_is_the_next_whole_second_after_the_newest_file_of_the_release() -> None:
-    files = [
+    files: list[dict[str, Any]] = [
         {"upload_time_iso_8601": "2026-10-12T00:15:37.721228Z"},
         {"upload_time_iso_8601": "2026-10-12T00:15:41.100000Z"},
     ]
 
-    assert _supply_chain.floor_pin(files) == "2026-10-12T00:15:42Z"
+    assert _supply_chain.floor_pin(_files(files)) == "2026-10-12T00:15:42Z"
 
 
 @pytest.mark.os_agnostic

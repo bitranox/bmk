@@ -207,7 +207,7 @@ def test_a_release_list_pypi_did_not_send_keeps_the_floor_and_says_why(tmp_path:
     (dep,) = check_dependencies(pyproject)
 
     assert dep.status is DependencyStatus.ERROR
-    assert "floor kept" in dep.latest
+    assert "floor kept" in dep.latest_display
     assert update_dependencies([dep], pyproject, quiet=True) == 0
     assert '"hypothesis>=6.168.4"' in pyproject.read_text(encoding="utf-8")
 
@@ -237,7 +237,7 @@ def test_a_floor_the_oldest_python_cannot_install_is_lowered_to_the_newest_relea
     (dep,) = check_dependencies(pyproject)
     updated = update_dependencies([dep], pyproject, quiet=True)
 
-    assert "does not install on Python 3.10" in dep.latest
+    assert "does not install on Python 3.10" in dep.latest_display
     assert updated == 1
     assert '"hypothesis>=6.168.5"' in pyproject.read_text(encoding="utf-8")
 
@@ -582,7 +582,7 @@ def test_the_report_names_the_floor_as_written(tmp_path: Path, pypi: _FakeIndex)
 
     (dep,) = check_dependencies(pyproject)
 
-    assert "floor >7.0 does not install on Python 3.10" in dep.latest
+    assert "floor >7.0 does not install on Python 3.10" in dep.latest_display
 
 
 @pytest.mark.os_agnostic
@@ -708,7 +708,7 @@ def test_a_final_floor_on_a_package_with_only_prereleases_follows_the_one_uv_wou
     (dep,) = check_dependencies(pyproject)
     update_dependencies([dep], pyproject, quiet=True)
 
-    assert dep.status is not DependencyStatus.ERROR, dep.latest
+    assert dep.status is not DependencyStatus.ERROR, dep.latest_display
     assert _written_dev(pyproject) == "pkg>=8.0b1"
 
 
@@ -771,7 +771,7 @@ def test_a_floor_is_not_raised_to_a_release_that_drops_a_later_supported_python(
 
     assert pyproject.read_text(encoding="utf-8") == before
     assert dep.status is DependencyStatus.PINNED
-    assert "does not install on Python 3.14" in dep.latest
+    assert "does not install on Python 3.14" in dep.latest_display
 
 
 @pytest.mark.os_agnostic
@@ -785,7 +785,7 @@ def test_a_floor_below_the_cap_is_raised_only_as_far_as_keeps_the_later_python(
     update_dependencies([dep], pyproject, quiet=True)
 
     assert _written_dev(pyproject) == "pkg>=1.0"
-    assert "newest that keeps Python 3.14" in dep.latest
+    assert "newest that keeps Python 3.14" in dep.latest_display
 
 
 @pytest.mark.os_agnostic
@@ -798,7 +798,7 @@ def test_a_python_no_admitted_release_ever_installed_on_does_not_hold_the_floor(
     (dep,) = check_dependencies(pyproject)
     update_dependencies([dep], pyproject, quiet=True)
 
-    assert dep.status is not DependencyStatus.ERROR, dep.latest
+    assert dep.status is not DependencyStatus.ERROR, dep.latest_display
     assert _written_dev(pyproject) == "pkg>=2.0"
 
 

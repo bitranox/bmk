@@ -743,8 +743,8 @@ class TestBuildUpdatedSpec:
             source="test",
             constraint=">=8.0.0",
             current_min="8.0.0",
-            latest="9.0.0",
-            status="outdated",
+            latest_version="9.0.0",
+            status=deps_module.DependencyStatus.OUTDATED,
             original_spec="pytest>=8.0.0",
         )
 
@@ -760,8 +760,8 @@ class TestBuildUpdatedSpec:
             source="test",
             constraint=">=2.0.0",
             current_min="2.0.0",
-            latest="2.1.0",
-            status="outdated",
+            latest_version="2.1.0",
+            status=deps_module.DependencyStatus.OUTDATED,
             original_spec="tomli>=2.0.0; python_version<'3.11'",
         )
 
@@ -772,14 +772,14 @@ class TestBuildUpdatedSpec:
 
     @pytest.mark.os_agnostic
     def test_returns_original_when_latest_not_found(self, deps_module: Any) -> None:
-        """_build_updated_spec returns original when latest is 'not found'."""
+        """_build_updated_spec returns original when PyPI did not answer (no latest version)."""
         dep = deps_module.DependencyInfo(
             name="unknown",
             source="test",
             constraint=">=1.0.0",
             current_min="1.0.0",
-            latest="not found",
-            status="error",
+            latest_version=None,
+            status=deps_module.DependencyStatus.ERROR,
             original_spec="unknown>=1.0.0",
         )
 
@@ -806,8 +806,8 @@ class TestBuildUpdatedSpecExtended:
             source="test",
             constraint=">=1.0",
             current_min="1.0",
-            latest="2.0",
-            status="outdated",
+            latest_version="2.0",
+            status=deps_module.DependencyStatus.OUTDATED,
             original_spec="pkg[extra]>=1.0",
         )
 
@@ -824,8 +824,8 @@ class TestBuildUpdatedSpecExtended:
             source="test",
             constraint="",
             current_min="",
-            latest="2.0",
-            status="outdated",
+            latest_version="2.0",
+            status=deps_module.DependencyStatus.OUTDATED,
             original_spec="mypackage",
         )
 
@@ -842,8 +842,8 @@ class TestBuildUpdatedSpecExtended:
             source="test",
             constraint="==1.0",
             current_min="1.0",
-            latest="2.0",
-            status="outdated",
+            latest_version="2.0",
+            status=deps_module.DependencyStatus.OUTDATED,
             original_spec="pkg==1.0",
         )
 
@@ -859,8 +859,8 @@ class TestBuildUpdatedSpecExtended:
             source="test",
             constraint="~=1.4",
             current_min="1.4",
-            latest="2.0",
-            status="outdated",
+            latest_version="2.0",
+            status=deps_module.DependencyStatus.OUTDATED,
             original_spec="pkg~=1.4",
         )
 
@@ -886,8 +886,8 @@ class TestPrintReport:
             "source": "[project].dependencies",
             "constraint": ">=1.0.0",
             "current_min": "1.0.0",
-            "latest": "1.0.0",
-            "status": "up-to-date",
+            "latest_version": "1.0.0",
+            "status": deps_module.DependencyStatus.UP_TO_DATE,
             "original_spec": "pkg>=1.0.0",
             "upper_bound": "",
         }
@@ -914,7 +914,11 @@ class TestPrintReport:
     @pytest.mark.os_agnostic
     def test_returns_one_when_any_outdated(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """print_report returns 1 when any dep is outdated."""
-        deps = [self._make_dep(deps_module, name="old-pkg", latest="2.0.0", status="outdated")]
+        deps = [
+            self._make_dep(
+                deps_module, name="old-pkg", latest_version="2.0.0", status=deps_module.DependencyStatus.OUTDATED
+            )
+        ]
 
         result = deps_module.print_report(deps)
 
@@ -925,7 +929,9 @@ class TestPrintReport:
         """print_report verbose mode shows up-to-date deps too."""
         deps = [
             self._make_dep(deps_module, name="ok-pkg"),
-            self._make_dep(deps_module, name="old-pkg", latest="2.0.0", status="outdated"),
+            self._make_dep(
+                deps_module, name="old-pkg", latest_version="2.0.0", status=deps_module.DependencyStatus.OUTDATED
+            ),
         ]
 
         deps_module.print_report(deps, verbose=True)
@@ -939,7 +945,9 @@ class TestPrintReport:
         """print_report non-verbose mode hides up-to-date deps."""
         deps = [
             self._make_dep(deps_module, name="ok-pkg"),
-            self._make_dep(deps_module, name="old-pkg", latest="2.0.0", status="outdated"),
+            self._make_dep(
+                deps_module, name="old-pkg", latest_version="2.0.0", status=deps_module.DependencyStatus.OUTDATED
+            ),
         ]
 
         deps_module.print_report(deps, verbose=False)
@@ -953,8 +961,10 @@ class TestPrintReport:
         """print_report includes a summary section with counts."""
         deps = [
             self._make_dep(deps_module, name="ok"),
-            self._make_dep(deps_module, name="old", latest="2.0.0", status="outdated"),
-            self._make_dep(deps_module, name="pinned", status="pinned"),
+            self._make_dep(
+                deps_module, name="old", latest_version="2.0.0", status=deps_module.DependencyStatus.OUTDATED
+            ),
+            self._make_dep(deps_module, name="pinned", status=deps_module.DependencyStatus.PINNED),
         ]
 
         deps_module.print_report(deps)
@@ -979,7 +989,7 @@ class TestPrintInstallReport:
     @pytest.mark.os_agnostic
     def test_shows_not_installed_label(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """_print_install_report shows NOT INSTALLED for missing packages."""
-        deps_module._print_install_report([("mypkg", None, "1.0", "")], dry_run=False)
+        deps_module._print_install_report([deps_module.PendingInstall("mypkg", None, "1.0", "")], dry_run=False)
         out = capsys.readouterr().out
 
         assert "NOT INSTALLED" in out
@@ -987,7 +997,7 @@ class TestPrintInstallReport:
     @pytest.mark.os_agnostic
     def test_shows_current_version(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """_print_install_report shows installed version."""
-        deps_module._print_install_report([("mypkg", "0.9", "1.0", "")], dry_run=False)
+        deps_module._print_install_report([deps_module.PendingInstall("mypkg", "0.9", "1.0", "")], dry_run=False)
         out = capsys.readouterr().out
 
         assert "0.9" in out
@@ -996,7 +1006,7 @@ class TestPrintInstallReport:
     @pytest.mark.os_agnostic
     def test_dry_run_prefix(self, deps_module: Any, capsys: CaptureFixture[str]) -> None:
         """_print_install_report prefixes output with [DRY RUN] in dry run mode."""
-        deps_module._print_install_report([("mypkg", None, "1.0", "")], dry_run=True)
+        deps_module._print_install_report([deps_module.PendingInstall("mypkg", None, "1.0", "")], dry_run=True)
         out = capsys.readouterr().out
 
         assert "[DRY RUN]" in out
@@ -1039,7 +1049,8 @@ class TestExtractDependenciesFromList:
         results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
 
         assert results[0].status == "error"
-        assert results[0].latest == "not found"
+        assert results[0].latest_version is None
+        assert results[0].latest_display == "not found"
 
     @pytest.mark.os_agnostic
     def test_no_constraint_is_unknown(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:

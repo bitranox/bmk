@@ -17,6 +17,7 @@ from packaging.specifiers import SpecifierSet
 from bmk.adapters.stagerunner.helpers._dependencies import (
     DependencyInfo,
     DependencyStatus,
+    PendingInstall,
     _build_updated_spec,
     _extract_all_dependencies,
     _extract_dependencies_from_list,
@@ -33,6 +34,7 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
     sync_installed_packages,
     update_dependencies,
 )
+from bmk.adapters.stagerunner.helpers._pypi_models import PypiDocument
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 if TYPE_CHECKING:
@@ -59,18 +61,20 @@ def _make_dep(
     source: str = "[project].dependencies",
     constraint: str = ">=1.0.0",
     current_min: str = "1.0.0",
-    latest: str = "2.0.0",
+    latest: str | None = "2.0.0",
+    notes: tuple[str, ...] = (),
     status: DependencyStatus = DependencyStatus.OUTDATED,
     original_spec: str = "pkg>=1.0.0",
     upper_bound: str = "",
 ) -> DependencyInfo:
-    """Build a DependencyInfo with sensible defaults."""
+    """Build a DependencyInfo with sensible defaults; ``latest`` None is a package PyPI did not answer for."""
     return DependencyInfo(
         name=name,
         source=source,
         constraint=constraint,
         current_min=current_min,
-        latest=latest,
+        latest_version=latest,
+        notes=notes,
         status=status,
         original_spec=original_spec,
         upper_bound=upper_bound,
@@ -214,15 +218,27 @@ def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_stream: MagicMoc
 
 @pytest.mark.os_agnostic
 @patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
+def test_fetch_pypi_data_returns_none_when_the_json_is_not_a_document(mock_stream: MagicMock) -> None:
+    """JSON that is not an object is no PyPI document: the package reads as unavailable."""
+    mock_stream.return_value = _mock_httpx_stream(status_code=200, content=b'["not", "a", "document"]')
+
+    assert _fetch_pypi_data("some-pkg") is None
+
+
+@pytest.mark.os_agnostic
+@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
 def test_fetch_pypi_data_returns_parsed_json_on_success(mock_stream: MagicMock) -> None:
-    """Returns parsed dict on successful response."""
+    """Returns the validated document on a successful response."""
     payload = {"info": {"version": "3.0.0"}}
     resp = _mock_httpx_stream(status_code=200, content=orjson.dumps(payload))
     mock_stream.return_value = resp
 
     result = _fetch_pypi_data("some-pkg")
 
-    assert result == payload
+    assert result == PypiDocument.model_validate(payload)
+    assert result is not None
+    assert result.info is not None
+    assert result.info.version == "3.0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +250,7 @@ def test_fetch_pypi_data_returns_parsed_json_on_success(mock_stream: MagicMock) 
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_returns_version_string(mock_pypi: MagicMock) -> None:
     """Returns the version string from PyPI info on success."""
-    mock_pypi.return_value = {"info": {"version": "4.1.2"}}
+    mock_pypi.return_value = PypiDocument.model_validate({"info": {"version": "4.1.2"}})
 
     result = fetch_latest_version("requests")
 
@@ -256,7 +272,7 @@ def test_fetch_latest_version_returns_none_when_pypi_fails(mock_pypi: MagicMock)
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_returns_empty_when_info_not_dict(mock_pypi: MagicMock) -> None:
     """Returns empty string when info field is not a dict."""
-    mock_pypi.return_value = {"info": "not-a-dict"}
+    mock_pypi.return_value = PypiDocument.model_validate({"info": "not-a-dict"})
 
     result = fetch_latest_version("some-pkg")
 
@@ -267,7 +283,7 @@ def test_fetch_latest_version_returns_empty_when_info_not_dict(mock_pypi: MagicM
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_returns_empty_when_version_missing(mock_pypi: MagicMock) -> None:
     """Returns empty string when version key is absent from info."""
-    mock_pypi.return_value = {"info": {"name": "pkg"}}
+    mock_pypi.return_value = PypiDocument.model_validate({"info": {"name": "pkg"}})
 
     result = fetch_latest_version("some-pkg")
 
@@ -283,15 +299,17 @@ def test_fetch_latest_version_returns_empty_when_version_missing(mock_pypi: Magi
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_within_returns_highest_within_bound(mock_pypi: MagicMock) -> None:
     """Returns the highest version below the upper bound."""
-    mock_pypi.return_value = {
-        "releases": {
-            "7.0.0": [],
-            "8.0.0": [],
-            "8.5.0": [],
-            "9.0.0": [],
-            "10.0.0": [],
+    mock_pypi.return_value = PypiDocument.model_validate(
+        {
+            "releases": {
+                "7.0.0": [],
+                "8.0.0": [],
+                "8.5.0": [],
+                "9.0.0": [],
+                "10.0.0": [],
+            }
         }
-    }
+    )
 
     result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
@@ -302,16 +320,18 @@ def test_fetch_latest_version_within_returns_highest_within_bound(mock_pypi: Mag
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_within_skips_prereleases(mock_pypi: MagicMock) -> None:
     """Prerelease versions (alpha, beta, rc, dev) are excluded."""
-    mock_pypi.return_value = {
-        "releases": {
-            "8.0.0": [],
-            "8.1.0a1": [],
-            "8.2.0b2": [],
-            "8.3.0rc1": [],
-            "8.4.0dev1": [],
-            "9.0.0": [],
+    mock_pypi.return_value = PypiDocument.model_validate(
+        {
+            "releases": {
+                "8.0.0": [],
+                "8.1.0a1": [],
+                "8.2.0b2": [],
+                "8.3.0rc1": [],
+                "8.4.0dev1": [],
+                "9.0.0": [],
+            }
         }
-    }
+    )
 
     result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
@@ -333,7 +353,7 @@ def test_fetch_latest_version_within_returns_none_when_pypi_fails(mock_pypi: Mag
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_within_returns_none_when_no_releases(mock_pypi: MagicMock) -> None:
     """Returns None when releases dict is empty."""
-    mock_pypi.return_value = {"releases": {}}
+    mock_pypi.return_value = PypiDocument.model_validate({"releases": {}})
 
     result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
@@ -344,12 +364,14 @@ def test_fetch_latest_version_within_returns_none_when_no_releases(mock_pypi: Ma
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_within_returns_none_when_all_above_bound(mock_pypi: MagicMock) -> None:
     """Returns None when all versions are at or above the upper bound."""
-    mock_pypi.return_value = {
-        "releases": {
-            "9.0.0": [],
-            "10.0.0": [],
+    mock_pypi.return_value = PypiDocument.model_validate(
+        {
+            "releases": {
+                "9.0.0": [],
+                "10.0.0": [],
+            }
         }
-    }
+    )
 
     result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
@@ -360,7 +382,7 @@ def test_fetch_latest_version_within_returns_none_when_all_above_bound(mock_pypi
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_within_returns_none_when_releases_not_dict(mock_pypi: MagicMock) -> None:
     """Returns None when releases field is not a dict."""
-    mock_pypi.return_value = {"releases": "not-a-dict"}
+    mock_pypi.return_value = PypiDocument.model_validate({"releases": "not-a-dict"})
 
     result = _fetch_latest_version_within("pytest", SpecifierSet("<9"))
 
@@ -416,7 +438,7 @@ def test_extract_dependencies_detects_pinned_within_range(mock_latest: MagicMock
 
     assert len(results) == 1
     assert results[0].status == DependencyStatus.PINNED
-    assert "pinned <9" in results[0].latest
+    assert "pinned <9" in results[0].latest_display
 
 
 @pytest.mark.os_agnostic
@@ -431,7 +453,7 @@ def test_extract_dependencies_detects_outdated_within_range(mock_latest: MagicMo
 
     assert len(results) == 1
     assert results[0].status == DependencyStatus.OUTDATED
-    assert "8.5.0" in results[0].latest
+    assert "8.5.0" in results[0].latest_display
 
 
 @pytest.mark.os_agnostic
@@ -685,7 +707,7 @@ def test_check_dependencies_reads_pyproject(mock_below: MagicMock, mock_latest: 
 def test_print_report_counts_errors(capsys: pytest.CaptureFixture[str]) -> None:
     """Error status dependencies are counted in the summary."""
     deps = [
-        _make_dep(name="broken-pkg", status=DependencyStatus.ERROR, latest="not found"),
+        _make_dep(name="broken-pkg", status=DependencyStatus.ERROR, latest=None),
     ]
 
     exit_code = print_report(deps, verbose=True)
@@ -693,6 +715,27 @@ def test_print_report_counts_errors(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert "Errors:     1" in captured.out
     assert exit_code == 0  # Only outdated triggers non-zero
+
+
+@pytest.mark.os_agnostic
+def test_print_report_rows_show_the_release_its_notes_and_the_status_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A row reads the same on every Python: the status by its value, never ``DependencyStatus.X``.
+
+    f-string interpolation of a ``str, Enum`` member gives its value on 3.10 and its qualified name
+    on 3.11+, so the row must name the value explicitly.
+    """
+    deps = [
+        _make_dep(name="capped", latest="1.2", notes=("max <2", "exact pin ==1.0"), status=DependencyStatus.PINNED),
+        _make_dep(name="gone", latest=None, status=DependencyStatus.ERROR),
+    ]
+
+    print_report(deps, verbose=True)
+
+    out = capsys.readouterr().out
+    assert "  [==] capped  >=1.0.0  -> 1.2 (max <2) (exact pin ==1.0)  [pinned]\n" in out
+    assert "  [XX] gone    >=1.0.0  -> not found                       [error]\n" in out
 
 
 @pytest.mark.os_agnostic
@@ -793,10 +836,10 @@ def test_build_updated_spec_adds_constraint_with_extras_when_none() -> None:
 
 @pytest.mark.os_agnostic
 def test_build_updated_spec_returns_original_when_latest_not_found() -> None:
-    """Returns the original spec unchanged when latest is 'not found'."""
+    """Returns the original spec unchanged when PyPI did not answer (no latest version)."""
     dep = _make_dep(
         original_spec="unknown-pkg>=1.0.0",
-        latest="not found",
+        latest=None,
     )
 
     result = _build_updated_spec(dep)
@@ -833,10 +876,11 @@ def test_build_updated_spec_re_adds_extras_when_stripped() -> None:
 
 @pytest.mark.os_agnostic
 def test_build_updated_spec_strips_display_annotations_from_latest() -> None:
-    """Display annotations like '(max <1.3, absolute: 1.3.0)' must not leak into the spec."""
+    """A report note like 'max <1.3, absolute: 1.3.0' must not leak into the spec."""
     dep = _make_dep(
         original_spec="pytest-asyncio>=1.1.0",
-        latest="1.2.0 (max <1.3, absolute: 1.3.0)",
+        latest="1.2.0",
+        notes=("max <1.3, absolute: 1.3.0",),
     )
 
     result = _build_updated_spec(dep)
@@ -851,7 +895,8 @@ def test_build_updated_spec_preserves_upper_bound() -> None:
     """Upper-bound constraints (<X.Y) must be preserved, only lower bound is updated."""
     dep = _make_dep(
         original_spec="pytest-asyncio>=1.1.0,<1.3; python_version<'3.10'",
-        latest="1.2.0 (max <1.3, absolute: 1.3.0)",
+        latest="1.2.0",
+        notes=("max <1.3, absolute: 1.3.0",),
         upper_bound="1.3",
     )
 
@@ -923,7 +968,7 @@ def test_find_packages_needing_install_not_installed() -> None:
     results = _find_packages_needing_install(deps, {})
 
     assert len(results) == 1
-    assert results[0] == ("missing-pkg", None, "1.0.0", "")
+    assert results[0] == PendingInstall("missing-pkg", None, "1.0.0", "")
 
 
 @pytest.mark.os_agnostic
@@ -934,7 +979,7 @@ def test_find_packages_needing_install_outdated() -> None:
     results = _find_packages_needing_install(deps, {"old-pkg": "0.9.0"})
 
     assert len(results) == 1
-    assert results[0] == ("old-pkg", "0.9.0", "1.0.0", "")
+    assert results[0] == PendingInstall("old-pkg", "0.9.0", "1.0.0", "")
 
 
 @pytest.mark.os_agnostic
@@ -968,7 +1013,7 @@ def test_find_packages_needing_install_preserves_extras() -> None:
 
     results = _find_packages_needing_install(deps, {"pyright": "1.1.400"})
 
-    assert results[0][0] == "pyright[nodejs]"
+    assert results[0].spec_name == "pyright[nodejs]"
 
 
 @pytest.mark.os_agnostic
@@ -991,7 +1036,7 @@ def test_find_packages_needing_install_preserves_environment_marker() -> None:
 
     results = _find_packages_needing_install(deps, {})
 
-    assert results[0] == ("pywin32", None, "312", "; sys_platform == 'win32'")
+    assert results[0] == PendingInstall("pywin32", None, "312", "; sys_platform == 'win32'")
 
 
 @pytest.mark.os_agnostic
@@ -1007,8 +1052,8 @@ def test_find_packages_needing_install_keeps_extras_and_marker_together() -> Non
 
     results = _find_packages_needing_install(deps, {})
 
-    assert results[0][0] == "lib_registry[fake]"
-    assert results[0][3] == "; sys_platform == 'win32'"
+    assert results[0].spec_name == "lib_registry[fake]"
+    assert results[0].marker == "; sys_platform == 'win32'"
 
 
 # ---------------------------------------------------------------------------
@@ -1022,7 +1067,7 @@ def test_run_pip_install_builds_uv_command(mock_run: MagicMock) -> None:
     """Builds a uv pip install command with --upgrade and package specs."""
     mock_run.return_value = _make_completed(0)
 
-    needs: list[tuple[str, str | None, str, str]] = [("requests", None, "2.31.0", ""), ("click", "8.0.0", "8.1.0", "")]
+    needs = [PendingInstall("requests", None, "2.31.0", ""), PendingInstall("click", "8.0.0", "8.1.0", "")]
 
     exit_code = _run_pip_install(needs, "/proj/.venv/bin/python")
 
@@ -1047,7 +1092,7 @@ def test_run_pip_install_appends_marker_after_the_version(mock_run: MagicMock) -
     """
     mock_run.return_value = _make_completed(0)
 
-    needs: list[tuple[str, str | None, str, str]] = [("pywin32", None, "312", "; sys_platform == 'win32'")]
+    needs = [PendingInstall("pywin32", None, "312", "; sys_platform == 'win32'")]
 
     _run_pip_install(needs, "/proj/.venv/bin/python")
 
@@ -1061,7 +1106,7 @@ def test_run_pip_install_targets_the_given_interpreter(mock_run: MagicMock) -> N
     """Installs into the interpreter it is handed, via --python."""
     mock_run.return_value = _make_completed(0)
 
-    _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
+    _run_pip_install([PendingInstall("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
 
     cmd = mock_run.call_args[0][0]
     assert "--python" in cmd
@@ -1080,7 +1125,7 @@ def test_run_pip_install_never_targets_the_ambient_interpreter(mock_run: MagicMo
     """
     mock_run.return_value = _make_completed(0)
 
-    _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
+    _run_pip_install([PendingInstall("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
 
     cmd = mock_run.call_args[0][0]
     assert sys.executable not in cmd
@@ -1097,7 +1142,7 @@ def test_run_pip_install_never_breaks_system_packages(mock_run: MagicMock) -> No
     """
     mock_run.return_value = _make_completed(0)
 
-    _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
+    _run_pip_install([PendingInstall("requests", None, "1.0.0", "")], "/proj/.venv/bin/python")
 
     assert "--break-system-packages" not in mock_run.call_args[0][0]
 
@@ -1108,14 +1153,14 @@ def test_run_pip_install_reports_failure(mock_run: MagicMock) -> None:
     """Propagates a non-zero install exit code."""
     mock_run.return_value = _make_completed(1)
 
-    assert _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python") == 1
+    assert _run_pip_install([PendingInstall("requests", None, "1.0.0", "")], "/proj/.venv/bin/python") == 1
 
 
 @pytest.mark.os_agnostic
 @patch("subprocess.run", side_effect=OSError("uv not found"))
 def test_run_pip_install_handles_missing_uv(_mock_run: MagicMock) -> None:
     """Returns non-zero rather than raising when uv is absent from PATH."""
-    assert _run_pip_install([("requests", None, "1.0.0", "")], "/proj/.venv/bin/python") == 1
+    assert _run_pip_install([PendingInstall("requests", None, "1.0.0", "")], "/proj/.venv/bin/python") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1131,7 +1176,7 @@ def test_sync_installed_packages_dry_run(
     mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Dry run shows what would be installed but does not install."""
-    mock_find.return_value = [("requests", None, "2.31.0", "")]
+    mock_find.return_value = [PendingInstall("requests", None, "2.31.0", "")]
 
     count, code = sync_installed_packages([], python="/p/bin/python", dry_run=True)
 
@@ -1149,7 +1194,7 @@ def test_sync_installed_packages_actual_run(
     mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Actual run installs and reports success."""
-    mock_find.return_value = [("requests", "1.0.0", "2.31.0", "")]
+    mock_find.return_value = [PendingInstall("requests", "1.0.0", "2.31.0", "")]
 
     count, code = sync_installed_packages([], python="/p/bin/python")
 
@@ -1167,7 +1212,7 @@ def test_sync_installed_packages_targets_the_given_interpreter(
     mock_find: MagicMock, mock_pip: MagicMock, mock_versions: MagicMock
 ) -> None:
     """Both the inspection and the install use the interpreter passed in."""
-    mock_find.return_value = [("requests", None, "2.31.0", "")]
+    mock_find.return_value = [PendingInstall("requests", None, "2.31.0", "")]
 
     sync_installed_packages([], python="/proj/.venv/bin/python")
 
@@ -1183,7 +1228,7 @@ def test_sync_installed_packages_reports_install_failure(
     mock_find: MagicMock, mock_pip: MagicMock, _mock_versions: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Returns and reports a non-zero install exit code."""
-    mock_find.return_value = [("requests", None, "2.31.0", "")]
+    mock_find.return_value = [PendingInstall("requests", None, "2.31.0", "")]
 
     _count, code = sync_installed_packages([], python="/p/bin/python")
 
@@ -1635,12 +1680,14 @@ def test_fetch_pypi_data_returns_none_on_non_404_http_error(mock_stream: MagicMo
 @patch("bmk.adapters.stagerunner.helpers._dependencies._fetch_pypi_data")
 def test_fetch_latest_version_within_skips_unparseable_versions(mock_pypi: MagicMock) -> None:
     """Versions that don't parse to numeric tuples are skipped."""
-    mock_pypi.return_value = {
-        "releases": {
-            "abc": [],  # Unparseable
-            "2.0.0": [],
+    mock_pypi.return_value = PypiDocument.model_validate(
+        {
+            "releases": {
+                "abc": [],  # Unparseable
+                "2.0.0": [],
+            }
         }
-    }
+    )
 
     result = _fetch_latest_version_within("pkg", SpecifierSet("<9"))
 
@@ -1686,7 +1733,7 @@ def test_update_dependencies_skips_when_spec_unchanged(tmp_path: Path, capsys: p
             name="requests",
             status=DependencyStatus.OUTDATED,
             original_spec="requests>=2.0.0",
-            latest="not found",  # _build_updated_spec returns original when latest="not found"
+            latest=None,  # _build_updated_spec returns the original when there is no latest version
         ),
     ]
 
@@ -1711,7 +1758,7 @@ def test_update_dependencies_skips_when_spec_unchanged(tmp_path: Path, capsys: p
         ("pkg[x,y]>=1.0,<3; python_version<'3.11'", "2.0", "pkg[x,y]>=2.0,<3; python_version<'3.11'"),
         ("pkg>1.0", "2.0", "pkg>=2.0"),
         ("pkg==8.0.*", "8.1.post1", "pkg==8.1.*"),
-        ("pkg!=1.5,>=1.0", "2.0 (max <3, absolute: 3.1)", "pkg!=1.5,>=2.0"),
+        ("pkg!=1.5,>=1.0", "2.0", "pkg!=1.5,>=2.0"),
         ("pkg; sys_platform == 'win32'", "2.0", "pkg>=2.0; sys_platform == 'win32'"),
         ("pkg[x]; sys_platform == 'win32'", "2.0", "pkg[x]>=2.0; sys_platform == 'win32'"),
         ("pkg==*", "2.0", "pkg==*"),
@@ -1748,7 +1795,7 @@ def _mixed_deps() -> list[DependencyInfo]:
         _make_dep(name="ghost", original_spec="ghost>=1.0", latest="2.0"),
         _make_dep(name="pkg", original_spec="pkg[a>=1]>=0.5", latest="2.0"),
         _make_dep(name="empty", original_spec="", latest="2.0"),
-        _make_dep(name="same", original_spec="same>=1.0", latest="not found"),
+        _make_dep(name="same", original_spec="same>=1.0", latest=None),
         _make_dep(name="fresh", original_spec="fresh>=1.0", latest="1.0", status=DependencyStatus.UP_TO_DATE),
     ]
 
