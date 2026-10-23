@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from lib_layered_config import Config
 
-    from ..adapters.email.sender import EmailConfig
+    from ..adapters.email.config import EmailConfig
     from ..domain.enums import DeployTarget, OutputFormat
 
 

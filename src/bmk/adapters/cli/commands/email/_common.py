@@ -15,8 +15,7 @@ from btx_lib_mail import AttachmentSecurityError, SecretSafeModel
 from pydantic import ConfigDict, SecretStr, ValidationError
 
 from bmk import __init__conf__
-from bmk.adapters.email.config import describe_validation_error
-from bmk.adapters.email.sender import EmailConfig
+from bmk.adapters.email.config import EmailConfig, describe_validation_error
 from bmk.domain.errors import ConfigurationError, DeliveryError
 
 from ... import safe_console

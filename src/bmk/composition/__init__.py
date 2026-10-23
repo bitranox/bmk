@@ -12,7 +12,7 @@ from ..adapters.config.display import display_config
 from ..adapters.config.loader import get_config, get_default_config_path
 
 # Email services
-from ..adapters.email.sender import (
+from ..adapters.email import (
     load_email_config_from_dict,
     send_email,
     send_notification,

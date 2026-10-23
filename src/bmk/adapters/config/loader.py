@@ -12,11 +12,7 @@ from lib_layered_config import (
     read_config,
     validate_profile_name,
 )
-
-try:  # newer lib_layered_config raises its own ValidationError (not a ValueError); older raised ValueError
-    from lib_layered_config import ValidationError as _LibValidationError
-except ImportError:  # pragma: no cover - older lib_layered_config without the dedicated exception type
-    _LibValidationError = ValueError
+from lib_layered_config import ValidationError as _LibValidationError
 
 from bmk import __init__conf__
 

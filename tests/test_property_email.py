@@ -12,8 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from bmk.adapters.email.config import load_email_config_from_dict
-from bmk.adapters.email.sender import EmailConfig
+from bmk.adapters.email.config import EmailConfig, load_email_config_from_dict
 
 # ======================== Strategy helpers ========================
 

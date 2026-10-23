@@ -149,7 +149,6 @@ lib_layered_config and btx_lib_mail. The gate tools it drives are listed in Cont
 - `src/bmk/adapters/config/overrides.py`  -  CLI `--set` override parsing and deep-merge
 - `src/bmk/adapters/email/config.py`  -  EmailConfig (a btx_lib_mail ConfMail), the `[email]` key mapping and `load_email_config_from_dict`
 - `src/bmk/adapters/email/transport.py`  -  `send_email` / `send_notification` over btx_lib_mail
-- `src/bmk/adapters/email/sender.py`  -  Re-exports of `config.py` and `transport.py`
 - `src/bmk/adapters/email/validation.py`  -  Email recipient validation
 - `src/bmk/adapters/logging/setup.py`  -  lib_log_rich initialization; takes only the `LOG_*` lines of a `.env`, and raises `InvalidLoggingConfigError` for a refused `[lib_log_rich]` value or `LOG_*` variable, after starting logging with its defaults (and without the `LOG_*` variables only when one of them is refused); `check_logging_config` refuses another configuration's logging settings through lib_log_rich's `validate_config`, without touching the running runtime
 - `src/bmk/adapters/cli/`  -  CLI adapter package:
@@ -452,7 +451,7 @@ Raises `ValueError` with descriptive message on invalid input.
 
 ### EmailConfig Fields
 
-`EmailConfig` (`adapters/email/config.py`, re-exported by `adapters/email/sender.py`) subclasses
+`EmailConfig` (`adapters/email/config.py`, re-exported by the `adapters/email` package) subclasses
 btx_lib_mail's `ConfMail`: frozen, a name that is not a field is refused, the password is a
 `SecretStr`, and a validation error never shows the password or a host. It adds `from_address` and
 `recipients`. ConfMail checks every SMTP host's syntax (port range, IPv6 brackets, host name

@@ -5,7 +5,6 @@ Provides the email sending adapter using btx_lib_mail.
 Structure:
     * :mod:`.config` - Email configuration model and loader
     * :mod:`.transport` - SMTP send functions
-    * :mod:`.sender` - Re-exports for backward compatibility
 
 Contents:
     * :class:`.config.EmailConfig` - Email configuration container

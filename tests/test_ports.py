@@ -12,8 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from lib_layered_config import Config
 
-from bmk.adapters.email.config import load_email_config_from_dict
-from bmk.adapters.email.sender import EmailConfig
+from bmk.adapters.email.config import EmailConfig, load_email_config_from_dict
 from bmk.adapters.memory import (
     EmailSpy,
     check_logging_config_in_memory,

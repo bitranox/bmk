@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from ..email.sender import EmailConfig
+    from ..email.config import EmailConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +61,7 @@ class EmailSpy:
         raise_exception: When set, send operations raise this exception.
 
     Example:
-        >>> from bmk.adapters.email.sender import EmailConfig
+        >>> from bmk.adapters.email.config import EmailConfig
         >>> spy = EmailSpy()
         >>> config = EmailConfig(smtphosts=["smtp.test.com:587"])
         >>> spy.send_email(config=config, recipients="test@example.com", subject="Hi", body="Hello")

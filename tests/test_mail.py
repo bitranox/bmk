@@ -20,7 +20,7 @@ from pydantic import SecretStr
 from pydantic import ValidationError as PydanticValidationError
 
 from bmk.adapters.cli.commands.email._common import EmailConfigOverrides, apply_validated_overrides
-from bmk.adapters.email.sender import (
+from bmk.adapters.email import (
     EmailConfig,
     load_email_config_from_dict,
     send_email,
@@ -1298,7 +1298,7 @@ def test_send_email_logs_warning_on_false_result(caplog: pytest.LogCaptureFixtur
 def smtp_config_from_env() -> EmailConfig:
     """Load SMTP configuration via lib_layered_config for integration tests."""
     from bmk.adapters.config.loader import get_config
-    from bmk.adapters.email.sender import load_email_config_from_dict
+    from bmk.adapters.email.config import load_email_config_from_dict
 
     get_config.cache_clear()
     config = get_config()
