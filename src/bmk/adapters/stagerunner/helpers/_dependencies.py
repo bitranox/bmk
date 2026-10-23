@@ -797,6 +797,8 @@ def _hold_to_supported_python(
 
 # One release as it is requested: its name (PEP 503), its version and the extras asked of it.
 _ReleaseKey = tuple[str, str, frozenset[str]]
+# One requirement on a package: its specifier, the Python it serves, and whether it pins exactly.
+_NeedKey = tuple[str, str | None, bool]
 
 
 class _UnjudgeableError(Exception):
@@ -1691,6 +1693,12 @@ class _FloorDemand:
     the previous pass and repeats until the pins stop changing; deciding as each requirement arrives
     made the result depend on walk order, and an earlier walk went stale once a later requirement
     moved the pin.
+
+    A requirement once reached is kept for every later pass, even when the new pins no longer lead
+    to it. Dropping it let a cycle oscillate (gadget's pin reaches helper, whose requirement on gadget
+    moves the pin so helper is no longer reached, which moves it back), and refusing then left the
+    cut release unpinned. Kept, the requirements only grow, so the passes always settle; the price
+    is a pin that may be stricter than the final tree strictly needs, never a half-visible release.
     """
 
     _MAX_PASSES = 20
@@ -1700,24 +1708,24 @@ class _FloorDemand:
         self._exempt = exempt
         self._kept = kept
         self._walked: set[_ReleaseKey] = set()
-        self._needs: dict[str, list[_Need]] = {}
+        self._needs: dict[str, dict[_NeedKey, _Need]] = {}
         self.pins: dict[str, str] = {}
 
     def resolve(self, declared: list[tuple[Requirement, str | None]]) -> dict[str, str]:
         """The pins ``declared`` needs, walked until they settle.
 
         Raises:
-            _UnjudgeableError: When a lookup fails, or the pins never settle.
+            _UnjudgeableError: When a lookup fails, or the pins never settle (a safety net: with the
+                requirements only growing, they always do).
         """
         for _ in range(self._MAX_PASSES):
             self._walked = set()
-            self._needs = {}
             for requirement, python in declared:
                 self.add(requirement, python=python)
             pins = {
                 name: pin
                 for name, needs in self._needs.items()
-                if (pin := _package_pin(needs, cutoff=self._cutoff)) is not None
+                if (pin := _package_pin(list(needs.values()), cutoff=self._cutoff)) is not None
             }
             if pins == self.pins:
                 return pins
@@ -1738,8 +1746,10 @@ class _FloorDemand:
         if name in self._exempt:
             self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
             return
-        need = _Need(releases=satisfying, python=python, exact=_exact_pin(requirement.specifier))
-        self._needs.setdefault(name, []).append(need)
+        exact = _exact_pin(requirement.specifier)
+        need = self._needs.setdefault(name, {}).setdefault(
+            (str(requirement.specifier), python, exact), _Need(releases=satisfying, python=python, exact=exact)
+        )
         pin = self.pins.get(name)
         if pin is None:
             return

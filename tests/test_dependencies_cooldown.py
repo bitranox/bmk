@@ -1299,6 +1299,33 @@ def test_what_a_moved_pin_exposes_is_walked_in_either_order(tmp_path: Path, pypi
 
 
 @pytest.mark.os_agnostic
+def test_a_dependency_cycle_settles_on_a_safe_pin(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # gadget 2.0 needs helper 2.0, which needs gadget on 3.11, where 2.5 is cut at gadget's pin:
+    # that moves gadget back to 1.0, which no longer reaches helper, which moved it forward again.
+    # The passes cycled until bmk refused and wrote no pin, leaving 3.0 half visible on 3.10.
+    pypi.packages["gadget"] = _doc(
+        "3.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(30),
+            "2.5": [*_uploaded(31, requires_python=">=3.11"), *_uploaded(14.5, requires_python=">=3.11")],
+            "3.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pypi.versions["gadget/2.0"] = ["helper>=2.0"]
+    pypi.packages["helper"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": _uploaded(5)})
+    pypi.versions["helper/2.0"] = ["gadget>=1.0; python_version >= '3.11'"]
+    pyproject = _write_two_pythons(tmp_path, '"gadget>=1.0"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert "did not settle" not in capsys.readouterr().err
+    assert _pins(pyproject)["gadget"] == _pin_of(90)
+
+
+@pytest.mark.os_agnostic
 def test_a_release_whose_installable_file_has_no_upload_time_leaves_the_pins_alone(
     tmp_path: Path, pypi: _FakeIndex
 ) -> None:
