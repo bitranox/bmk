@@ -1647,9 +1647,14 @@ class _FloorDemand:
         if name in self._exempt:
             self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
             return
-        if admitted_releases(satisfying, self._cutoff):
-            return  # a release the cooldown already admits serves the floor
-        pin = _earliest_whole_pin(satisfying, at_least=self.pins.get(name))
+        floor_release = min(satisfying, key=Version)
+        if admitted_releases(satisfying, self._cutoff) and not _cuts_at(
+            {floor_release: satisfying[floor_release]}, self._cutoff
+        ):
+            return  # the cooldown admits a release, and the floor's own release whole or not at all
+        # A floor release with files on both sides of the cutoff gets the pin that admits it whole
+        # (uv would otherwise lock it with only its older files); that pin always lies past the cutoff.
+        pin = _earliest_whole_pin(satisfying, at_least=self.pins.get(name), after=self._cutoff)
         if pin is None:
             return
         self.pins[name] = pin
@@ -1681,23 +1686,40 @@ def _exact_pin(specifier: SpecifierSet) -> bool:
     return any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
 
 
-def _earliest_whole_pin(satisfying: dict[str, Any], *, at_least: str | None) -> str | None:
+def _earliest_whole_pin(
+    satisfying: dict[str, Any], *, at_least: str | None, after: datetime | None = None
+) -> str | None:
     """The earliest cutoff, from ``at_least`` on, at which every release in ``satisfying`` is whole.
 
     Each candidate is one second after a release's newest file, so that release is admitted whole;
     one at which another satisfying release has files on both sides is skipped, since uv would lock
     that release with only its older files (pydantic-core 2.50.1 kept one macOS wheel of dozens), and
     every other platform would build from source or fail. The latest candidate always qualifies.
+
+    With ``after``, only cutoffs later than it qualify: a pin is written only where the default
+    cutoff falls short, so one at or before it would admit nothing the default does not.
     """
     candidates = sorted({pin for files in satisfying.values() if (pin := floor_pin(files)) is not None})
     if at_least is not None:
         candidates = sorted({at_least, *(c for c in candidates if c > at_least)})
+    if after is not None:
+        candidates = [c for c in candidates if _as_moment(c) > after]
     return next((c for c in candidates if not _cuts_a_release(satisfying, c)), None)
+
+
+def _as_moment(pin: str) -> datetime:
+    """A pin's timestamp as an aware datetime (pins end in ``Z``, which Python 3.10 cannot parse)."""
+    return datetime.fromisoformat(pin.replace("Z", "+00:00"))
 
 
 def _cuts_a_release(satisfying: dict[str, Any], pin: str) -> bool:
     """Whether some release in ``satisfying`` has timed files both before and after ``pin``."""
-    visible = admitted_releases(satisfying, datetime.fromisoformat(pin.replace("Z", "+00:00")))
+    return _cuts_at(satisfying, _as_moment(pin))
+
+
+def _cuts_at(satisfying: dict[str, Any], moment: datetime) -> bool:
+    """Whether some release in ``satisfying`` has timed files both before and after ``moment``."""
+    visible = admitted_releases(satisfying, moment)
     for version, files in satisfying.items():
         timed = sum(1 for entry in cast("list[Any]", files) if floor_pin([entry]) is not None)
         if len(visible.get(version, [])) not in (0, timed):

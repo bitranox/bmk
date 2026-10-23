@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- `deps --update` pins a young floor whose release has files on both sides of the cooldown cutoff,
+  so uv locks the whole release, not only its older files. pydantic-core 2.50.1 uploaded 137 files
+  over four minutes and straddled a 1-day cutoff: no pin was demanded, and an existing one was kept
+  with the false note "no declared floor demands it".
+
 ## [3.22.6] 2026-10-23 10:08:52
 
 ### Fixed
