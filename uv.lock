@@ -71,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "bmk"
-version = "3.23.2"
+version = "3.23.3"
 source = { editable = "." }
 dependencies = [
     { name = "bandit" },

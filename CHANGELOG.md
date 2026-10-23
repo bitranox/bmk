@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.23.3] 2026-10-23 22:56:09
+
 ### Fixed
 
 - **A release above a floor that the cooldown cuts through is no longer locked half-visible.** When
