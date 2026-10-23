@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.22.6] 2026-10-23 10:08:52
+
 ### Fixed
 
 - **A dependency floor is no longer raised to a release that drops a Python the project declares.**
