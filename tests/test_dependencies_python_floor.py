@@ -693,3 +693,25 @@ def test_a_rewrite_that_would_not_be_valid_pep_508_is_never_written(
     assert updated == 0
     assert pyproject.read_text(encoding="utf-8") == before
     assert "not a valid requirement" in capsys.readouterr().err
+
+
+# The later classifier Pythons a raised floor must keep (OPEN-WORK [85]).
+
+
+@pytest.mark.os_agnostic
+def test_later_for_names_each_later_classifier_python_the_requirement_is_installed_on() -> None:
+    support = _dependencies.PythonSupport(10, later_minors=(12, 14))
+
+    assert support.later_for("pkg>=1") == ("3.12.0", "3.14.0")
+    assert support.later_for("pkg>=1; python_version < '3.13'") == ("3.12.0",)
+
+
+@pytest.mark.os_agnostic
+def test_python_support_carries_the_later_classifier_minors(tmp_path: Path) -> None:
+    pyproject = _write_pyproject(tmp_path, dev='"hypothesis>=6.168.4"')
+    config = _dependencies.load_pyproject_config(pyproject)
+
+    support = _dependencies.python_support(config)
+
+    assert support is not None
+    assert (support.lowest_minor, support.later_minors) == (10, (14,))

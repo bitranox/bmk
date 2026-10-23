@@ -474,15 +474,42 @@ class PythonSupport:
 
     A raised floor must still install on the OLDEST of them: a release that drops it makes the
     whole requirement unresolvable there (hypothesis 6.169.0 dropped 3.10, so a 3.10 project
-    whose floor was raised to it could no longer install its dev extras on 3.10).
+    whose floor was raised to it could no longer install its dev extras on 3.10). It must also keep
+    the later ones (:meth:`later_for`): a release capped below the newest classifier is one pip
+    refuses there, while uv installs it anyway, so no uv-based gate would show the break.
 
     Attributes:
         lowest_minor: The oldest supported ``3.X`` minor, as ``python_support`` decides it.
         requires_python: The project's ``requires-python``, or None when absent or unparseable.
+        later_minors: The supported ``3.X`` minors after ``lowest_minor``, from the classifiers, ascending.
     """
 
     lowest_minor: int
     requires_python: SpecifierSet | None = None
+    later_minors: tuple[int, ...] = ()
+
+    def later_for(self, spec: str) -> tuple[str, ...]:
+        """The supported Pythons after :meth:`oldest_for` on which ``spec`` is installed.
+
+        One per later classifier minor: its first patch ``requires-python`` admits, kept when the
+        spec's marker can hold there.
+
+        Example:
+            >>> PythonSupport(10, later_minors=(12, 14)).later_for("pkg>=1")
+            ('3.12.0', '3.14.0')
+        """
+        oldest = self.oldest_for(spec)
+        if oldest is None:
+            return ()
+        marker = _marker_of_spec(spec)
+        found: list[str] = []
+        for minor in self.later_minors:
+            patch = _oldest_patch(self.requires_python, minor)
+            if minor <= Version(oldest).minor or patch is None:
+                continue
+            if marker is None or _marker_holds(str(marker), (patch,), ()):
+                found.append(patch)
+        return tuple(found)
 
     def oldest_for(self, spec: str) -> str | None:
         """The oldest supported Python, as a full ``3.X.Y``, on which ``spec`` is installed at all.
@@ -565,7 +592,8 @@ def python_support(config: PyprojectConfig) -> PythonSupport | None:
         lowest = next((m for m in range(_MINOR_SCAN) if _oldest_patch(requires, m) is not None), None)
     if lowest is None:
         return None
-    return PythonSupport(lowest_minor=lowest, requires_python=requires)
+    later = tuple(m for m in classifiers if m > lowest and _oldest_patch(requires, m) is not None)
+    return PythonSupport(lowest_minor=lowest, requires_python=requires, later_minors=later)
 
 
 def _specifier_or_none(text: str) -> SpecifierSet | None:
