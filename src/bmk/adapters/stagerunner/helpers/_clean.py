@@ -146,43 +146,105 @@ def clean(
         pyproject = project_dir / "pyproject.toml"
         patterns = get_clean_patterns(pyproject)
 
-    resolved_root = project_dir.resolve()
-    removed_count = 0
-    skipped_count = 0
+    removed, skipped = _sweep(project_dir, patterns=patterns, dry_run=dry_run, verbose=verbose)
+    _print_clean_summary(removed=removed, skipped=skipped, dry_run=dry_run, verbose=verbose, quiet=quiet)
+    return 0
 
+
+def _sweep(project_dir: Path, *, patterns: Iterable[str], dry_run: bool, verbose: bool) -> tuple[int, int]:
+    """Remove every contained path matching ``patterns`` and count the outcome.
+
+    Args:
+        project_dir: Root directory the patterns are globbed from.
+        patterns: Glob patterns to remove, applied in order.
+        dry_run: If True, only report what would be removed.
+        verbose: If True, print a line per removed or skipped path.
+
+    Returns:
+        ``(removed, skipped)``: paths removed (or that would be, in a dry run)
+        and paths skipped because they resolve outside ``project_dir``.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     _ = (Path(tmp) / "build").mkdir()
+        ...     _sweep(Path(tmp), patterns=["build"], dry_run=False, verbose=False)
+        (1, 0)
+    """
+    resolved_root = project_dir.resolve()
+    removed = 0
+    skipped = 0
     for pattern in patterns:
+        # Iterated lazily, never listed up front: a match is acted on before the
+        # glob looks further, so a directory already removed is not descended.
         for path in project_dir.glob(pattern):
             if not _is_contained(path, resolved_root):
-                skipped_count += 1
+                skipped += 1
                 if verbose:
                     print(f"Skipping (outside project): {path}")
                 continue
+            if _remove_path(path, dry_run=dry_run, verbose=verbose):
+                removed += 1
+    return removed, skipped
 
-            if dry_run:
-                print(f"[DRY RUN] Would remove: {path}")
-                removed_count += 1
-            elif path.is_dir():
-                if verbose:
-                    print(f"Removing directory: {path}")
-                shutil.rmtree(path, ignore_errors=True)
-                removed_count += 1
-            else:
-                try:
-                    if verbose:
-                        print(f"Removing file: {path}")
-                    path.unlink()
-                    removed_count += 1
-                except FileNotFoundError:
-                    continue
 
-    if skipped_count > 0:
-        print(f"Skipped {skipped_count} paths outside project directory")
+def _remove_path(path: Path, *, dry_run: bool, verbose: bool) -> bool:
+    """Remove one file or directory, or report it in a dry run.
+
+    Args:
+        path: The matched path, already known to lie inside the project.
+        dry_run: If True, print what would be removed and touch nothing.
+        verbose: If True, print the removal before performing it.
+
+    Returns:
+        True when the path counts as removed; False when a file was already
+        gone by the time it was unlinked.
+
+    Examples:
+        >>> _remove_path(Path("dist"), dry_run=True, verbose=False)
+        [DRY RUN] Would remove: dist
+        True
+    """
     if dry_run:
-        print(f"\n[DRY RUN] Would remove {removed_count} items")
-    elif not quiet and (verbose or removed_count > 0):
-        print(f"Removed {removed_count} items")
+        print(f"[DRY RUN] Would remove: {path}")
+        return True
+    if path.is_dir():
+        if verbose:
+            print(f"Removing directory: {path}")
+        shutil.rmtree(path, ignore_errors=True)
+        return True
+    if verbose:
+        print(f"Removing file: {path}")
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        # Something else removed it between the glob and here; nothing was
+        # removed by this run, so it must not be counted.
+        return False
+    return True
 
-    return 0
+
+def _print_clean_summary(*, removed: int, skipped: int, dry_run: bool, verbose: bool, quiet: bool) -> None:
+    """Print the closing summary lines of a clean run.
+
+    Args:
+        removed: Paths removed, or that would be removed in a dry run.
+        skipped: Paths skipped because they resolve outside the project.
+        dry_run: If True, print the dry-run summary, which ``quiet`` never hides.
+        verbose: If True, print the removal count even when it is zero.
+        quiet: If True, suppress the routine removal count (JSON mode).
+
+    Examples:
+        >>> _print_clean_summary(removed=2, skipped=1, dry_run=False, verbose=False, quiet=False)
+        Skipped 1 paths outside project directory
+        Removed 2 items
+    """
+    if skipped > 0:
+        print(f"Skipped {skipped} paths outside project directory")
+    if dry_run:
+        print(f"\n[DRY RUN] Would remove {removed} items")
+    elif not quiet and (verbose or removed > 0):
+        print(f"Removed {removed} items")
 
 
 def main(
