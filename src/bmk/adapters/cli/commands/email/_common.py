@@ -145,29 +145,42 @@ def smtp_config_options(func: Callable[..., Any]) -> Callable[..., Any]:
     return functools.reduce(lambda f, opt: opt(f), reversed(options), func)
 
 
-def load_and_validate_email_config(config: Config, loader: LoadEmailConfigFromDict) -> EmailConfig:
-    """Extract and validate email config from the provided Config object.
+def load_and_validate_email_config(
+    config: Config, loader: LoadEmailConfigFromDict, *, overrides: EmailConfigOverrides
+) -> EmailConfig:
+    """Extract the email config from ``config``, apply the command-line ``overrides``, validate both.
+
+    The SMTP hosts are checked AFTER the overrides apply, so ``--smtp-host`` supplies them when
+    the configuration names none.
 
     Args:
         config: Already-loaded layered configuration object.
         loader: Function to load EmailConfig from dict.
+        overrides: The options given on the command line.
 
     Returns:
-        EmailConfig with validated SMTP configuration.
+        EmailConfig with validated SMTP configuration and the overrides applied.
 
     Raises:
         click.exceptions.Exit: When the ``[email]`` section is invalid, one ``Error:`` line per
-            problem, or when SMTP hosts are not configured (exit code 78 / CONFIG_ERROR).
+            problem, or when no SMTP host is configured or given (exit code 78 / CONFIG_ERROR);
+            when an override is invalid (exit code 22 / INVALID_ARGUMENT).
     """
     try:
         email_config = loader(config.as_dict())
     except ValidationError as exc:
         _refuse_email_config(exc, "Invalid configuration", exit_code=ExitCode.CONFIG_ERROR)
+    try:
+        email_config = apply_validated_overrides(email_config, overrides)
+    except ValidationError as exc:
+        handle_validation_error(exc)
 
     if not email_config.smtphosts:
         logger.error("No SMTP hosts configured")
         safe_console.echo(
-            "\nError: No SMTP hosts configured. Please configure email.smtp_hosts in your config file.", err=True
+            "\nError: No SMTP hosts configured. Please configure email.smtp_hosts in your config file"
+            " or pass --smtp-host.",
+            err=True,
         )
         safe_console.echo(f"See: {__init__conf__.shell_command} config-deploy --target user", err=True)
         get_current_context().exit(ExitCode.CONFIG_ERROR)

@@ -10,7 +10,6 @@ import logging
 
 import lib_log_rich.runtime
 import rich_click as click
-from pydantic import ValidationError
 
 from ...config_load import require_config
 from ...constants import CLICK_CONTEXT_SETTINGS
@@ -18,9 +17,7 @@ from ...context import get_cli_context
 from ...typed_click import option
 from ._common import (
     EmailConfigOverrides,
-    apply_validated_overrides,
     execute_with_email_error_handling,
-    handle_validation_error,
     load_and_validate_email_config,
     smtp_config_options,
 )
@@ -69,7 +66,6 @@ def cli_send_notification(
     extra = {"command": "send-notification", "recipients": resolved_recipients, "subject": subject}
 
     with lib_log_rich.runtime.bind(job_id="cli-send-notification", extra=extra):
-        email_config = load_and_validate_email_config(config, cli_ctx.services.load_email_config_from_dict)
         overrides = EmailConfigOverrides.from_cli_options(
             smtp_hosts=smtp_hosts,
             smtp_username=smtp_username,
@@ -78,10 +74,9 @@ def cli_send_notification(
             timeout=timeout,
             raise_on_invalid_recipient=raise_on_invalid_recipient,
         )
-        try:
-            email_config = apply_validated_overrides(email_config, overrides)
-        except ValidationError as exc:
-            handle_validation_error(exc)
+        email_config = load_and_validate_email_config(
+            config, cli_ctx.services.load_email_config_from_dict, overrides=overrides
+        )
         logger.info("Sending notification", extra={"recipients": resolved_recipients, "subject": subject})
         execute_with_email_error_handling(
             operation=functools.partial(

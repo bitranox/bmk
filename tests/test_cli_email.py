@@ -44,6 +44,32 @@ def test_when_send_email_is_invoked_without_smtp_hosts_it_fails(
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("command", "body_option"),
+    [("send-email", "--body"), ("send-notification", "--message")],
+    ids=["send-email", "send-notification"],
+)
+def test_smtp_host_on_the_command_line_stands_in_for_an_empty_configured_list(
+    cli_runner: CliRunner,
+    email_cli_context: Callable[[dict[str, Any]], EmailCliContext],
+    command: str,
+    body_option: str,
+) -> None:
+    """``--smtp-host`` overrides the hosts, so it must also supply them when none are configured."""
+    ctx = email_cli_context({"from_address": "sender@test.com"})
+
+    result: Result = cli_runner.invoke(
+        cli_mod.cli,
+        [command, "--to", "a@test.com", "--subject", "S", body_option, "B", "--smtp-host", "smtp.cli.test:587"],
+        obj=ctx.factory,
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = ctx.spy.sent_emails if command == "send-email" else ctx.spy.sent_notifications
+    assert [call.config.smtphosts for call in sent] == [["smtp.cli.test:587"]]
+
+
+@pytest.mark.os_agnostic
 def test_when_send_email_is_invoked_with_valid_config_it_sends(
     cli_runner: CliRunner,
     email_cli_context: Callable[[dict[str, Any]], EmailCliContext],

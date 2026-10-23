@@ -16,6 +16,9 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   every later classifier Python the requirement as written already installs on, and the report
   names it (`does not install on Python 3.14`, `newest that keeps Python 3.14`). A Python no
   release of the requirement installed on before is not checked.
+- `send-email --smtp-host H` and `send-notification --smtp-host H` send through `H` when the
+  configuration names no SMTP host; they exited 78 "No SMTP hosts configured", because the hosts
+  were checked before the command-line overrides were applied.
 
 ## [3.22.5] 2026-10-22 22:01:10
 
