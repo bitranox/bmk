@@ -1279,6 +1279,10 @@ def test_build_codecov_args_includes_git_service(monkeypatch: pytest.MonkeyPatch
 
     assert "--git-service" in args
     assert "github" in args
+    # A str-mixin member also compares equal to "github"; only its type shows a member leaked into
+    # the argv, where any later str() or f-string of it renders "GitService.GITHUB" on 3.11+.
+    value = args[args.index("--git-service") + 1]
+    assert type(value) is str
 
 
 @pytest.mark.os_agnostic

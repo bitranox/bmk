@@ -601,9 +601,10 @@ class GitService(str, Enum):
     """Codecov git service identifiers for a closed set of known hosts.
 
     Inherits from str (the StrEnum pattern on Python 3.10, where the stdlib
-    ``enum.StrEnum`` does not exist yet - this project targets >=3.10) so a
-    member IS its value on the command line: ``str(GitService.GITHUB) ==
-    "github"`` and ``GitService.GITHUB == "github"``, byte-identical to what
+    ``enum.StrEnum`` does not exist yet - this project targets >=3.10), so a
+    member compares equal to its value (``GitService.GITHUB == "github"``).
+    It does NOT render as its value: ``str()`` and f-strings give
+    ``GitService.GITHUB`` on 3.11+, so the argv takes ``.value``, byte-identical to what
     codecovcli received before this was an enum.
     """
 
@@ -839,7 +840,7 @@ def _build_codecov_args(
 
     git_service = _resolve_git_service(remote.host)
     if git_service:
-        args.extend(["--git-service", git_service])
+        args.extend(["--git-service", git_service.value])
 
     if remote.slug:
         args.extend(["--slug", remote.slug])
