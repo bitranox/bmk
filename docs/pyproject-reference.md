@@ -207,11 +207,13 @@ bmk judges floors against the cutoff uv itself resolved, read back from `uv.lock
   `make test` / `deps update` gives the floor a per-package cutoff one second after the newest file
   of the satisfying release uploaded FIRST, among those that install on the oldest Python the
   project supports (`exclude-newer-package`, `pydantic = "2026-10-11T18:37:56Z"`), so it admits no
-  more than the floor asked for. No release a floor admits is left with files on both sides of
-  the cutoff, because uv would lock it with only its older files: a floor release cut that way
-  gets the pin one second after its newest file, and when a HIGHER release is cut while the
-  floor's own is admitted whole, the pin goes BACK to the newest release still whole, holding the
-  package there until the cut release clears the cooldown. That release's own requirements are walked the same way, as are
+  more than the floor asked for. No release uv could lock for any requirement on the package is
+  left with files on both sides of the cutoff, because uv would lock it with only its older files:
+  a floor release cut that way gets the pin one second after its newest file, and when a HIGHER
+  release is cut while the floor's own is admitted whole, the pin goes BACK to the newest release
+  still whole, holding the package there until the cut release clears the cooldown. A cut release
+  below the one uv locks needs no pin. Every requirement that reaches the package counts at once,
+  so the order the dependency tree is walked in never changes the pin. That release's own requirements are walked the same way, as are
   the releases an exempt package's floor brings in - every requirement `uv lock` can need, since it
   resolves for all platforms and Pythons at once: any marker that can hold for some value of the
   variables it names (judged on every value it compares against, never the host's own), on any

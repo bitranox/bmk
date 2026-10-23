@@ -13,7 +13,9 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   sides of the cutoff, bmk wrote no pin, and uv locked that higher release with only its older
   files, so other platforms built from source or failed. `deps --update` now pins the package
   back to the newest release still whole, and drops the pin once the cut release clears the
-  cooldown. It never pins forward past the floor's own upload.
+  cooldown. It never pins forward past the floor's own upload. A package's pin is now chosen from
+  every requirement that reaches it at once, and the tree is walked again at the new pins until they
+  settle, so the walk order no longer changes which pins are written.
 
 ## [3.23.2] 2026-10-23 21:24:19
 

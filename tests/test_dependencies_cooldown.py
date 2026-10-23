@@ -1250,6 +1250,55 @@ def test_a_pin_back_cuts_no_release_only_a_newer_python_sees(tmp_path: Path, pyp
 
 
 @pytest.mark.os_agnostic
+def test_a_cut_release_uv_would_never_lock_needs_no_pin(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # 1.5.1 is a backport the cutoff cuts, but uv locks 2.2, the highest visible release, which is
+    # whole. Pinning back for 1.5.1 would hide 2.2 for nothing.
+    pypi.packages["gadget"] = _doc(
+        "2.2",
+        {
+            "1.0": _uploaded(90),
+            "1.5.1": [*_uploaded(20), *_uploaded(10)],
+            "2.0": _uploaded(60),
+            "2.1": _uploaded(30),
+            "2.2": _uploaded(18),
+        },
+    )
+    pyproject = _write(tmp_path, deps='"gadget>=1.0"', tool_uv='exclude-newer = "14 days"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {}
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "deps", ['"gadget>=1.0", "tool>=1.0"', '"tool>=1.0", "gadget>=1.0"'], ids=["gadget-first", "tool-first"]
+)
+def test_what_a_moved_pin_exposes_is_walked_in_either_order(tmp_path: Path, pypi: _FakeIndex, deps: str) -> None:
+    # tool needs gadget 2.1 on 3.11, which moves gadget's pin forward to 2.1's; at that pin uv locks
+    # gadget 2.0 on 3.10, and 2.0 needs helper 3.0 (two days old). Walked only at the pin the first
+    # requirement set, 2.0 was never seen and helper got no pin when gadget came first.
+    pypi.packages["gadget"] = _doc(
+        "2.1",
+        {
+            "1.0": _uploaded(90),
+            "1.5": _uploaded(30),
+            "2.0": [*_uploaded(15), *_uploaded(13)],
+            "2.1": _uploaded(5, requires_python=">=3.11"),
+        },
+    )
+    pypi.packages["tool"] = _doc("1.0", {"1.0": _uploaded(4)})
+    pypi.versions["tool/1.0"] = ["gadget>=2.1; python_version >= '3.11'"]
+    pypi.versions["gadget/2.0"] = ["helper>=3.0"]
+    pypi.packages["helper"] = _doc("3.0", {"2.0": _uploaded(90), "3.0": _uploaded(2)})
+    pyproject = _write_two_pythons(tmp_path, deps)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(5), "tool": _pin_of(4), "helper": _pin_of(2)}
+
+
+@pytest.mark.os_agnostic
 def test_a_release_whose_installable_file_has_no_upload_time_leaves_the_pins_alone(
     tmp_path: Path, pypi: _FakeIndex
 ) -> None:

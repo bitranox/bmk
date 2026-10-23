@@ -1643,11 +1643,12 @@ def _demanded_pins(config: PyprojectConfig, cutoff: datetime | None, packages: d
     # needs no pin, and for a project not on PyPI its release list cannot be read, which would
     # leave every pin unjudgeable and frozen. The extras it names are walked as declared anyway.
     own = normalize(config.project.name)
+    declared: list[tuple[Requirement, str | None]] = []
     for dep in _extract_all_dependencies(config):
         requirement = _requirement_or_none(dep.original_spec)
         if requirement is not None and normalize(requirement.name) != own:
-            demand.add(requirement, python=support.oldest_for(dep.original_spec) if support is not None else None)
-    return demand.pins
+            declared.append((requirement, support.oldest_for(dep.original_spec) if support is not None else None))
+    return demand.resolve(declared)
 
 
 def _is_floor_pin(name: str, value: object) -> bool:
@@ -1678,26 +1679,50 @@ def _is_floor_pin(name: str, value: object) -> bool:
 class _FloorDemand:
     """The releases a project's declared floors demand, and the pins those inside the cooldown need.
 
-    A floor needs no pin while a release it admits is already outside the cooldown. Otherwise the pin
-    goes to the satisfying release uploaded FIRST, among those that install on the Python the floor
-    serves, so it admits no more than the floor asked for. An exempt package needs no pin of its own,
+    A package needs no pin while the default cutoff shows each requirement on it a whole release to
+    lock (:func:`_package_pin` says which pin otherwise). An exempt package needs no pin of its own,
     but the release it demands brings floors of its own, which are walked the same way - and so does
     a pinned release, whose own requirements can be just as young (pydantic 2.14.1 requires exactly
     pydantic-core 2.50.1, uploaded the same evening). A requirement is walked wherever ``uv lock``
     can need it: on any platform, any Python from the oldest up, and behind the extras requested.
+
+    A pin depends on every requirement that reaches the package, and which requirements are reached
+    depends on the releases walked at the pins. So :meth:`resolve` walks the whole tree at the pins of
+    the previous pass and repeats until the pins stop changing; deciding as each requirement arrives
+    made the result depend on walk order, and an earlier walk went stale once a later requirement
+    moved the pin.
     """
+
+    _MAX_PASSES = 20
 
     def __init__(self, *, cutoff: datetime, exempt: frozenset[str], kept: frozenset[str]) -> None:
         self._cutoff = cutoff
         self._exempt = exempt
         self._kept = kept
         self._walked: set[_ReleaseKey] = set()
-        # Per package, every requirement seen so far: the releases any of them admits, and the
-        # latest of their earliest whole-release pins. The pin is chosen from both together, so it
-        # does not depend on the order the requirements are walked in.
-        self._admitted: dict[str, dict[str, Any]] = {}
-        self._bound: dict[str, str] = {}
+        self._needs: dict[str, list[_Need]] = {}
         self.pins: dict[str, str] = {}
+
+    def resolve(self, declared: list[tuple[Requirement, str | None]]) -> dict[str, str]:
+        """The pins ``declared`` needs, walked until they settle.
+
+        Raises:
+            _UnjudgeableError: When a lookup fails, or the pins never settle.
+        """
+        for _ in range(self._MAX_PASSES):
+            self._walked = set()
+            self._needs = {}
+            for requirement, python in declared:
+                self.add(requirement, python=python)
+            pins = {
+                name: pin
+                for name, needs in self._needs.items()
+                if (pin := _package_pin(needs, cutoff=self._cutoff)) is not None
+            }
+            if pins == self.pins:
+                return pins
+            self.pins = pins
+        raise _UnjudgeableError(f"floor pins did not settle within {self._MAX_PASSES} passes")
 
     def add(self, requirement: Requirement, *, python: str | None) -> None:
         name = normalize(requirement.name)
@@ -1713,35 +1738,16 @@ class _FloorDemand:
         if name in self._exempt:
             self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
             return
-        pin = self._pin_for(name, satisfying)
+        need = _Need(releases=satisfying, python=python, exact=_exact_pin(requirement.specifier))
+        self._needs.setdefault(name, []).append(need)
+        pin = self.pins.get(name)
         if pin is None:
             return
-        self.pins[name] = pin
-        # What uv resolves at that pin: the highest release a file uploaded before it makes visible
-        # and installable on this Python (the pinned release itself always is).
-        visible = admitted_releases(satisfying, datetime.fromisoformat(pin.replace("Z", "+00:00")))
-        exact = _exact_pin(requirement.specifier)
-        takeable = [
-            v for v, files in visible.items() if _installs_on(cast("list[Any]", files), python, yanked_ok=exact)
-        ]
-        if not takeable:
-            raise _UnjudgeableError(f"no file of {name} that installs on Python {python} has an upload time")
-        self._walk(name, max(takeable, key=Version), python=python, extras=extras)
-
-    def _pin_for(self, name: str, satisfying: dict[str, Any]) -> str | None:
-        """The pin ``name`` needs once this requirement joins the earlier ones; None to keep the last.
-
-        uv locks the highest visible release with whichever of its files the cutoff admits, and it
-        resolves every Python and platform at once, so no release ANY requirement admits may be left
-        with files on both sides of the cutoff that applies, and each requirement must keep a whole
-        release visible.
-        """
-        admitted = self._admitted.setdefault(name, {})
-        admitted.update(satisfying)
-        earliest = min((p for files in satisfying.values() if (p := floor_pin(files)) is not None), default=None)
-        if earliest is not None and earliest > self._bound.get(name, ""):
-            self._bound[name] = earliest
-        return _package_pin(admitted, bound=self._bound.get(name), cutoff=self._cutoff)
+        # What uv resolves at the previous pass's pin is what this pass walks. A requirement first
+        # reached in this pass may see nothing there; its pin is recomputed below and walked next pass.
+        chosen = need.chosen(_as_moment(pin))
+        if chosen is not None:
+            self._walk(name, chosen, python=python, extras=extras)
 
     def _walk(self, name: str, version: str, *, python: str | None, extras: frozenset[str]) -> None:
         if (name, version, extras) in self._walked:
@@ -1760,49 +1766,72 @@ def _exact_pin(specifier: SpecifierSet) -> bool:
     return any(s.operator == "===" or (s.operator == "==" and not s.version.endswith(".*")) for s in specifier)
 
 
-def _package_pin(admitted: dict[str, Any], *, bound: str | None, cutoff: datetime) -> str | None:
-    """The pin a package needs, given every release its requirements admit; None when it needs none.
+class _Need:
+    """One requirement on a package: the releases it admits, on the Python it serves."""
 
-    ``bound`` is the earliest cutoff at which every requirement sees one of its releases whole, so no
-    pin may lie before it. Each candidate is one second after a release's newest file, which admits
-    that release whole and is how bmk recognises the pin as its own; one at which some admitted
-    release has files on both sides is skipped, since uv would lock that release with only its older
-    files (pydantic-core 2.50.1 kept one macOS wheel of dozens) and every other platform would build
-    from source or fail.
+    def __init__(self, *, releases: dict[str, Any], python: str | None, exact: bool) -> None:
+        self.releases = releases
+        self.python = python
+        self.exact = exact
 
-    No pin is needed while the default cutoff already shows every requirement a whole release and
-    cuts none. Otherwise, when the bound allows it, the pin goes BACK to the latest candidate at or
-    before the cutoff: a higher release is cut, and pinning forward past a floor's own upload would
-    admit young files no floor asked for (user, 2026-10-12 16:06 and 2026-10-23 21:54); the pin
-    goes once the cut release clears the cooldown. Failing that it goes FORWARD to the earliest
+    def chosen(self, moment: datetime) -> str | None:
+        """The release uv locks for this requirement at ``moment``: the highest one a file uploaded
+        before it makes visible and installable on this Python; None when there is none."""
+        visible = admitted_releases(self.releases, moment)
+        takeable = [
+            v
+            for v, files in visible.items()
+            if _installs_on(cast("list[Any]", files), self.python, yanked_ok=self.exact)
+        ]
+        return max(takeable, key=Version) if takeable else None
+
+    def settles(self, moment: datetime) -> bool:
+        """Whether uv, cut off at ``moment``, locks a release for this requirement with all its files.
+
+        Not only the release locked on the oldest Python counts: uv resolves every Python at once, so
+        a higher release whose visible file installs only on a newer Python is locked there. A cut
+        release BELOW the one locked on the oldest Python is never taken and does not count.
+        """
+        chosen = self.chosen(moment)
+        if chosen is None:
+            return False
+        floor = Version(chosen)
+        return not _cuts_at({v: f for v, f in self.releases.items() if Version(v) >= floor}, moment)
+
+
+def _package_pin(needs: list[_Need], *, cutoff: datetime) -> str | None:
+    """The pin a package needs under the default ``cutoff``, given every requirement on it; None for none.
+
+    uv locks, per requirement, the highest release a file before the cutoff makes visible, with only
+    those files: a release cut by the cutoff keeps its older files alone (pydantic-core 2.50.1 kept
+    one macOS wheel of dozens) and every other platform builds from source or fails. A cut release
+    no requirement would lock does not matter. So a cutoff is safe when no requirement can lock a
+    cut release there (:meth:`_Need.settles`).
+
+    No pin is needed while the default cutoff is safe. Otherwise the pin goes BACK to the latest
+    safe candidate at or before the cutoff: pinning forward past a floor's own upload would admit
+    young files no floor asked for (user, 2026-10-12 16:06 and 2026-10-23 21:54), and the pin goes
+    once the cut release clears the cooldown. Failing that it goes FORWARD to the earliest safe
     candidate past the cutoff, where a floor release too young or itself cut is admitted whole.
+    Each candidate is one second after a release's newest file, which is how bmk recognises the pin
+    as its own.
     """
-    floor_whole = bound is not None and _as_moment(bound) <= cutoff
-    if floor_whole and not _cuts_at(admitted, cutoff):
+    if all(need.settles(cutoff) for need in needs):
         return None
     candidates = sorted(
-        {
-            pin
-            for files in admitted.values()
-            if (pin := floor_pin(files)) is not None and (bound is None or pin >= bound)
-        }
+        {pin for need in needs for files in need.releases.values() if (pin := floor_pin(files)) is not None}
     )
-    if floor_whole:
-        back = [c for c in candidates if _as_moment(c) <= cutoff]
-        pin = next((c for c in reversed(back) if not _cuts_a_release(admitted, c)), None)
-        if pin is not None:
-            return pin
-    return next((c for c in candidates if _as_moment(c) > cutoff and not _cuts_a_release(admitted, c)), None)
+    back = [c for c in candidates if _as_moment(c) <= cutoff]
+    forward = [c for c in candidates if _as_moment(c) > cutoff]
+    for candidate in [*reversed(back), *forward]:
+        if all(need.settles(_as_moment(candidate)) for need in needs):
+            return candidate
+    return None
 
 
 def _as_moment(pin: str) -> datetime:
     """A pin's timestamp as an aware datetime (pins end in ``Z``, which Python 3.10 cannot parse)."""
     return datetime.fromisoformat(pin.replace("Z", "+00:00"))
-
-
-def _cuts_a_release(satisfying: dict[str, Any], pin: str) -> bool:
-    """Whether some release in ``satisfying`` has timed files both before and after ``pin``."""
-    return _cuts_at(satisfying, _as_moment(pin))
 
 
 def _cuts_at(satisfying: dict[str, Any], moment: datetime) -> bool:
