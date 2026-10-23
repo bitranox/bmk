@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A release above a floor that the cooldown cuts through is no longer locked half-visible.** When
+  the floor's own release was admitted whole but a higher satisfying release had files on both
+  sides of the cutoff, bmk wrote no pin, and uv locked that higher release with only its older
+  files, so other platforms built from source or failed. `deps --update` now pins the package
+  back to the newest release still whole, and drops the pin once the cut release clears the
+  cooldown. It never pins forward past the floor's own upload.
+
 ## [3.23.2] 2026-10-23 21:24:19
 
 ### Changed

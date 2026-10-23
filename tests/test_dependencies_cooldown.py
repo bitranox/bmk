@@ -1094,6 +1094,65 @@ def test_a_floor_release_the_cooldown_admits_whole_needs_no_pin(tmp_path: Path, 
 
 
 @pytest.mark.os_agnostic
+def test_a_higher_release_the_cooldown_cuts_is_never_left_half_visible(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # The floor's own release 1.0 is admitted whole, but 2.0 straddles the 14-day cutoff. uv locks the
+    # highest visible release, so it would take 2.0 with only its older file - the cut-release defect
+    # of pydantic-core 2.50.1, one release above the floor. Whatever cutoff applies to gadget after
+    # the update, it must show each release whole or not at all.
+    releases = {"1.0": _uploaded(90), "2.0": [*_uploaded(15), *_uploaded(13)]}
+    pypi.packages["gadget"] = _doc("2.0", releases)
+    pyproject = _write(tmp_path, deps='"gadget>=1.0"', tool_uv='exclude-newer = "14 days"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    pin = _pins(pyproject).get("gadget")
+    cutoff = datetime.fromisoformat(pin.replace("Z", "+00:00")) if isinstance(pin, str) else _NOW - timedelta(days=14)
+    visible_of_2_0 = sum(
+        1 for entry in releases["2.0"] if datetime.fromisoformat(entry["upload_time_iso_8601"]) < cutoff
+    )
+    assert visible_of_2_0 in (0, len(releases["2.0"]))
+    # Pinned BACK to the floor's own release, never forward past it (user decision 2026-10-23).
+    assert pin == _pin_of(90)
+
+
+@pytest.mark.os_agnostic
+def test_a_pin_back_is_kept_while_the_higher_release_is_still_cut(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pypi.packages["gadget"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": [*_uploaded(15), *_uploaded(13)]})
+    tool_uv = f'exclude-newer = "14 days"\nexclude-newer-package = {{ gadget = "{_pin_of(90)}" }}'
+    pyproject = _write(tmp_path, deps='"gadget>=1.0"', tool_uv=tool_uv)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(90)}
+    assert "no declared floor demands it" not in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_a_pin_back_goes_once_the_higher_release_clears_the_cooldown(tmp_path: Path, pypi: _FakeIndex) -> None:
+    pypi.packages["gadget"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": [*_uploaded(16), *_uploaded(15)]})
+    tool_uv = f'exclude-newer = "14 days"\nexclude-newer-package = {{ gadget = "{_pin_of(90)}" }}'
+    pyproject = _write(tmp_path, deps='"gadget>=1.0"', tool_uv=tool_uv)
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {}
+
+
+@pytest.mark.os_agnostic
+def test_a_pin_back_stops_at_the_newest_release_still_whole(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # 1.5 is whole outside the cooldown, so holding gadget at 1.0 would take more than the cut asks.
+    releases = {"1.0": _uploaded(90), "1.5": _uploaded(30), "2.0": [*_uploaded(15), *_uploaded(13)]}
+    pypi.packages["gadget"] = _doc("2.0", releases)
+    pyproject = _write(tmp_path, deps='"gadget>=1.0"', tool_uv='exclude-newer = "14 days"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(30)}
+
+
+@pytest.mark.os_agnostic
 def test_a_release_whose_installable_file_has_no_upload_time_leaves_the_pins_alone(
     tmp_path: Path, pypi: _FakeIndex
 ) -> None:

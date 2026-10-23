@@ -1708,14 +1708,7 @@ class _FloorDemand:
         if name in self._exempt:
             self._walk(name, min(satisfying, key=Version), python=python, extras=extras)
             return
-        floor_release = min(satisfying, key=Version)
-        if admitted_releases(satisfying, self._cutoff) and not _cuts_at(
-            {floor_release: satisfying[floor_release]}, self._cutoff
-        ):
-            return  # the cooldown admits a release, and the floor's own release whole or not at all
-        # A floor release with files on both sides of the cutoff gets the pin that admits it whole
-        # (uv would otherwise lock it with only its older files); that pin always lies past the cutoff.
-        pin = _earliest_whole_pin(satisfying, at_least=self.pins.get(name), after=self._cutoff)
+        pin = self._pin_for(satisfying, at_least=self.pins.get(name))
         if pin is None:
             return
         self.pins[name] = pin
@@ -1729,6 +1722,28 @@ class _FloorDemand:
         if not takeable:
             raise _UnjudgeableError(f"no file of {name} that installs on Python {python} has an upload time")
         self._walk(name, max(takeable, key=Version), python=python, extras=extras)
+
+    def _pin_for(self, satisfying: dict[str, Any], *, at_least: str | None) -> str | None:
+        """The pin one floor needs under the default cutoff, or None when it needs none.
+
+        uv locks the highest visible release with whichever of its files the cutoff admits, so no
+        satisfying release may be left with files on both sides of the cutoff that applies.
+        """
+        floor_release = min(satisfying, key=Version)
+        floor_whole = not _cuts_at({floor_release: satisfying[floor_release]}, self._cutoff)
+        if admitted_releases(satisfying, self._cutoff) and floor_whole:
+            if not _cuts_at(satisfying, self._cutoff):
+                return None  # every satisfying release is admitted whole or not at all
+            if at_least is None or _as_moment(at_least) <= self._cutoff:
+                # A HIGHER release is cut while the floor's own is whole: pin BACK to where the
+                # cut release is invisible, never forward past the floor's upload (user, 2026-10-12
+                # 16:06 and 2026-10-23 21:54). The pin goes once the cut release clears the cooldown.
+                before = self._cutoff if at_least is None else _as_moment(at_least)
+                return _latest_whole_pin(satisfying, floor_release=floor_release, before=before)
+        # A floor release too young, or with files on both sides of the cutoff, gets the pin that
+        # admits it whole (uv would otherwise lock it with only its older files); that pin always lies
+        # past the cutoff, as does one an earlier floor already set past it.
+        return _earliest_whole_pin(satisfying, at_least=at_least, after=self._cutoff)
 
     def _walk(self, name: str, version: str, *, python: str | None, extras: frozenset[str]) -> None:
         if (name, version, extras) in self._walked:
@@ -1766,6 +1781,25 @@ def _earliest_whole_pin(
     if after is not None:
         candidates = [c for c in candidates if _as_moment(c) > after]
     return next((c for c in candidates if not _cuts_a_release(satisfying, c)), None)
+
+
+def _latest_whole_pin(satisfying: dict[str, Any], *, floor_release: str, before: datetime) -> str | None:
+    """The latest cutoff, at or before ``before``, that admits ``floor_release`` and cuts no release.
+
+    Candidates are, as everywhere, one second after a release's newest file, so the pin stays one bmk
+    recognises as its own. One earlier than the floor release's own would hide the floor itself.
+    """
+    floor = floor_pin(satisfying[floor_release])
+    if floor is None:
+        return None
+    candidates = sorted(
+        {pin for files in satisfying.values() if (pin := floor_pin(files)) is not None and pin >= floor},
+        reverse=True,
+    )
+    return next(
+        (c for c in candidates if _as_moment(c) <= before and not _cuts_a_release(satisfying, c)),
+        None,
+    )
 
 
 def _as_moment(pin: str) -> datetime:
