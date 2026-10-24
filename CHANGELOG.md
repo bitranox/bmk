@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.25.2] 2026-10-24 18:52:21
+
+### Changed
+
+- The `devops-bmk` skill says an old bmk right after a release is usually the tool-lock skip
+  (another bmk, a hung one included, holds the shared lock, so every `make` skips the upgrade until
+  it exits), names the `make push` commit subject and where its message comes from on an
+  already-committed tree, and says to gate the bumped commit, not the tree before the bump, since
+  nothing in bmk raises a SKILL.md's `uvx` floors.
+
 ## [3.25.1] 2026-10-24 18:27:49
 
 ### Changed
