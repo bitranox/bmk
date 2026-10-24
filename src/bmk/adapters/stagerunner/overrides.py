@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from pydantic_core import ErrorDetails
+
 _MAX_ARGV = 256
 
 
@@ -88,7 +90,12 @@ def _pipelines_from(path: Path, root_keys: tuple[str, ...]) -> dict[str, Any]:
 
 
 def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
-    """Load and validate the overlay for ``prefix`` (``stages.toml`` wins)."""
+    """Load and validate the overlay for ``prefix`` (``stages.toml`` wins).
+
+    Raises:
+        ValueError: The overlay is malformed; the message names each problem on its own line
+            as ``<dotted location>: <reason>``.
+    """
     pyproject = _pipelines_from(cwd / "pyproject.toml", ("tool", "bmk", "pipelines"))
     stages_toml = _pipelines_from(cwd / "bmk_makescripts" / "stages.toml", ("pipelines",))
 
@@ -98,8 +105,20 @@ def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
     try:
         return Overlay.model_validate(section)
     except ValidationError as exc:
-        msg = f"invalid [tool.bmk.pipelines.{prefix}] overlay: {exc}"
+        problems = "".join(f"\n  {_problem(item)}" for item in exc.errors(include_url=False))
+        msg = f"invalid [tool.bmk.pipelines.{prefix}] overlay:{problems}"
         raise ValueError(msg) from exc
+
+
+def _problem(item: ErrorDetails) -> str:
+    """One refusal line, ``<dotted location>: <reason>``.
+
+    Not ``str(ValidationError)``: that is several lines per problem, echoes the offending input,
+    and ends each problem with a link to pydantic's versioned documentation, none of which helps
+    the person editing the overlay.
+    """
+    location = ".".join(str(part) for part in item["loc"])
+    return f"{location}: {item['msg']}"
 
 
 def resolve_stages(cwd: Path, prefix: str, base: Sequence[Stage]) -> list[Stage]:

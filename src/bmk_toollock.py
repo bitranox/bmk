@@ -36,6 +36,7 @@ import os
 import subprocess
 import sys
 import time
+from enum import Enum
 from pathlib import Path
 
 #: ETIMEDOUT. Mirrors ``ExitCode.TIMEOUT`` in ``bmk/adapters/cli/exit_codes.py``, which is
@@ -54,6 +55,20 @@ LOCK_PATH_ENV = "BMK_TOOL_LOCK_PATH"
 LOCK_HELD_ENV = "BMK_TOOL_LOCK_HELD"
 #: ``0`` disables the guard entirely.
 LOCK_ENABLE_ENV = "BMK_TOOL_LOCK"
+
+
+class OnTimeout(str, Enum):
+    """What the guard does when another holder keeps the lock past ``--timeout``.
+
+    ``SKIP`` leaves the command unrun and exits 0 (the routine upgrade before every make
+    target, which a later make retries); ``FAIL`` exits with :data:`EXIT_TIMEOUT` (a repair
+    that must not be silently dropped). The values are the ``--on-timeout`` spellings the
+    generated Makefile passes.
+    """
+
+    SKIP = "skip"
+    FAIL = "fail"
+
 
 _DEFAULT_TIMEOUT = 30.0
 _POLL_SECONDS = 0.05
@@ -228,8 +243,8 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=_DEFAULT_TIMEOUT, help="seconds to wait")
     parser.add_argument(
         "--on-timeout",
-        choices=("skip", "fail"),
-        default="skip",
+        choices=[policy.value for policy in OnTimeout],
+        default=OnTimeout.SKIP.value,
         help="skip: leave the command unrun and exit 0. fail: exit with the timeout code.",
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -258,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _parse(list(sys.argv[1:] if argv is None else argv))
     command = [item for item in args.command if item != "--"]
+    on_timeout = OnTimeout(args.on_timeout)
 
     if os.environ.get(LOCK_ENABLE_ENV) == "0":
         return _run(command)
@@ -284,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             f"for the lock at {target} and gave up. Nothing was changed.",
             file=sys.stderr,
         )
-        return 0 if args.on_timeout == "skip" else EXIT_TIMEOUT
+        return 0 if on_timeout is OnTimeout.SKIP else EXIT_TIMEOUT
 
     return _run(command)
 

@@ -24,6 +24,7 @@ import logging
 import shutil
 import subprocess
 import time
+from enum import Enum
 
 import lib_log_rich.runtime
 import orjson
@@ -40,6 +41,20 @@ _POLL_SECONDS = 15
 _FIND_RUN_TIMEOUT = 180  # how long to wait for a run to appear after push/release
 _DEFAULT_CI_WORKFLOW = "CI"
 _DEFAULT_RELEASE_WORKFLOW = "Release"
+
+
+class GhRunEvent(str, Enum):
+    """GitHub Actions trigger events ``ship`` gates on.
+
+    Only the events ``ship`` asks for are members. gh reports many more
+    (``pull_request``, ``schedule``, ``workflow_dispatch``, ...), so a parsed run
+    keeps its event as plain text and is compared against ``.value``: an event
+    outside this set then simply never matches, instead of failing validation or
+    collapsing into a catch-all member that would match every other unknown event.
+    """
+
+    PUSH = "push"
+    RELEASE = "release"
 
 
 def _git_head() -> str:
@@ -64,7 +79,7 @@ class _WorkflowRun(BaseModel):
     head_sha: str = Field(alias="headSha")
 
 
-def _find_run_id(workflow: str, *, event: str | None, head_sha: str) -> str | None:
+def _find_run_id(workflow: str, *, event: GhRunEvent | None, head_sha: str) -> str | None:
     """Find the most recent workflow run id matching workflow/event/head_sha."""
     fields = "databaseId,workflowName,event,headSha,status,conclusion"
     result = subprocess.run(  # noqa: S603
@@ -86,7 +101,7 @@ def _find_run_id(workflow: str, *, event: str | None, head_sha: str) -> str | No
             continue
         if run.workflow_name != workflow:
             continue
-        if event is not None and run.event != event:
+        if event is not None and run.event != event.value:
             continue
         if head_sha and run.head_sha and run.head_sha != head_sha:
             continue
@@ -100,12 +115,12 @@ def _watch_run(run_id: str) -> bool:
     return result.returncode == 0
 
 
-def _gate_on_ci(workflow: str, *, event: str | None, head_sha: str, label: str) -> None:
+def _gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label: str) -> None:
     """Find and watch the workflow run for *head_sha*; raise SystemExit on failure.
 
     Args:
         workflow: GitHub workflow name to match.
-        event: Trigger event to match (``push`` / ``release``), or None for any.
+        event: Trigger event to match, or None for any.
         head_sha: Commit sha the run must belong to.
         label: Human label for log messages.
 
@@ -147,7 +162,7 @@ def _run_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str)
 
     run_push(message)
     head_sha = _git_head()
-    _gate_on_ci(ci_workflow, event="push", head_sha=head_sha, label="CI")
+    _gate_on_ci(ci_workflow, event=GhRunEvent.PUSH, head_sha=head_sha, label="CI")
     run_release(())
     # The release tag points at the same commit; match the release workflow by sha.
     _gate_on_ci(release_workflow, event=None, head_sha=head_sha, label="release")
@@ -200,4 +215,4 @@ def cli_sh(message: tuple[str, ...], ci_workflow: str, release_workflow: str) ->
         _run_ship(message, ci_workflow, release_workflow)
 
 
-__all__ = ["cli_sh", "cli_ship"]
+__all__ = ["GhRunEvent", "cli_sh", "cli_ship"]

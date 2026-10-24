@@ -293,8 +293,8 @@ if __name__ == "__main__":  # pragma: no cover
     )
     parser.add_argument(
         "--output-format",
-        choices=["json", "text"],
-        default="text",
+        choices=[fmt.value for fmt in ToolOutputFormat],
+        default=ToolOutputFormat.TEXT.value,
         help="Output format: json for machine-readable, text for human-readable (default: text)",
     )
     args, _unknown = parser.parse_known_args()

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from bmk.adapters.cli.commands import ship_cmd
-from bmk.adapters.cli.commands.ship_cmd import _find_run_id
+from bmk.adapters.cli.commands.ship_cmd import GhRunEvent, _find_run_id
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,19 +31,19 @@ def _fake_gh(stdout: str, returncode: int = 0) -> Callable[..., subprocess.Compl
 @pytest.mark.os_agnostic
 def test_find_run_id_matches_workflow_event_and_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("CI", event="push", head_sha="abc") == "123"
+    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "123"
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_filters_by_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("Release", event="release", head_sha="def") == "456"
+    assert _find_run_id("Release", event=GhRunEvent.RELEASE, head_sha="def") == "456"
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_none_on_sha_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("CI", event="push", head_sha="different") is None
+    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="different") is None
 
 
 @pytest.mark.os_agnostic
@@ -72,7 +72,54 @@ def test_find_run_id_skips_malformed_entry(monkeypatch: pytest.MonkeyPatch) -> N
         ' {"databaseId": 99, "workflowName": "CI", "event": "push", "headSha": "abc"}]'
     )
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(mixed))
-    assert _find_run_id("CI", event="push", head_sha="abc") == "99"
+    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "99"
+
+
+# gh reports every trigger event, not only the two ship gates on.
+_RUNS_WITH_OTHER_EVENTS_JSON = (
+    '[{"databaseId": 301, "workflowName": "CI", "event": "pull_request", "headSha": "abc",'
+    ' "status": "completed", "conclusion": "success"},'
+    ' {"databaseId": 302, "workflowName": "CI", "event": "workflow_dispatch", "headSha": "abc",'
+    ' "status": "in_progress", "conclusion": ""},'
+    ' {"databaseId": 303, "workflowName": "CI", "event": "push", "headSha": "abc",'
+    ' "status": "queued", "conclusion": ""}]'
+)
+
+
+@pytest.mark.os_agnostic
+def test_workflow_run_parses_an_event_outside_the_gated_set() -> None:
+    run = ship_cmd._WorkflowRun.model_validate(
+        {"databaseId": 1, "workflowName": "CI", "event": "schedule", "headSha": "abc", "status": "queued"}
+    )
+    assert run.event == "schedule"
+    assert type(run.event) is str
+
+
+@pytest.mark.os_agnostic
+def test_find_run_id_skips_runs_of_other_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runs triggered by pull_request / workflow_dispatch parse, but never match a push gate."""
+    monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_WITH_OTHER_EVENTS_JSON))
+    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "303"
+
+
+@pytest.mark.os_agnostic
+def test_find_run_id_none_when_only_other_events_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+    only_others = _RUNS_WITH_OTHER_EVENTS_JSON.replace('"event": "push"', '"event": "schedule"')
+    monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(only_others))
+    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") is None
+    assert _find_run_id("CI", event=GhRunEvent.RELEASE, head_sha="abc") is None
+
+
+@pytest.mark.os_agnostic
+def test_find_run_id_with_no_event_filter_takes_any_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_WITH_OTHER_EVENTS_JSON))
+    assert _find_run_id("CI", event=None, head_sha="abc") == "301"
+
+
+@pytest.mark.os_agnostic
+def test_gh_run_event_values_are_the_strings_gh_reports() -> None:
+    assert [event.value for event in GhRunEvent] == ["push", "release"]
+    assert all(type(event.value) is str for event in GhRunEvent)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +161,7 @@ def test_gate_on_ci_raises_when_watched_run_fails(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: "77")
     monkeypatch.setattr(ship_cmd, "_watch_run", lambda _run_id: False)
     with pytest.raises(SystemExit):
-        ship_cmd._gate_on_ci("CI", event="push", head_sha="abc", label="CI")
+        ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
 
 
 @pytest.mark.os_agnostic
@@ -125,14 +172,14 @@ def test_gate_on_ci_raises_when_no_run_appears_before_deadline(monkeypatch: pyte
     clock = iter([0.0, 10_000.0])  # deadline set from 0, next read is already past it
     monkeypatch.setattr(ship_cmd.time, "monotonic", lambda: next(clock))
     with pytest.raises(SystemExit):
-        ship_cmd._gate_on_ci("CI", event="push", head_sha="abc", label="CI")
+        ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
 
 
 @pytest.mark.os_agnostic
 def test_gate_on_ci_passes_when_run_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: "5")
     monkeypatch.setattr(ship_cmd, "_watch_run", lambda _run_id: True)
-    ship_cmd._gate_on_ci("CI", event="push", head_sha="abc", label="CI")  # must not raise
+    ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")  # must not raise
 
 
 # ---------------------------------------------------------------------------

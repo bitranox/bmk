@@ -212,6 +212,35 @@ def test_the_timeout_exit_code_matches_the_cli_enum() -> None:
 
 
 @pytest.mark.os_agnostic
+def test_on_timeout_values_are_the_spellings_the_makefile_passes() -> None:
+    assert [policy.value for policy in bmk_toollock.OnTimeout] == ["skip", "fail"]
+    assert all(type(policy.value) is str for policy in bmk_toollock.OnTimeout)
+
+
+@pytest.mark.os_agnostic
+def test_on_timeout_help_lists_the_plain_spellings(capsys: pytest.CaptureFixture[str]) -> None:
+    """On Python 3.11+ a member list would print ``{OnTimeout.SKIP,OnTimeout.FAIL}`` here."""
+    with pytest.raises(SystemExit) as exited:
+        bmk_toollock.main(["--help"])
+
+    assert exited.value.code == 0
+    out = capsys.readouterr().out
+    assert "{skip,fail}" in out
+    assert "OnTimeout" not in out
+
+
+@pytest.mark.os_agnostic
+def test_an_unknown_on_timeout_spelling_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exited:
+        bmk_toollock.main(["--on-timeout", "retry", "--", sys.executable, "-c", "pass"])
+
+    assert exited.value.code == 2
+    err = capsys.readouterr().err
+    assert "retry" in err
+    assert "OnTimeout" not in err
+
+
+@pytest.mark.os_agnostic
 def test_a_nested_make_never_rebuilds_the_env_its_parent_is_running_out_of(tmp_path: Path) -> None:
     """The inherited token makes a nested guard skip, instead of deadlocking on itself.
 
