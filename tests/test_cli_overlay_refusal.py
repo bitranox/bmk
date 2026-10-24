@@ -64,6 +64,24 @@ def test_load_overlay_names_each_problem_on_its_own_line(tmp_path: Path) -> None
 
 
 @pytest.mark.os_agnostic
+def test_a_bad_stages_toml_overlay_names_that_file_and_its_own_table(tmp_path: Path) -> None:
+    """stages.toml has no [tool.bmk] prefix, so naming the pyproject table would send the reader to the wrong file."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.0"\n', encoding="utf-8")
+    (tmp_path / "bmk_makescripts").mkdir()
+    (tmp_path / "bmk_makescripts" / "stages.toml").write_text(
+        '[[pipelines.deploy.add]]\nname = "upload"\norder = "soon"\nargv = ["true"]\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="overlay:") as raised:
+        load_overlay(tmp_path, "deploy")
+
+    assert str(raised.value) == (
+        "invalid bmk_makescripts/stages.toml [pipelines.deploy] overlay:\n"
+        "  add.0.order: Input should be a valid integer, unable to parse string as an integer"
+    )
+
+
+@pytest.mark.os_agnostic
 def test_custom_command_reports_a_bad_overlay_without_pydantic_internals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

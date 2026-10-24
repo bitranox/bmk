@@ -405,9 +405,10 @@ class PoetryDepSpec(BaseModel):
         """Convert to a PEP 508 requirement string carrying this constraint's conditions.
 
         Returns:
-            ``name[extras]<specifier>; <marker>`` for a PyPI dependency, a direct reference
-            ``name[extras] @ <url> ; <marker>`` for a git/url/path one, and an empty string
-            for one from a private index (the dependency stage skips both of the last two).
+            ``name[extras]<specifier>; <marker>`` for an index dependency (PyPI or a private
+            index alike), and a direct reference ``name[extras] @ <url> ; <marker>`` for a
+            git/url/path one. Whether PyPI may judge it is :attr:`source_kind`'s question, not
+            this string's.
 
         Examples:
             >>> PoetryDepSpec(name="tomli", version="^2", python="<3.11").to_requirement_string()
@@ -416,11 +417,9 @@ class PoetryDepSpec(BaseModel):
             'foo @ git+https://h/foo.git@v1'
         """
         kind = self.source_kind
-        if kind is PoetrySourceKind.PRIVATE_INDEX:
-            return ""
         head = f"{self.name}[{','.join(self.extras)}]" if self.extras else self.name
         marker = self._marker()
-        if kind is PoetrySourceKind.REGISTRY:
+        if kind in (PoetrySourceKind.REGISTRY, PoetrySourceKind.PRIVATE_INDEX):
             return f"{head}{self._specifier()}" + (f"; {marker}" if marker else "")
         # PEP 508 needs whitespace between a URL and the ';' that starts its marker.
         return f"{head} @ {self._direct_reference()}" + (f" ; {marker}" if marker else "")

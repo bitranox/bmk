@@ -15,6 +15,7 @@ import pytest
 from packaging.markers import Marker
 from packaging.requirements import Requirement
 
+from bmk.adapters.stagerunner.helpers._dependencies import _extract_all_dependencies
 from bmk.adapters.stagerunner.helpers._toml_config import PoetrySourceKind, PyprojectConfig, load_pyproject_config
 
 if TYPE_CHECKING:
@@ -235,18 +236,22 @@ foo = { git = "https://github.com/org/foo.git", python = "<3.11" }
 
 @pytest.mark.os_agnostic
 def test_a_dependency_from_a_named_private_source_is_not_offered_to_pypi(tmp_path: Path) -> None:
-    """The same name on PyPI may be someone else's package; an empty string is skipped by the stage."""
+    """The same name on PyPI may be someone else's package, so the dependency stage leaves it out."""
     config = _load(
         tmp_path,
         """
 [tool.poetry.dependencies]
 internal-lib = { version = "^1.0", source = "corp" }
+requests = "^2.31"
 """,
     )
-    (dep,) = config.tool.poetry.dependencies
+    internal, _requests = config.tool.poetry.dependencies
 
-    assert dep.source_kind is PoetrySourceKind.PRIVATE_INDEX
-    assert dep.to_requirement_string() == ""
+    assert internal.source_kind is PoetrySourceKind.PRIVATE_INDEX
+    assert internal.to_requirement_string() == "internal-lib>=1.0"
+    checked = [dep.name for dep in _extract_all_dependencies(config)]
+    assert "requests" in checked
+    assert "internal-lib" not in checked
 
 
 @pytest.mark.os_agnostic

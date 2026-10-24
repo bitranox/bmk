@@ -99,14 +99,19 @@ def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
     pyproject = _pipelines_from(cwd / "pyproject.toml", ("tool", "bmk", "pipelines"))
     stages_toml = _pipelines_from(cwd / "bmk_makescripts" / "stages.toml", ("pipelines",))
 
-    section: Any = stages_toml.get(prefix) or pyproject.get(prefix)
+    section: Any = stages_toml.get(prefix)
+    # The refusal names the table the person has to edit, which differs between the two files.
+    where = f"bmk_makescripts/stages.toml [pipelines.{prefix}]"
+    if not section:
+        section = pyproject.get(prefix)
+        where = f"[tool.bmk.pipelines.{prefix}]"
     if not isinstance(section, dict) or not section:
         return None
     try:
         return Overlay.model_validate(section)
     except ValidationError as exc:
         problems = "".join(f"\n  {_problem(item)}" for item in exc.errors(include_url=False))
-        msg = f"invalid [tool.bmk.pipelines.{prefix}] overlay:{problems}"
+        msg = f"invalid {where} overlay:{problems}"
         raise ValueError(msg) from exc
 
 

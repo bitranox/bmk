@@ -64,7 +64,11 @@ from bmk.adapters.stagerunner.helpers._supply_chain import (
     reconcile_floor_pins,
     uv_resolved_options,
 )
-from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._toml_config import (
+    PoetryDepSpec,
+    PoetrySourceKind,
+    load_pyproject_config,
+)
 from bmk.adapters.stagerunner.output_format_env import read_tool_output_format
 from bmk.domain.enums import ToolOutputFormat
 
@@ -479,6 +483,16 @@ def _extract_dependencies_from_list(
     return results
 
 
+def _poetry_pypi_requirements(deps: Iterable[PoetryDepSpec]) -> list[str]:
+    """PEP 508 strings of the Poetry dependencies PyPI resolves; the rest are not PyPI's to judge.
+
+    A dependency from a named private index may share its name with an unrelated PyPI package,
+    and a git/url/path one has no PyPI release at all, so checking either against PyPI would
+    report, raise or install the wrong package.
+    """
+    return [dep.to_requirement_string() for dep in deps if dep.source_kind is PoetrySourceKind.REGISTRY]
+
+
 def _extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
     """Extract all dependencies from PyprojectConfig.
 
@@ -512,15 +526,15 @@ def _extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
         all_deps.extend(_extract_dependencies_from_list(group_deps, source))
 
     if config.tool.poetry.dependencies:
-        poetry_deps = [dep.to_requirement_string() for dep in config.tool.poetry.dependencies]
+        poetry_deps = _poetry_pypi_requirements(config.tool.poetry.dependencies)
         all_deps.extend(_extract_dependencies_from_list(poetry_deps, "[tool.poetry.dependencies]"))
 
     if config.tool.poetry.dev_dependencies:
-        poetry_dev_deps = [dep.to_requirement_string() for dep in config.tool.poetry.dev_dependencies]
+        poetry_dev_deps = _poetry_pypi_requirements(config.tool.poetry.dev_dependencies)
         all_deps.extend(_extract_dependencies_from_list(poetry_dev_deps, "[tool.poetry.dev-dependencies]"))
 
     for group_name, group_deps in config.tool.poetry.group_dependencies.items():
-        poetry_group_deps = [dep.to_requirement_string() for dep in group_deps]
+        poetry_group_deps = _poetry_pypi_requirements(group_deps)
         source = f"[tool.poetry.group.{group_name}.dependencies]"
         all_deps.extend(_extract_dependencies_from_list(poetry_group_deps, source))
 
