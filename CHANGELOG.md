@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.26.0] 2026-10-24 23:15:15
+
 ### Fixed
 
 - The cooldown floor pins now also judge the requirements of a package that needs no pin itself.
