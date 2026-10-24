@@ -1,7 +1,7 @@
 """PyPI's JSON API at the network edge: a real ``httpx2.Client`` running on ``httpx2.MockTransport``.
 
 Every PyPI download in ``helpers/_dependencies.py`` goes through an ``httpx2.Client`` (one per
-``_one_fetch_per_package`` block, else a one-off), so replacing the CLIENT's transport is the one
+``one_fetch_per_package`` block, else a one-off), so replacing the CLIENT's transport is the one
 seam that reaches all of them. The real client still streams the body, raises on an error status
 and enforces nothing the test did not ask for, so a test asserts what bmk does with a real
 response rather than with a ``MagicMock`` shaped like one. ``httpx2.Client`` is patched only to

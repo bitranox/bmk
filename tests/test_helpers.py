@@ -612,8 +612,8 @@ class TestDependencyVersionParsing:
         expected_min: str,
         expected_upper: str,
     ) -> None:
-        """_parse_version_constraint extracts name, constraint, min, and upper bound."""
-        parsed = deps_module._parse_version_constraint(spec)
+        """parse_version_constraint extracts name, constraint, min, and upper bound."""
+        parsed = deps_module.parse_version_constraint(spec)
 
         assert parsed.name == expected_name
         assert parsed.constraint == expected_constraint
@@ -622,8 +622,8 @@ class TestDependencyVersionParsing:
 
     @pytest.mark.os_agnostic
     def test_parse_version_constraint_handles_empty_string(self, deps_module: Any) -> None:
-        """_parse_version_constraint handles empty string."""
-        parsed = deps_module._parse_version_constraint("")
+        """parse_version_constraint handles empty string."""
+        parsed = deps_module.parse_version_constraint("")
 
         assert parsed.name == ""
         assert parsed.constraint == ""
@@ -722,7 +722,7 @@ class TestStatusIcon:
 
 
 class TestBuildUpdatedSpec:
-    """Tests for _build_updated_spec function."""
+    """Tests for build_updated_spec function."""
 
     @pytest.fixture
     def deps_module(self) -> Any:
@@ -733,7 +733,7 @@ class TestBuildUpdatedSpec:
 
     @pytest.mark.os_agnostic
     def test_updates_version_constraint(self, deps_module: Any) -> None:
-        """_build_updated_spec updates version in constraint."""
+        """build_updated_spec updates version in constraint."""
         dep = deps_module.DependencyInfo(
             name="pytest",
             source="test",
@@ -744,13 +744,13 @@ class TestBuildUpdatedSpec:
             original_spec="pytest>=8.0.0",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert result == "pytest>=9.0.0"
 
     @pytest.mark.os_agnostic
     def test_preserves_environment_markers(self, deps_module: Any) -> None:
-        """_build_updated_spec preserves environment markers."""
+        """build_updated_spec preserves environment markers."""
         dep = deps_module.DependencyInfo(
             name="tomli",
             source="test",
@@ -761,14 +761,14 @@ class TestBuildUpdatedSpec:
             original_spec="tomli>=2.0.0; python_version<'3.11'",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert "; python_version<'3.11'" in result
         assert ">=2.1.0" in result
 
     @pytest.mark.os_agnostic
     def test_returns_original_when_latest_not_found(self, deps_module: Any) -> None:
-        """_build_updated_spec returns original when PyPI did not answer (no latest version)."""
+        """build_updated_spec returns original when PyPI did not answer (no latest version)."""
         dep = deps_module.DependencyInfo(
             name="unknown",
             source="test",
@@ -779,13 +779,13 @@ class TestBuildUpdatedSpec:
             original_spec="unknown>=1.0.0",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert result == "unknown>=1.0.0"
 
 
 class TestBuildUpdatedSpecExtended:
-    """Additional edge cases for _build_updated_spec."""
+    """Additional edge cases for build_updated_spec."""
 
     @pytest.fixture
     def deps_module(self) -> Any:
@@ -796,7 +796,7 @@ class TestBuildUpdatedSpecExtended:
 
     @pytest.mark.os_agnostic
     def test_preserves_extras(self, deps_module: Any) -> None:
-        """_build_updated_spec preserves extras bracket notation."""
+        """build_updated_spec preserves extras bracket notation."""
         dep = deps_module.DependencyInfo(
             name="pkg",
             source="test",
@@ -807,14 +807,14 @@ class TestBuildUpdatedSpecExtended:
             original_spec="pkg[extra]>=1.0",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert "[extra]" in result
         assert ">=2.0" in result
 
     @pytest.mark.os_agnostic
     def test_adds_constraint_to_bare_name(self, deps_module: Any) -> None:
-        """_build_updated_spec adds >=latest to a bare package name."""
+        """build_updated_spec adds >=latest to a bare package name."""
         dep = deps_module.DependencyInfo(
             name="mypackage",
             source="test",
@@ -825,14 +825,14 @@ class TestBuildUpdatedSpecExtended:
             original_spec="mypackage",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert "mypackage" in result
         assert ">=2.0" in result
 
     @pytest.mark.os_agnostic
     def test_double_equals(self, deps_module: Any) -> None:
-        """_build_updated_spec updates == constraints."""
+        """build_updated_spec updates == constraints."""
         dep = deps_module.DependencyInfo(
             name="pkg",
             source="test",
@@ -843,13 +843,13 @@ class TestBuildUpdatedSpecExtended:
             original_spec="pkg==1.0",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert "==2.0" in result
 
     @pytest.mark.os_agnostic
     def test_tilde_equals(self, deps_module: Any) -> None:
-        """_build_updated_spec updates ~= constraints."""
+        """build_updated_spec updates ~= constraints."""
         dep = deps_module.DependencyInfo(
             name="pkg",
             source="test",
@@ -860,7 +860,7 @@ class TestBuildUpdatedSpecExtended:
             original_spec="pkg~=1.4",
         )
 
-        result = deps_module._build_updated_spec(dep)
+        result = deps_module.build_updated_spec(dep)
 
         assert "~=2.0" in result
 
@@ -1009,7 +1009,7 @@ class TestPrintInstallReport:
 
 
 class TestExtractDependenciesFromList:
-    """Tests for _extract_dependencies_from_list function."""
+    """Tests for extract_dependencies_from_list function."""
 
     @pytest.fixture
     def deps_module(self) -> Any:
@@ -1023,7 +1023,7 @@ class TestExtractDependenciesFromList:
         """Up-to-date when latest equals minimum."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "1.0.0")  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
+        results = deps_module.extract_dependencies_from_list(["pkg>=1.0.0"], "test")
 
         assert len(results) == 1
         assert results[0].status == "up-to-date"
@@ -1033,7 +1033,7 @@ class TestExtractDependenciesFromList:
         """Outdated when latest exceeds minimum."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "2.0.0")  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
+        results = deps_module.extract_dependencies_from_list(["pkg>=1.0.0"], "test")
 
         assert results[0].status == "outdated"
 
@@ -1042,7 +1042,7 @@ class TestExtractDependenciesFromList:
         """Error status when fetch returns None."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: None)  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["pkg>=1.0.0"], "test")
+        results = deps_module.extract_dependencies_from_list(["pkg>=1.0.0"], "test")
 
         assert results[0].status == "error"
         assert results[0].latest_version is None
@@ -1053,7 +1053,7 @@ class TestExtractDependenciesFromList:
         """Unknown status for bare package name without constraint."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "1.0.0")  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["mypackage"], "test")
+        results = deps_module.extract_dependencies_from_list(["mypackage"], "test")
 
         assert results[0].status == "unknown"
 
@@ -1062,7 +1062,7 @@ class TestExtractDependenciesFromList:
         """Empty strings in the dependency list are skipped."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "1.0.0")  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["", "pkg>=1.0.0"], "test")
+        results = deps_module.extract_dependencies_from_list(["", "pkg>=1.0.0"], "test")
 
         assert len(results) == 1
 
@@ -1070,9 +1070,9 @@ class TestExtractDependenciesFromList:
     def test_upper_bound_pinned(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Pinned when latest exceeds upper bound and no version in range."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "9.0.0")  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(deps_module, "_fetch_latest_version_within", lambda _name, _bound: None)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(deps_module, "fetch_latest_version_within", lambda _name, _bound: None)  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
+        results = deps_module.extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
 
         assert results[0].status == "pinned"
 
@@ -1080,9 +1080,9 @@ class TestExtractDependenciesFromList:
     def test_upper_bound_outdated_within_range(self, deps_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Outdated when a newer version exists within the allowed range."""
         monkeypatch.setattr(deps_module, "fetch_latest_version", lambda _name: "9.0.0")  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(deps_module, "_fetch_latest_version_within", lambda _name, _bound: "8.5.0")  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(deps_module, "fetch_latest_version_within", lambda _name, _bound: "8.5.0")  # type: ignore[reportUnknownLambdaType]
 
-        results = deps_module._extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
+        results = deps_module.extract_dependencies_from_list(["pkg>=8.0.0,<9"], "test")
 
         assert results[0].status == "outdated"
 

@@ -53,7 +53,7 @@ _GIT_INHERITED_VARS: frozenset[str] = frozenset(
     }
 )
 
-__all__ = ["find_project_files"]
+__all__ = ["find_project_files", "git_listed_files"]
 
 
 def find_project_files(project_dir: Path, suffix: str) -> list[Path]:
@@ -81,12 +81,12 @@ def find_project_files(project_dir: Path, suffix: str) -> list[Path]:
         ...     [p.name for p in find_project_files(root, ".sh")]
         ['build.sh']
     """
-    listed = _git_listed_files(project_dir, suffix, case_insensitive=os.name == "nt")
+    listed = git_listed_files(project_dir, suffix, case_insensitive=os.name == "nt")
     candidates: Iterable[Path] = listed if listed is not None else project_dir.rglob(f"*{suffix}")
     return sorted({p for p in candidates if _is_project_file(p, project_dir)})
 
 
-def _git_listed_files(project_dir: Path, suffix: str, *, case_insensitive: bool) -> list[Path] | None:
+def git_listed_files(project_dir: Path, suffix: str, *, case_insensitive: bool) -> list[Path] | None:
     """Return git's tracked plus untracked-not-ignored files ending in ``suffix``.
 
     ``-z`` keeps a non-ASCII name unquoted (git quotes it as ``"a\\303\\244.sh"``

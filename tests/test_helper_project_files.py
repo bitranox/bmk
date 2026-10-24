@@ -1,14 +1,12 @@
 """Behaviour tests for the shared lint-stage file discovery in helpers._project_files."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import pytest
 
-from bmk.adapters.stagerunner.helpers._project_files import _git_listed_files, find_project_files
+from bmk.adapters.stagerunner.helpers._project_files import find_project_files, git_listed_files
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -22,7 +20,7 @@ def test_case_insensitive_listing_finds_an_upper_case_suffix(tmp_path: Path, git
     (tmp_path / "a.ps1").write_text("# lower")
     git_project("add", "Build.PS1", "a.ps1")
 
-    listed = _git_listed_files(tmp_path, ".ps1", case_insensitive=True)
+    listed = git_listed_files(tmp_path, ".ps1", case_insensitive=True)
 
     assert listed is not None
     assert sorted(p.name for p in listed) == ["Build.PS1", "a.ps1"]
@@ -35,7 +33,7 @@ def test_case_sensitive_listing_keeps_the_exact_suffix_only(tmp_path: Path, git_
     (tmp_path / "a.ps1").write_text("# lower")
     git_project("add", "Build.PS1", "a.ps1")
 
-    listed = _git_listed_files(tmp_path, ".ps1", case_insensitive=False)
+    listed = git_listed_files(tmp_path, ".ps1", case_insensitive=False)
 
     assert listed is not None
     assert [p.name for p in listed] == ["a.ps1"]

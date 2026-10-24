@@ -80,14 +80,26 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "MAX_PYPI_BYTES",
     "DependencyInfo",
     "DependencyStatus",
     "PendingInstall",
     "SyncOutcome",
+    "build_updated_spec",
     "check_dependencies",
     "compare_versions",
+    "extract_all_dependencies",
+    "extract_dependencies_from_list",
     "fetch_latest_version",
+    "fetch_latest_version_within",
+    "fetch_pypi_data",
+    "find_packages_needing_install",
+    "installs_on",
+    "one_fetch_per_package",
+    "parse_version_constraint",
     "print_report",
+    "read_installed_versions",
+    "run_pip_install",
     "sync_installed_packages",
     "update_dependencies",
 ]
@@ -109,7 +121,7 @@ class DependencyStatus(str, Enum):
 
 # A PyPI package's JSON metadata is at most a few MB; anything past this cap is treated as a
 # broken/hostile response rather than buffered into memory.
-_MAX_PYPI_BYTES = 32 * 1024 * 1024
+MAX_PYPI_BYTES = 32 * 1024 * 1024
 
 # Precompiled regex patterns for version parsing and dependency matching
 _RE_NAME_SEPARATOR = re.compile(r"[-_.]+")
@@ -198,7 +210,7 @@ class _ParsedConstraint(NamedTuple):
     upper_bound: str
 
 
-def _parse_version_constraint(spec: str) -> _ParsedConstraint:
+def parse_version_constraint(spec: str) -> _ParsedConstraint:
     """Parse a dependency spec into its name, constraint, minimum version and upper bound.
 
     Examples:
@@ -261,8 +273,8 @@ _PYPI_TIMEOUT_SECONDS = 10.0
 
 
 @contextmanager
-def _one_fetch_per_package() -> Generator[None]:
-    """Within the block, ``_fetch_pypi_data`` downloads each package at most once, over one connection pool.
+def one_fetch_per_package() -> Generator[None]:
+    """Within the block, ``fetch_pypi_data`` downloads each package at most once, over one connection pool.
 
     A nested block shares the outer one's documents and client, so a caller that checks twice
     (before and after writing ``[tool.uv]``) reads each package once in all.
@@ -280,8 +292,8 @@ def _one_fetch_per_package() -> Generator[None]:
             _PYPI_CLIENT.reset(client_token)
 
 
-def _fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocument | None:
-    """Fetch package data from PyPI, once per document inside ``_one_fetch_per_package``.
+def fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocument | None:
+    """Fetch package data from PyPI, once per document inside ``one_fetch_per_package``.
 
     ``version`` selects that release's own document, whose ``info.requires_dist`` is the one
     release's requirements (the package document carries only the newest release's).
@@ -302,7 +314,7 @@ def _fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocum
 def _download_pypi_data(normalized: str) -> PypiDocument | None:
     """Download one package's JSON document from PyPI, validated into a :class:`PypiDocument`.
 
-    Uses the block's client inside ``_one_fetch_per_package``, else a one-off client, so every
+    Uses the block's client inside ``one_fetch_per_package``, else a one-off client, so every
     download takes the same path.
     """
     client = _PYPI_CLIENT.get()
@@ -328,7 +340,7 @@ def _stream_pypi_document(client: httpx2.Client, normalized: str) -> PypiDocumen
             total = 0
             for chunk in response.iter_bytes():
                 total += len(chunk)
-                if total > _MAX_PYPI_BYTES:
+                if total > MAX_PYPI_BYTES:
                     return None
                 chunks.append(chunk)
         return PypiDocument.model_validate(orjson.loads(b"".join(chunks)))
@@ -341,13 +353,13 @@ def _stream_pypi_document(client: httpx2.Client, normalized: str) -> PypiDocumen
 
 def fetch_latest_version(package_name: str) -> str | None:
     """Fetch the latest version of a package from PyPI."""
-    data = _fetch_pypi_data(package_name)
+    data = fetch_pypi_data(package_name)
     if data is None:
         return None
     return data.info.version if data.info is not None else ""
 
 
-def _fetch_latest_version_within(package_name: str, ceiling: SpecifierSet) -> str | None:
+def fetch_latest_version_within(package_name: str, ceiling: SpecifierSet) -> str | None:
     """The newest final release of ``package_name`` that ``ceiling`` admits, or None.
 
     Args:
@@ -393,7 +405,7 @@ def _judge_against_ceiling(name: str, *, min_version: str, ceiling: SpecifierSet
     Judged on the whole ceiling, so ``<=`` and ``!=`` bound the suggestion as ``<`` does: a floor
     raised past them is a requirement nothing satisfies.
     """
-    in_range = _fetch_latest_version_within(name, ceiling)
+    in_range = fetch_latest_version_within(name, ceiling)
     if in_range is None or _version_gte(min_version, in_range):
         return _CeilingVerdict(status=DependencyStatus.PINNED, proposed=latest, note=f"pinned {ceiling}")
     return _CeilingVerdict(
@@ -446,7 +458,7 @@ def compare_versions(current: str, latest: str) -> DependencyStatus:
     return DependencyStatus.UP_TO_DATE if _version_gte(current, latest) else DependencyStatus.OUTDATED
 
 
-def _extract_dependencies_from_list(
+def extract_dependencies_from_list(
     deps: tuple[str, ...] | list[str],
     source: str,
 ) -> list[DependencyInfo]:
@@ -461,7 +473,7 @@ def _extract_dependencies_from_list(
             continue
 
         original_spec = dep.strip()
-        parsed = _parse_version_constraint(dep)
+        parsed = parse_version_constraint(dep)
         name, min_version, upper_bound = parsed.name, parsed.min_version, parsed.upper_bound
         if not name:
             continue
@@ -509,7 +521,7 @@ def _poetry_pypi_requirements(deps: Iterable[PoetryDepSpec]) -> list[str]:
     return [dep.to_requirement_string() for dep in deps if dep.source_kind is PoetrySourceKind.REGISTRY]
 
 
-def _extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
+def extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
     """Extract all dependencies from PyprojectConfig.
 
     Scans multiple dependency locations in pyproject.toml:
@@ -524,38 +536,38 @@ def _extract_all_dependencies(config: PyprojectConfig) -> list[DependencyInfo]:
     all_deps: list[DependencyInfo] = []
 
     if config.project.dependencies:
-        all_deps.extend(_extract_dependencies_from_list(config.project.dependencies, "[project].dependencies"))
+        all_deps.extend(extract_dependencies_from_list(config.project.dependencies, "[project].dependencies"))
 
     for group_name, group_deps in config.project.optional_dependencies.items():
         source = f"[project.optional-dependencies].{group_name}"
-        all_deps.extend(_extract_dependencies_from_list(group_deps, source))
+        all_deps.extend(extract_dependencies_from_list(group_deps, source))
 
     if config.build_system.requires:
-        all_deps.extend(_extract_dependencies_from_list(config.build_system.requires, "[build-system].requires"))
+        all_deps.extend(extract_dependencies_from_list(config.build_system.requires, "[build-system].requires"))
 
     for group_name, group_deps in config.dependency_groups.groups.items():
         source = f"[dependency-groups].{group_name}"
-        all_deps.extend(_extract_dependencies_from_list(group_deps, source))
+        all_deps.extend(extract_dependencies_from_list(group_deps, source))
 
     for group_name, group_deps in config.tool.pdm.dev_dependencies.items():
         source = f"[tool.pdm.dev-dependencies].{group_name}"
-        all_deps.extend(_extract_dependencies_from_list(group_deps, source))
+        all_deps.extend(extract_dependencies_from_list(group_deps, source))
 
     if config.tool.poetry.dependencies:
         poetry_deps = _poetry_pypi_requirements(config.tool.poetry.dependencies)
-        all_deps.extend(_extract_dependencies_from_list(poetry_deps, "[tool.poetry.dependencies]"))
+        all_deps.extend(extract_dependencies_from_list(poetry_deps, "[tool.poetry.dependencies]"))
 
     if config.tool.poetry.dev_dependencies:
         poetry_dev_deps = _poetry_pypi_requirements(config.tool.poetry.dev_dependencies)
-        all_deps.extend(_extract_dependencies_from_list(poetry_dev_deps, "[tool.poetry.dev-dependencies]"))
+        all_deps.extend(extract_dependencies_from_list(poetry_dev_deps, "[tool.poetry.dev-dependencies]"))
 
     for group_name, group_deps in config.tool.poetry.group_dependencies.items():
         poetry_group_deps = _poetry_pypi_requirements(group_deps)
         source = f"[tool.poetry.group.{group_name}.dependencies]"
-        all_deps.extend(_extract_dependencies_from_list(poetry_group_deps, source))
+        all_deps.extend(extract_dependencies_from_list(poetry_group_deps, source))
 
     if config.tool.uv.dev_dependencies:
-        all_deps.extend(_extract_dependencies_from_list(config.tool.uv.dev_dependencies, "[tool.uv.dev-dependencies]"))
+        all_deps.extend(extract_dependencies_from_list(config.tool.uv.dev_dependencies, "[tool.uv.dev-dependencies]"))
 
     return all_deps
 
@@ -705,7 +717,7 @@ def _specifier_or_none(text: str) -> SpecifierSet | None:
         return None
 
 
-def _installs_on(files: Iterable[PypiFile], python: str | None, *, yanked_ok: bool = False) -> bool:
+def installs_on(files: Iterable[PypiFile], python: str | None, *, yanked_ok: bool = False) -> bool:
     """Whether a release has a file that installs on ``python`` (see :func:`_file_installs_on`).
 
     Every judgement of whether a release installs on a Python comes through here, so the
@@ -779,13 +791,13 @@ def _interpreter_tags(major: int, minor: int) -> frozenset[Tag]:
 
 
 def _installs_on_all(files: tuple[PypiFile, ...], pythons: tuple[str | None, ...], *, yanked_ok: bool = False) -> bool:
-    """Whether a release installs on every one of ``pythons`` (see :func:`_installs_on`)."""
-    return all(_installs_on(files, python, yanked_ok=yanked_ok) for python in pythons)
+    """Whether a release installs on every one of ``pythons`` (see :func:`installs_on`)."""
+    return all(installs_on(files, python, yanked_ok=yanked_ok) for python in pythons)
 
 
 def _releases_of(package_name: str) -> PypiReleases | None:
     """The ``releases`` map of a package's PyPI document, or None when PyPI did not provide one."""
-    data = _fetch_pypi_data(package_name)
+    data = fetch_pypi_data(package_name)
     return data.releases if data is not None else None
 
 
@@ -1155,7 +1167,7 @@ def _is_version(text: str) -> bool:
 
 def _requires_of_release(name: str, version: str) -> list[Requirement] | None:
     """One release's parsed requirements from its own PyPI document, or None when unreadable."""
-    data = _fetch_pypi_data(name, version)
+    data = fetch_pypi_data(name, version)
     if data is None or data.info is None:
         return None
     parsed = (_requirement_or_none(spec) for spec in data.info.requires_dist)
@@ -1240,9 +1252,9 @@ def _python_dropped(releases: PypiReleases, version: str, *, python: str | None,
     Names which Python held a floor back, so the report blames the later Python rather than the oldest.
     """
     files = releases.get(version, ())
-    if not _installs_on(files, python):
+    if not installs_on(files, python):
         return None
-    return next((p for p in also if not _installs_on(files, p)), None)
+    return next((p for p in also if not installs_on(files, p)), None)
 
 
 def _floor_why(
@@ -1371,10 +1383,9 @@ def check_dependencies(pyproject: Path = Path("pyproject.toml")) -> list[Depende
     config = load_pyproject_config(pyproject)
     support = python_support(config)
     policy = release_policy(config)
-    with _one_fetch_per_package():
+    with one_fetch_per_package():
         return [
-            _hold_exact_pin(_hold_to_supported_python(dep, support, policy))
-            for dep in _extract_all_dependencies(config)
+            _hold_exact_pin(_hold_to_supported_python(dep, support, policy)) for dep in extract_all_dependencies(config)
         ]
 
 
@@ -1552,7 +1563,7 @@ def _complete_requirement(requirement: str, updated: str, *, extras: str, latest
     return updated
 
 
-def _build_updated_spec(dep: DependencyInfo) -> str:
+def build_updated_spec(dep: DependencyInfo) -> str:
     """Build an updated dependency specification with the latest version.
 
     Preserves the original format (>=, ==, etc.) and any environment markers.
@@ -1593,7 +1604,7 @@ class _UvPipListEntry(BaseModel):
     version: str
 
 
-def _installed_versions(python: str) -> dict[str, str]:
+def read_installed_versions(python: str) -> dict[str, str]:
     """Map of normalized package name -> installed version in ``python``'s env.
 
     Queries the *target* interpreter rather than importing metadata in-process:
@@ -1678,7 +1689,7 @@ class PendingInstall(NamedTuple):
     marker: str
 
 
-def _find_packages_needing_install(
+def find_packages_needing_install(
     deps: list[DependencyInfo], installed_versions: dict[str, str]
 ) -> list[PendingInstall]:
     """Find packages that need installation or update.
@@ -1754,7 +1765,7 @@ def _complete_block(
     config = load_pyproject_config(pyproject)
     try:
         exempt = own_closure(
-            [d.name for d in _extract_all_dependencies(config)],
+            [d.name for d in extract_all_dependencies(config)],
             own=supply_chain.own_packages,
             requires_of=_requires_of_newest,
             project=config.project.name,
@@ -1844,7 +1855,7 @@ def _demanded_pins(config: PyprojectConfig, cutoff: datetime | None, packages: d
     # leave every pin unjudgeable and frozen. The extras it names are walked as declared anyway.
     own = normalize(config.project.name)
     declared: list[_DeclaredRequirement] = []
-    for dep in _extract_all_dependencies(config):
+    for dep in extract_all_dependencies(config):
         requirement = _requirement_or_none(dep.original_spec)
         if requirement is not None and normalize(requirement.name) != own:
             python = support.oldest_for(dep.original_spec) if support is not None else None
@@ -2056,7 +2067,7 @@ class _Need:
         """The release uv locks for this requirement at ``moment``: the highest one a file uploaded
         before it makes visible and installable on this Python; None when there is none."""
         visible = admitted_releases(self.releases, moment)
-        takeable = [v for v, files in visible.items() if _installs_on(files, self.python, yanked_ok=self.exact)]
+        takeable = [v for v, files in visible.items() if installs_on(files, self.python, yanked_ok=self.exact)]
         return max(takeable, key=Version) if takeable else None
 
     def settles(self, moment: datetime) -> bool:
@@ -2164,7 +2175,7 @@ def _satisfying_releases(
         for version, files in releases.items()
         if _is_version(version)
         and specifier.contains(version, prereleases=bool(specifier.prereleases))
-        and _installs_on(files, python, yanked_ok=exact)
+        and installs_on(files, python, yanked_ok=exact)
     }
 
 
@@ -2213,13 +2224,13 @@ def _say(line: str, out: SupportsWrite | None) -> None:
 
 def _requires_of_newest(package_name: str) -> list[str] | None:
     """The requirement strings of a package's newest release on PyPI; None when PyPI did not answer."""
-    data = _fetch_pypi_data(package_name)
+    data = fetch_pypi_data(package_name)
     if data is None or data.info is None:
         return None
     return list(data.info.requires_dist)
 
 
-def _run_pip_install(needs_install: list[PendingInstall], python: str, *, project_dir: Path | None = None) -> int:
+def run_pip_install(needs_install: list[PendingInstall], python: str, *, project_dir: Path | None = None) -> int:
     """Install packages into ``python``'s environment.
 
     Installs into the *explicitly passed* interpreter (the project's venv), never
@@ -2288,7 +2299,7 @@ def sync_installed_packages(
         The exit code is reported rather than swallowed so a failed install
         cannot be mistaken for a successful sync.
     """
-    needs_install = _find_packages_needing_install(deps, _installed_versions(python))
+    needs_install = find_packages_needing_install(deps, read_installed_versions(python))
 
     if not needs_install:
         if not quiet:
@@ -2305,7 +2316,7 @@ def sync_installed_packages(
 
     if not quiet:
         print("\nInstalling/updating packages...")
-    exit_code = _run_pip_install(needs_install, python, project_dir=project_dir)
+    exit_code = run_pip_install(needs_install, python, project_dir=project_dir)
 
     if exit_code == 0:
         if not quiet:
@@ -2404,7 +2415,7 @@ def _apply_update(
     if not dep.original_spec:
         return False
 
-    new_spec = _build_updated_spec(dep)
+    new_spec = build_updated_spec(dep)
     if new_spec == dep.original_spec:
         return False
     if _specifier_of(new_spec) is None:
@@ -2487,7 +2498,7 @@ def main(
     # instead of reading '(no output captured)', and no notice prints past its report.
     out = locked.out if locked is not None else None
     try:
-        with _one_fetch_per_package():
+        with one_fetch_per_package():
             if update and not dry_run and supply_chain is not None:
                 _complete_block(pyproject, supply_chain, quiet=quiet, out=out)
             deps = check_dependencies(pyproject)

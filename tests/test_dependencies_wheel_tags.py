@@ -5,15 +5,13 @@ release installs only where one of its wheels' interpreter tags runs. The record
 ``https://pypi.org/pypi/<name>/<version>/json`` lists them; the platform is never judged.
 """
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
 
-from bmk.adapters.stagerunner.helpers._dependencies import _installs_on
+from bmk.adapters.stagerunner.helpers._dependencies import installs_on
 from bmk.adapters.stagerunner.helpers._pypi_models import PypiFile
 
 
@@ -65,14 +63,14 @@ _PYWIN32_310 = tuple(
     ("python", "expected"), [("3.14.0", False), ("3.13.0", True), ("3.8.0", True), ("3.7.0", False)]
 )
 def test_a_wheel_only_release_installs_only_where_one_of_its_wheels_runs(python: str, expected: bool) -> None:
-    assert _installs_on(_PYWIN32_310, python) is expected
+    assert installs_on(_PYWIN32_310, python) is expected
 
 
 @pytest.mark.os_agnostic
 def test_an_sdist_beside_the_wheels_installs_wherever_its_requires_python_admits() -> None:
     sdist = PypiFile.model_validate(_record("pywin32-310.tar.gz", "sdist"))
 
-    assert _installs_on((*_PYWIN32_310, sdist), "3.14.0") is True
+    assert installs_on((*_PYWIN32_310, sdist), "3.14.0") is True
 
 
 @pytest.mark.os_agnostic
@@ -102,12 +100,12 @@ def test_an_sdist_beside_the_wheels_installs_wherever_its_requires_python_admits
 def test_a_wheel_installs_where_its_interpreter_tag_runs_whatever_its_platform(
     tag: str, python: str, expected: bool
 ) -> None:
-    assert _installs_on(_wheels("demo", tag), python) is expected
+    assert installs_on(_wheels("demo", tag), python) is expected
 
 
 @pytest.mark.os_agnostic
 def test_a_wheel_still_needs_its_requires_python_to_admit_the_python() -> None:
-    assert _installs_on(_wheels("demo", "py3-none-any", requires_python="<3.14"), "3.14.0") is False
+    assert installs_on(_wheels("demo", "py3-none-any", requires_python="<3.14"), "3.14.0") is False
 
 
 @pytest.mark.os_agnostic
@@ -124,9 +122,9 @@ def test_a_wheel_still_needs_its_requires_python_to_admit_the_python() -> None:
     ],
 )
 def test_a_file_whose_tags_cannot_be_read_installs_by_requires_python_alone(raw: dict[str, Any]) -> None:
-    assert _installs_on((PypiFile.model_validate(raw),), "3.14.0") is True
+    assert installs_on((PypiFile.model_validate(raw),), "3.14.0") is True
 
 
 @pytest.mark.os_agnostic
 def test_no_python_to_judge_admits_any_file() -> None:
-    assert _installs_on(_PYWIN32_310, None) is True
+    assert installs_on(_PYWIN32_310, None) is True
