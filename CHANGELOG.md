@@ -25,7 +25,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **`[tool.poetry]` dependencies keep their conditions and sources.** `markers`, `python` and
   `platform` were dropped, so `pywin32 = { version = "^306", markers = "sys_platform == 'win32'" }`
   was installed on Linux (and failed) and `tomli = { version = "^2", python = "<3.11" }` was
-  demanded on 3.12. They now carry the marker. A `git`, `path` or `url` dependency, or one from a
+  demanded on 3.12. They now carry the marker, and `platform` is read as Poetry reads it
+  (`linux || darwin`, `!=win32`). A `git`, `path` or `url` dependency, or one from a
   named non-PyPI `source`, is no longer looked up on PyPI under its bare name. The list form
   (several constraint tables) gives one requirement per table, extras are kept, a bare version is
   an exact pin (`2.13.0` was read as part of the package name), and `~=` is kept as PEP 440's

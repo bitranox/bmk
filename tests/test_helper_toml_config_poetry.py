@@ -147,7 +147,7 @@ foo = { version = ">=1", markers = "implementation_name == 'cpython' or implemen
 
     assert req == (
         "foo>=1; (implementation_name == 'cpython' or implementation_name == 'pypy')"
-        ' and python_version < "3.11" and sys_platform == "linux"'
+        ' and (python_version < "3.11") and (sys_platform == "linux")'
     )
     pypy_on_312 = {**_env(python="3.12.4"), "implementation_name": "pypy"}
     pypy_on_310 = {**_env(python="3.10.14"), "implementation_name": "pypy"}
@@ -379,3 +379,68 @@ def test_every_emitted_string_parses_as_a_pep508_requirement(tmp_path: Path) -> 
         parsed = Requirement(req)
         if parsed.marker is not None:
             Marker(str(parsed.marker)).evaluate(_env(python="3.12.4"))
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "markers",
+    [
+        '(sys_platform == "win32")or(sys_platform == "cygwin")',
+        'sys_platform == "win32"\tor sys_platform == "cygwin"',
+        'sys_platform == "win32" or sys_platform == "cygwin"',
+    ],
+)
+def test_an_or_in_markers_stays_inside_the_and_whatever_its_spacing(tmp_path: Path, markers: str) -> None:
+    """``and`` binds tighter than ``or``: an unwrapped ``or`` would admit win32 on any Python."""
+    (req,) = _main_requirements(
+        tmp_path,
+        f"""
+[tool.poetry.dependencies]
+x = {{ version = ">=1", markers = '{markers}', python = "<3.11" }}
+""",
+    )
+
+    assert _applies(req, _env(python="3.10.4", platform="win32")) is True
+    assert _applies(req, _env(python="3.12.4", platform="win32")) is False
+    assert _applies(req, _env(python="3.10.4", platform="linux")) is False
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("platform", "admitted", "refused"),
+    [
+        ("linux", ["linux"], ["darwin", "win32"]),
+        ("linux || darwin", ["linux", "darwin"], ["win32"]),
+        ("!=win32", ["linux", "darwin"], ["win32"]),
+        ("!=win32,!=cygwin", ["linux"], ["win32", "cygwin"]),
+    ],
+)
+def test_a_platform_constraint_is_read_like_poetry_reads_it(
+    tmp_path: Path, platform: str, admitted: list[str], refused: list[str]
+) -> None:
+    """Poetry's ``platform`` takes alternatives and negations, not only a bare name."""
+    (req,) = _main_requirements(
+        tmp_path,
+        f"""
+[tool.poetry.dependencies]
+x = {{ version = ">=1", platform = "{platform}" }}
+""",
+    )
+
+    for name in admitted:
+        assert _applies(req, _env(python="3.12.4", platform=name)) is True, (req, name)
+    for name in refused:
+        assert _applies(req, _env(python="3.12.4", platform=name)) is False, (req, name)
+
+
+@pytest.mark.os_agnostic
+def test_a_platform_value_the_grammar_cannot_read_adds_no_condition(tmp_path: Path) -> None:
+    (req,) = _main_requirements(
+        tmp_path,
+        """
+[tool.poetry.dependencies]
+x = { version = ">=1", platform = "linux and darwin" }
+""",
+    )
+
+    assert req == "x>=1"

@@ -295,17 +295,20 @@ _POETRY_OR_RE = re.compile(r"\s*\|\|?\s*")
 _POETRY_PYPI_SOURCE = "pypi"
 
 
-def _poetry_pep440_operator(operator: str) -> str:
-    """The PEP 440 operator for one Poetry clause operator.
+# Poetry operators that differ from PEP 440's: caret and tilde become the ``>=`` floor (see
+# ``PoetryVersionOperator``); no operator, or a single ``=``, is Poetry's exact pin. Every other
+# operator is already spelled the PEP 440 way.
+_POETRY_TO_PEP440_OPERATOR = {
+    PoetryVersionOperator.CARET.value: ">=",
+    PoetryVersionOperator.TILDE.value: ">=",
+    "": "==",
+    "=": "==",
+}
 
-    Caret and tilde become the ``>=`` floor (see ``PoetryVersionOperator``); no operator, or a
-    single ``=``, is Poetry's exact pin.
-    """
-    if operator in {member.value for member in PoetryVersionOperator}:
-        return ">="
-    if operator in {"", "="}:
-        return "=="
-    return operator
+
+def _poetry_pep440_operator(operator: str) -> str:
+    """The PEP 440 operator for one Poetry clause operator."""
+    return _POETRY_TO_PEP440_OPERATOR.get(operator, operator)
 
 
 def _poetry_clauses(text: str) -> tuple[_PoetryClause, ...] | None:
@@ -359,9 +362,30 @@ def _poetry_python_marker(constraint: str) -> str:
     return " or ".join(alternatives)
 
 
-def _parenthesise_disjunction(marker: str) -> str:
-    """Wrap a marker holding ``or`` so joining it with ``and`` keeps its meaning."""
-    return f"({marker})" if " or " in marker else marker
+# One platform comparison of a Poetry ``platform`` constraint: an optional ``==``/``!=`` and a
+# bare ``sys.platform`` name (``linux``, ``win32``, ``darwin``, ``cygwin``, ...).
+_POETRY_PLATFORM_RE = re.compile(r"\s*(?P<op>==|!=)?\s*(?P<name>[A-Za-z0-9_.-]+)\s*")
+
+
+def _poetry_platform_marker(constraint: str) -> str:
+    """A Poetry ``platform`` constraint as a ``sys_platform`` marker; empty when it limits nothing.
+
+    Poetry reads ``platform`` as a constraint, not a bare name: ``linux || darwin`` is either,
+    ``!=win32,!=cygwin`` is neither. Text outside that grammar degrades to no condition, the
+    module's usual fallback for a value it does not understand.
+    """
+    alternatives: list[str] = []
+    texts = _POETRY_OR_RE.split(constraint.strip())
+    for text in texts:
+        comparisons: list[str] = []
+        for item in text.split(","):
+            match = _POETRY_PLATFORM_RE.fullmatch(item)
+            if match is None:
+                return ""
+            comparisons.append(f'sys_platform {match.group("op") or "=="} "{match.group("name")}"')
+        joined = " and ".join(comparisons)
+        alternatives.append(f"({joined})" if len(comparisons) > 1 and len(texts) > 1 else joined)
+    return " or ".join(alternatives)
 
 
 class PoetryDepSpec(BaseModel):
@@ -434,13 +458,18 @@ class PoetryDepSpec(BaseModel):
 
     def _marker(self) -> str:
         """``markers``, ``python`` and ``platform`` joined with ``and``; empty when none applies."""
-        platform = self.platform.strip()
         parts = [
-            self.markers.strip(),
-            _poetry_python_marker(self.python),
-            f'sys_platform == "{platform}"' if platform else "",
+            part
+            for part in (
+                self.markers.strip(),
+                _poetry_python_marker(self.python),
+                _poetry_platform_marker(self.platform),
+            )
+            if part
         ]
-        return " and ".join(_parenthesise_disjunction(part) for part in parts if part)
+        # ``and`` binds tighter than ``or``, and an ``or`` may be spelled with any spacing or none
+        # ("(a)or(b)"), so every part is wrapped whenever there is more than one.
+        return parts[0] if len(parts) == 1 else " and ".join(f"({part})" for part in parts)
 
     def _direct_reference(self) -> str:
         """The URL of a git/url/path dependency, in the form pip and uv accept after ``@``."""
