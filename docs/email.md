@@ -17,7 +17,8 @@ Environment variables use the format: `<PREFIX>___<SECTION>__<KEY>=value`
 - Double underscore (`__`) separates SECTION from KEY
 
 ```bash
-export BMK___EMAIL__SMTP_HOSTS="smtp.gmail.com:587,smtp.backup.com:587"
+# A list is written as a JSON array; a comma-separated string is refused as one host.
+export BMK___EMAIL__SMTP_HOSTS='["smtp.gmail.com:587","smtp.backup.com:587"]'
 export BMK___EMAIL__FROM_ADDRESS="alerts@myapp.com"
 export BMK___EMAIL__SMTP_USERNAME="your-email@gmail.com"
 export BMK___EMAIL__SMTP_PASSWORD="your-app-password"
@@ -37,21 +38,25 @@ timeout = 60.0
 ```
 
 **`.env` File:**
+
+A `.env` line takes `<SECTION>__<KEY>`, without the `BMK___` prefix the shell needs; a prefixed
+line in a `.env` is ignored.
+
 ```bash
 # Email configuration for local testing
-BMK___EMAIL__SMTP_HOSTS=smtp.gmail.com:587
-BMK___EMAIL__FROM_ADDRESS=noreply@example.com
+EMAIL__SMTP_HOSTS=smtp.gmail.com:587
+EMAIL__FROM_ADDRESS=noreply@example.com
 ```
 
 #### Gmail Configuration Example
 
-For Gmail, create an [App Password](https://support.google.com/accounts/answer/185833) instead of using your account password:
+For Gmail, create an [App Password](https://support.google.com/accounts/answer/185833) instead of using your account password (`.env` lines):
 
 ```bash
-BMK___EMAIL__SMTP_HOSTS=smtp.gmail.com:587
-BMK___EMAIL__FROM_ADDRESS=your-email@gmail.com
-BMK___EMAIL__SMTP_USERNAME=your-email@gmail.com
-BMK___EMAIL__SMTP_PASSWORD=your-16-char-app-password
+EMAIL__SMTP_HOSTS=smtp.gmail.com:587
+EMAIL__FROM_ADDRESS=your-email@gmail.com
+EMAIL__SMTP_USERNAME=your-email@gmail.com
+EMAIL__SMTP_PASSWORD=your-16-char-app-password
 ```
 
 #### Send Simple Email
@@ -110,11 +115,11 @@ from bmk.composition import send_email, send_notification
 
 # Configure email
 config = EmailConfig(
-    smtp_hosts=["smtp.gmail.com:587"],
+    smtphosts=["smtp.gmail.com:587"],
     from_address="alerts@myapp.com",
     smtp_username="myuser@gmail.com",
     smtp_password="app-password",
-    timeout=60.0,
+    smtp_timeout=60.0,
 )
 
 # Send simple email
