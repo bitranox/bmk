@@ -32,7 +32,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationEr
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
-from bmk.domain.enums import PythonImplementation
+from bmk.domain.enums import PythonImplementation, PythonVariant
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -48,9 +48,9 @@ __all__ = [
     "ensure_venv_ignored",
     "ensure_venv_typecheck_excluded",
     "is_venv",
-    "latest_installed_patch",
     "lock_project",
     "lock_project_reporting",
+    "patch_uv_builds_on",
     "resolve_project_venv",
     "sync_lock_path",
     "uv_lock_guard_path",
@@ -140,14 +140,13 @@ class _UvPythonEntry(BaseModel):
     """One entry of ``uv python list --output-format json``.
 
     Only the fields this module needs are declared; ``extra="ignore"`` drops the
-    rest (``key``, ``path``, ...). An entry that lacks these or types them oddly
-    fails validation and is skipped, exactly as the previous hand-written guards did.
+    rest (``symlink``, ``url``, ``arch``, ...). An entry that lacks a required field or
+    types one oddly fails validation and is skipped.
 
-    ``implementation`` matters: several implementations (CPython, PyPy, ...) can be
-    installed for the same ``X.Y``. ``uv venv --python <minor>`` provisions CPython, so
-    the patch comparison must only consider CPython - otherwise a PyPy build whose patch
-    happens to exceed the installed CPython's would be reported as "newest", never match
-    the CPython venv, and rebuild it on every run.
+    ``implementation`` and ``variant`` matter: several implementations (CPython, PyPy, ...)
+    and builds (default, free-threaded) can be installed for the same ``X.Y``, and
+    ``uv python install X.Y`` installs only default CPython. A newer download of any other
+    kind is not work for that command, so counting one would run it on every gate.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -156,24 +155,44 @@ class _UvPythonEntry(BaseModel):
     version_parts: _UvVersionParts
     implementation: PythonImplementation
     path: str | None = None
-    variant: str = "default"
+    variant: PythonVariant = PythonVariant.DEFAULT
     key: str = ""
 
     @property
     def is_default_build(self) -> bool:
         """The build ``uv python install X.Y`` installs; older uv lists no ``variant``, only the key."""
-        return self.variant == "default" and "+freethreaded" not in self.key
+        return self.variant is PythonVariant.DEFAULT and "+freethreaded" not in self.key
 
 
-def latest_installed_patch(minor: str, cwd: Path) -> str | None:
-    """Newest installed patch of ``minor`` (e.g. ``3.14`` -> ``3.14.5``), or None.
+def patch_uv_builds_on(minor: str, cwd: Path) -> str | None:
+    """``X.Y.Z`` of the interpreter ``uv venv --python <minor>`` would build on, or None.
 
-    Asks uv rather than reading its store layout. ``uv python find`` is NOT usable for
-    this: it answers with the interpreter for the current CONTEXT (an active venv, or the
-    cwd's own ``.venv``), not the one uv would provision.
+    The newest installed patch is NOT that interpreter: uv picks by its ``python-preference``
+    (env, ``uv.toml`` or ``[tool.uv]``) and then by PATH order, and on 3.14+ it may take a
+    free-threaded build that comes first on PATH. Measured, uv 0.13.0, with uv's own 3.14.8 and a
+    distro 3.14.4 installed: ``managed`` (the default) builds on 3.14.8, ``system`` on 3.14.4. A
+    target uv never builds on deletes the venv on every run, and uv rebuilds it on the same
+    interpreter each time. So uv answers for itself, in the venv's own cwd and environment.
+
+    ``--system`` is what makes ``uv python find`` usable here: without it uv answers with the
+    interpreter of the current CONTEXT (the cwd's own ``.venv``), which ``uv venv`` ignores
+    (measured: a cwd ``.venv`` on 3.14.4 changed ``find``'s answer, never ``uv venv``'s).
     """
-    listing = _run_capture(["uv", "python", "list", "--only-installed", "--output-format", "json"], cwd)
-    return _highest_installed_patch(listing, minor)
+    found = _run_capture(["uv", "python", "find", "--system", "--no-python-downloads", "--show-version", minor], cwd)
+    return _release_of(found, minor)
+
+
+# What `uv python find --show-version` prints: the interpreter's version, a pre-release keeping its
+# suffix (`3.16.0b1`). The suffix is dropped because the caller compares with `sys.version_info[:3]`.
+_FOUND_VERSION = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:(?:a|b|rc)[0-9]+)?")
+
+
+def _release_of(found: str | None, minor: str) -> str | None:
+    """``X.Y.Z`` of a ``--show-version`` answer for ``minor``; None for no answer or one for another minor."""
+    match = _FOUND_VERSION.fullmatch(found.strip()) if found else None
+    if match is None or f"{match[1]}.{match[2]}" != minor:
+        return None
+    return f"{minor}.{match[3]}"
 
 
 def _uv_python_entries(listing: str | None) -> list[_UvPythonEntry] | None:
@@ -201,26 +220,6 @@ def _valid_uv_python_entry(raw_entry: object) -> _UvPythonEntry | None:
         return _UvPythonEntry.model_validate(raw_entry)
     except ValidationError:
         return None
-
-
-def _highest_installed_patch(listing: str | None, minor: str) -> str | None:
-    """Newest CPython patch of ``minor`` in an installed-only listing, as ``X.Y.Z``, or None.
-
-    Compared on the numeric patch, never the version text: as strings ``"3.13.5"`` beats
-    ``"3.13.13"``. Returned as ``X.Y.Z`` from the parts, never uv's text, because the caller
-    compares it with what a venv's interpreter reports (``sys.version_info[:3]``): uv lists a
-    beta as ``3.16.0b1``, which would never equal the venv's ``3.16.0``.
-    """
-    entries = _uv_python_entries(listing)
-    if entries is None:
-        return None
-    patches = [
-        entry.version_parts.patch
-        for entry in entries
-        if entry.implementation is PythonImplementation.CPYTHON
-        and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
-    ]
-    return f"{minor}.{max(patches)}" if patches else None
 
 
 # One line from a venv's own interpreter: its implementation, X.Y.Z, and whether its GIL is disabled
@@ -734,13 +733,16 @@ def _discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, q
     rebuilding. The path does not change, so the pins derived from it stay valid - and this
     runs before ``build_context`` freezes them.
 
+    The target is the interpreter uv itself would build the venv on (:func:`patch_uv_builds_on`),
+    never a pick of bmk's own: a target uv never builds on rebuilds the venv on every run.
+
     Only fires on a real mismatch against a target uv actually reports; if uv cannot answer
     (offline, absent, unexpected output) the existing venv is left exactly as it was. The
     rebuild costs a full re-resolve, so it must never be triggered by a guess.
     """
     if not minor or not is_venv(venv):
         return
-    target = latest_installed_patch(minor, cwd)
+    target = patch_uv_builds_on(minor, cwd)
     current = venv_version(venv)
     if not target or not current or current == target:
         return

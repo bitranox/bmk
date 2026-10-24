@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from bmk.adapters.stagerunner import venv as venv_mod
+from bmk.domain.enums import PythonVariant
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -166,129 +167,102 @@ def test_none_on_unparseable_pyproject(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# latest_installed_patch: the newest patch uv has for that minor
+# patch_uv_builds_on: the patch uv itself would build a venv of that minor on
 #
-# The decision is the pure _highest_installed_patch, tested on every OS with the listing uv
-# prints; only the wiring (which command asks uv) needs the stub uv on PATH.
+# Not the newest installed patch: uv picks by python-preference and PATH order (measured, uv
+# 0.13.0: managed builds 3.14 on its own 3.14.8, system on a distro 3.14.4), and a target uv never
+# builds on rebuilds the venv on every run. The stub uv stands in for uv's answer.
 # ---------------------------------------------------------------------------
 
 
-_UV_JSON = json.dumps(
-    [
-        {
-            "key": "cpython-3.14.5-linux",
-            "version": "3.14.5",
-            "version_parts": {"major": 3, "minor": 14, "patch": 5},
-            "implementation": "cpython",
-        },
-        {
-            "key": "cpython-3.14.0-linux",
-            "version": "3.14.0",
-            "version_parts": {"major": 3, "minor": 14, "patch": 0},
-            "implementation": "cpython",
-        },
-        {
-            "key": "cpython-3.13.13-linux",
-            "version": "3.13.13",
-            "version_parts": {"major": 3, "minor": 13, "patch": 13},
-            "implementation": "cpython",
-        },
-    ]
-)
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_picks_the_highest_for_the_minor() -> None:
-    assert venv_mod._highest_installed_patch(_UV_JSON, "3.14") == "3.14.5"
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_compares_numerically() -> None:
-    """patch 13 must beat patch 5 - a lexical compare would invert it.
-
-    Both patches of ONE minor, 13 listed second: the shared listing's minors each hold patches
-    that sort the same either way, so it could not tell a numeric compare from a lexical one.
-    """
-    listing = json.dumps([_entry("3.13.5", installed=True), _entry("3.13.13", installed=True)])
-    assert venv_mod._highest_installed_patch(listing, "3.13") == "3.13.13"
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_of_a_prerelease_is_in_the_form_the_venv_reports() -> None:
-    """uv lists a beta as ``3.16.0b1``; a venv on it reports ``sys.version_info[:3]``, ``3.16.0``.
-
-    ``_discard_venv_on_wrong_python`` compares the two for equality, so returning uv's text would
-    never match and the venv would be deleted and rebuilt on every run for a pre-release classifier.
-    """
-    listing = json.dumps([{**_entry("3.16.0", installed=True), "version": "3.16.0b1"}])
-    assert venv_mod._highest_installed_patch(listing, "3.16") == "3.16.0"
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_none_for_absent_minor() -> None:
-    assert venv_mod._highest_installed_patch(_UV_JSON, "3.11") is None
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_none_when_uv_gave_no_listing() -> None:
-    """uv missing or erroring must not raise - the caller degrades to uv's own choice."""
-    assert venv_mod._highest_installed_patch(None, "3.14") is None
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_none_on_garbage_json() -> None:
-    assert venv_mod._highest_installed_patch("not json at all", "3.14") is None
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_ignores_non_cpython_even_with_higher_patch() -> None:
-    """Only CPython counts: uv provisions CPython, so a higher-patch PyPy must not win.
-
-    Otherwise the reported "newest" never matches the CPython venv and it rebuilds every run.
-    """
-    mixed = json.dumps(
-        [
-            {
-                "key": "cpython-3.11.15-linux",
-                "version": "3.11.15",
-                "version_parts": {"major": 3, "minor": 11, "patch": 15},
-                "implementation": "cpython",
-            },
-            {
-                "key": "pypy-3.11.20-linux",
-                "version": "3.11.20",
-                "version_parts": {"major": 3, "minor": 11, "patch": 20},
-                "implementation": "pypy",
-            },
-        ]
-    )
-    assert venv_mod._highest_installed_patch(mixed, "3.11") == "3.11.15"
-
-
-@pytest.mark.os_agnostic
-def test_highest_installed_patch_skips_malformed_entry() -> None:
-    """An entry missing version_parts (or typed oddly) is skipped, not fatal."""
-    partial = json.dumps(
-        [
-            {"key": "broken", "version": "3.12.9"},  # no version_parts -> ValidationError -> skipped
-            {
-                "key": "cpython-3.12.7-linux",
-                "version": "3.12.7",
-                "version_parts": {"major": 3, "minor": 12, "patch": 7},
-                "implementation": "cpython",
-            },
-        ]
-    )
-    assert venv_mod._highest_installed_patch(partial, "3.12") == "3.12.7"
+def _venv_reporting(venv: Path, probe_line: str) -> Path:
+    """A venv whose interpreter answers ``probe_line``, plus a marker file only a rebuild removes."""
+    python = venv / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f"#!/bin/sh\necho {probe_line}\n", encoding="utf-8")
+    python.chmod(0o755)
+    (venv / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+    marker = venv / "survives-only-without-a-rebuild"
+    marker.write_text("", encoding="utf-8")
+    return marker
 
 
 @pytest.mark.os_posix
-def test_latest_installed_patch_asks_uv_for_the_installed_pythons(tmp_path: Path, stub_uv: StubUv) -> None:
-    """The listing must be the installed one: a download on offer is not an interpreter yet."""
-    stub_uv.install(installed_json=_UV_JSON)
+def test_a_venv_on_the_interpreter_uv_chooses_is_kept_though_a_newer_patch_is_installed(
+    tmp_path: Path, stub_uv: StubUv
+) -> None:
+    """With ``python-preference = system`` uv builds 3.14 on the distro's 3.14.4, not its own 3.14.8.
 
-    assert venv_mod.latest_installed_patch("3.14", tmp_path) == "3.14.5"
-    assert stub_uv.commands() == [["uv", "python", "list", "--only-installed", "--output-format", "json"]]
+    Measured, uv 0.13.0: ``UV_PYTHON_PREFERENCE=system uv venv --python 3.14`` gave 3.14.4 while a
+    managed 3.14.8 was installed. With the newest installed patch as the target, every run deletes
+    that venv and uv rebuilds it on 3.14.4 again.
+    """
+    venv = tmp_path / ".venv"
+    marker = _venv_reporting(venv, "cpython 3.14.4 0")
+    stub_uv.install(found_version="3.14.4")
+
+    venv_mod._discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+
+    assert marker.exists(), "the venv is on the interpreter uv would rebuild it on"
+
+
+@pytest.mark.os_posix
+def test_a_venv_behind_the_interpreter_uv_chooses_is_rebuilt(tmp_path: Path, stub_uv: StubUv) -> None:
+    """Control for the test above: when uv would build on another patch, the venv does go."""
+    venv = tmp_path / ".venv"
+    marker = _venv_reporting(venv, "cpython 3.14.4 0")
+    stub_uv.install(found_version="3.14.8")
+
+    venv_mod._discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+
+    assert not venv.exists()
+    assert not marker.exists()
+
+
+@pytest.mark.os_posix
+def test_a_venv_is_kept_when_uv_finds_no_interpreter_for_the_minor(tmp_path: Path, stub_uv: StubUv) -> None:
+    """uv exiting 2 with no interpreter is no answer, and no answer never deletes a venv."""
+    venv = tmp_path / ".venv"
+    marker = _venv_reporting(venv, "cpython 3.14.4 0")
+    stub_uv.install(found_version=None)
+
+    venv_mod._discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+
+    assert venv_mod.patch_uv_builds_on("3.14", tmp_path) is None
+    assert marker.exists()
+
+
+@pytest.mark.os_posix
+def test_patch_uv_builds_on_asks_uv_which_interpreter_it_would_use(tmp_path: Path, stub_uv: StubUv) -> None:
+    """``--system`` keeps uv from answering with a venv's interpreter (the cwd's own ``.venv``)."""
+    stub_uv.install(found_version="3.14.4")
+
+    assert venv_mod.patch_uv_builds_on("3.14", tmp_path) == "3.14.4"
+    assert stub_uv.commands() == [
+        ["uv", "python", "find", "--system", "--no-python-downloads", "--show-version", "3.14"]
+    ]
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("minor", "found", "expected"),
+    [
+        ("3.16", "3.16.0b1", "3.16.0"),
+        ("3.14", "3.14.8\n", "3.14.8"),
+        ("3.14", "3.12.9", None),
+        ("3.14", "3.14", None),
+        ("3.14", "not a version", None),
+        ("3.14", None, None),
+    ],
+    ids=["prerelease", "release", "another-minor", "no-patch", "garbage", "nothing-found"],
+)
+def test_uvs_answer_is_in_the_form_the_venv_reports(minor: str, found: str | None, expected: str | None) -> None:
+    """A beta is ``X.Y.Z`` as ``sys.version_info[:3]`` gives it; an answer for no patch of ``minor`` is none.
+
+    ``_discard_venv_on_wrong_python`` compares the target with the venv's ``X.Y.Z`` for equality, so
+    uv's ``3.16.0b1`` would never match and a venv on a pre-release would be rebuilt on every run.
+    """
+    assert venv_mod._release_of(found, minor) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -473,15 +447,6 @@ def test_an_unknown_implementation_never_counts_as_cpython() -> None:
     )
 
     assert venv_mod._listing_needs_install(listing, "3.12") is False
-    assert (
-        venv_mod._highest_installed_patch(
-            json.dumps(
-                [_entry("3.12.15", installed=True), _entry("3.12.99", installed=True, implementation="graalpy")]
-            ),
-            "3.12",
-        )
-        == "3.12.15"
-    )
 
 
 @pytest.mark.os_agnostic
@@ -491,6 +456,19 @@ def test_a_freethreaded_download_without_a_variant_field_is_still_not_the_defaul
     current = {**_entry("3.14.8", installed=True), "key": "cpython-3.14.8-linux-x86_64-gnu"}
 
     assert venv_mod._listing_needs_install(json.dumps([current, freethreaded]), "3.14") is False
+
+
+@pytest.mark.os_agnostic
+def test_an_unknown_variant_is_read_and_never_taken_for_the_default_build() -> None:
+    """A variant spelling bmk has no member for keeps its entry valid, and is not the default build."""
+    debug = {**_entry("3.14.9", installed=False), "variant": "freethreaded+debug"}
+    entry = venv_mod._valid_uv_python_entry(debug)
+
+    assert entry is not None, "an unknown variant must not drop the entry"
+    assert entry.variant is PythonVariant.OTHER
+    assert not entry.is_default_build
+    listing = json.dumps([{**_entry("3.14.8", installed=True), "variant": "default"}, debug])
+    assert venv_mod._listing_needs_install(listing, "3.14") is False
 
 
 @pytest.mark.os_agnostic

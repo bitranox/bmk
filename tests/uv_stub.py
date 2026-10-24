@@ -103,8 +103,8 @@ class StubUv:
         sync_rc: int = 0,
         sync_aftermath: str = ":",
         pip_install_rc: Mapping[str, int] | None = None,
-        installed_json: str = "[]",
         offered_json: str = "[]",
+        found_version: str | None = None,
     ) -> None:
         """Write the stub with these answers.
 
@@ -115,7 +115,7 @@ class StubUv:
             venv_reports: What the created venv's ``bin/python`` prints for any command line, in the
                 shape bmk's interpreter probe reads (``<implementation> <X.Y.Z> <0|1>``, the last
                 field the free-threaded flag); None leaves an empty, unrunnable file there.
-            python_rc: Exit code of every ``uv python ...``; a non-zero ``list`` prints nothing.
+            python_rc: Exit code of every ``uv python ...``; a non-zero one prints nothing.
             lock_rc: Exit code of ``uv lock``; a non-zero one prints :data:`LOCK_MARKER` on stderr.
             lock_upgrade_rc: The same, for a ``uv lock --upgrade`` only, so a failing upgrade can be
                 told from the plain ``uv lock`` bmk runs elsewhere (one reads the cutoff back).
@@ -126,8 +126,9 @@ class StubUv:
             sync_aftermath: Shell run by ``uv sync`` against ``$UV_PROJECT_ENVIRONMENT`` first.
             pip_install_rc: Exit code of ``uv pip install`` per install target (its last word);
                 a target not listed succeeds, a failing one prints :data:`PIP_MARKER` and the target.
-            installed_json: What ``uv python list --only-installed`` prints.
-            offered_json: What any other ``uv python list`` prints.
+            offered_json: What ``uv python list`` prints.
+            found_version: What ``uv python find ... --show-version`` prints; None answers the way uv does
+                when it finds no interpreter for the request (an error on stderr, exit 2).
         """
         self.bin_dir.mkdir(parents=True, exist_ok=True)
         stub = self.bin_dir / "uv"
@@ -143,8 +144,8 @@ class StubUv:
                 sync_rc=sync_rc,
                 sync_aftermath=sync_aftermath,
                 pip_install_rc=pip_install_rc or {},
-                installed_json=installed_json,
                 offered_json=offered_json,
+                found_version=found_version,
             ),
             encoding="utf-8",
         )
@@ -174,11 +175,16 @@ class StubUv:
         sync_rc: int,
         sync_aftermath: str,
         pip_install_rc: Mapping[str, int],
-        installed_json: str,
         offered_json: str,
+        found_version: str | None,
     ) -> str:
         allowed = shlex.quote(str(self._allowed))
         pip_cases = "".join(f"      {shlex.quote(target)}) rc={rc} ;;\n" for target, rc in pip_install_rc.items())
+        found = (
+            f"      echo {shlex.quote(found_version)}\n"
+            if found_version is not None
+            else '      echo "error: No interpreter found" >&2; exit 2\n'
+        )
         create = '    mkdir -p "$last/bin" && echo "home = /usr" > "$last/pyvenv.cfg" && : > "$last/bin/python"\n'
         if venv_reports is not None:
             report = shlex.quote(f"#!/bin/sh\necho {venv_reports}\n")
@@ -204,16 +210,12 @@ class StubUv:
             "  python)\n"
             f"    [ {python_rc} -eq 0 ] || exit {python_rc}\n"
             '    if [ "$2" = list ]; then\n'
-            '      case " $* " in\n'
-            "        *' --only-installed '*) cat <<'STUB_JSON'\n"
-            f"{installed_json}\n"
-            "STUB_JSON\n"
-            "          ;;\n"
-            "        *) cat <<'STUB_JSON'\n"
+            "      cat <<'STUB_JSON'\n"
             f"{offered_json}\n"
             "STUB_JSON\n"
-            "          ;;\n"
-            "      esac\n"
+            "    fi\n"
+            '    if [ "$2" = find ]; then\n'
+            f"{found}"
             "    fi\n"
             "    exit 0 ;;\n"
             f"  lock) rc={lock_rc}\n"
