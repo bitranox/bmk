@@ -1429,6 +1429,97 @@ def test_a_dependency_cycle_settles_on_a_safe_pin(
 
 
 @pytest.mark.os_agnostic
+def test_a_pin_cycle_settles_on_its_strictest_member(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # gadget's back pin (30) reaches 2.0 and helper>=2.0, which sees nothing at the cutoff and
+    # pins helper forward (5); helper 2.0 then needs gadget>=4.0 on 3.11, which pins gadget forward
+    # (3); gadget 4.0 no longer reaches helper, so gadget falls back to 30 and helper loses its pin.
+    # Those three states repeat for good, and bmk wrote no pin, leaving 3.0 half visible on 3.10.
+    pypi.packages["gadget"] = _doc(
+        "4.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(30),
+            "3.0": [*_uploaded(15), *_uploaded(13)],
+            "4.0": _uploaded(3),
+        },
+    )
+    pypi.versions["gadget/2.0"] = ["helper>=2.0"]
+    pypi.packages["helper"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": _uploaded(5)})
+    pypi.versions["helper/2.0"] = ["gadget>=4.0; python_version >= '3.11'"]
+    pyproject = _write_two_pythons(tmp_path, '"gadget>=1.0"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert "did not settle" not in capsys.readouterr().err
+    assert _pins(pyproject) == {"gadget": _pin_of(30)}
+
+
+@pytest.mark.os_agnostic
+def test_a_pin_cycle_keeps_a_members_looser_pin_where_its_strictest_would_cut(
+    tmp_path: Path, pypi: _FakeIndex, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The same three-state cycle, but helper 2.0 is itself cut at the cutoff (15 and 13 days). The
+    # strictest member leaves helper unpinned, yet gadget's pin still reaches helper>=2.0, which
+    # would then lock the cut 2.0; helper keeps the forward pin another member of the cycle held.
+    pypi.packages["gadget"] = _doc(
+        "4.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(30),
+            "3.0": [*_uploaded(15), *_uploaded(13)],
+            "4.0": _uploaded(3),
+        },
+    )
+    pypi.versions["gadget/2.0"] = ["helper>=2.0"]
+    pypi.packages["helper"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": [*_uploaded(15), *_uploaded(13)]})
+    pypi.versions["helper/2.0"] = ["gadget>=4.0; python_version >= '3.11'"]
+    pyproject = _write_two_pythons(tmp_path, '"gadget>=1.0"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert "did not settle" not in capsys.readouterr().err
+    assert _pins(pyproject) == {"gadget": _pin_of(30), "helper": _pin_of(13)}
+
+
+@pytest.mark.os_agnostic
+def test_a_requirement_no_longer_reached_holds_a_pin_back_even_when_it_sees_nothing(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    # gadget's first pin reaches 2.0, which needs helper>=2.0 (only a five-day 2.0) and, on 3.11,
+    # helper>=1.5 (1.5 is cut there at the cutoff). Once tool holds gadget at 1.0 neither is
+    # reached. helper>=1.5 still objects to the cutoff, so helper goes back to 1.0's pin; helper>=2.0
+    # sees nothing at that pin, which a requirement no longer reached may - demanding it lock a
+    # release there would leave the cut 1.5 unpinned while the project's helper>=1.0 settles.
+    pypi.packages["gadget"] = _doc(
+        "3.0",
+        {
+            "1.0": _uploaded(90),
+            "2.0": _uploaded(30),
+            "2.5": [*_uploaded(31, requires_python=">=3.11"), *_uploaded(14.5, requires_python=">=3.11")],
+            "3.0": [*_uploaded(15), *_uploaded(13)],
+        },
+    )
+    pypi.versions["gadget/2.0"] = ["helper>=2.0", "helper>=1.5; python_version >= '3.11'"]
+    pypi.packages["helper"] = _doc(
+        "2.0",
+        {
+            "1.0": _uploaded(90),
+            "1.5": [*_uploaded(15, requires_python=">=3.11"), *_uploaded(13, requires_python=">=3.11")],
+            "2.0": _uploaded(5),
+        },
+    )
+    pypi.packages["tool"] = _doc("1.0", {"1.0": _uploaded(4)})
+    pypi.versions["tool/1.0"] = ["gadget>=1.0; python_version >= '3.11'"]
+    pyproject = _write_two_pythons(tmp_path, '"gadget>=1.0", "tool>=1.0", "helper>=1.0"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(90), "tool": _pin_of(4), "helper": _pin_of(90)}
+
+
+@pytest.mark.os_agnostic
 def test_a_requirement_no_longer_reached_never_admits_a_young_release(tmp_path: Path, pypi: _FakeIndex) -> None:
     # gadget's first pin reaches 2.0, which needs helper>=2.0 (five days old); tool's 3.11
     # requirement then holds gadget at 1.0, which needs no helper. Kept but no longer reached,

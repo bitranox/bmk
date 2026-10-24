@@ -1895,6 +1895,11 @@ class _FloorDemand:
     (:meth:`_Need.tolerates`): one with a young floor would otherwise force a pin past the cutoff
     and let uv lock a young release no reached floor asks for. The price is a pin that may be
     stricter than the final tree strictly needs, never a looser one and never a half-visible release.
+
+    Keeping requirements does not stop every cycle: a forward pin can stop reaching the very
+    requirement that asked for it, and the pins then repeat a run of states for good. A pass depends
+    only on the previous pins and the requirements kept so far, so a state seen before with the same
+    requirements is a cycle, and :meth:`_settle_cycle` ends it on the strictest pin of its members.
     """
 
     # One pass per level of a chain of young packages each reached only through the previous pin.
@@ -1913,29 +1918,87 @@ class _FloorDemand:
         """The pins ``declared`` needs, walked until they settle.
 
         Raises:
-            _UnjudgeableError: When a lookup fails, or the pins never settle (a safety net: with the
-                requirements only growing, they always do).
+            _UnjudgeableError: When a lookup fails, a cycle's strictest pins would still leave a cut
+                release lockable, or the pins neither settle nor cycle within the pass limit.
         """
+        history: list[dict[str, str]] = []
+        seen: dict[tuple[frozenset[tuple[str, str]], frozenset[tuple[str, _NeedKey]]], int] = {}
         for _ in range(self._MAX_PASSES):
-            self._walked = set()
-            self._reached = set()
-            for entry in declared:
-                self.add(entry.requirement, python=entry.python)
-            pins = {
-                name: pin
-                for name, needs in self._needs.items()
-                if (
-                    pin := _package_pin(
-                        [_ReachedNeed(need=need, reached=(name, key) in self._reached) for key, need in needs.items()],
-                        cutoff=self._cutoff,
-                    )
-                )
-                is not None
-            }
+            pins = self._pass(declared)
             if pins == self.pins:
                 return pins
+            state = (frozenset(pins.items()), self._need_keys())
+            if state in seen:
+                return self._settle_cycle(history[seen[state] :], declared)
+            seen[state] = len(history)
+            history.append(pins)
             self.pins = pins
         raise _UnjudgeableError(f"floor pins did not settle within {self._MAX_PASSES} passes")
+
+    def _pass(self, declared: list[_DeclaredRequirement]) -> dict[str, str]:
+        """Walk ``declared`` at the current pins and return the pins that walk asks for."""
+        self._walked = set()
+        self._reached = set()
+        for entry in declared:
+            self.add(entry.requirement, python=entry.python)
+        return {
+            name: pin
+            for name, needs in self._needs.items()
+            if (
+                pin := _package_pin(
+                    [_ReachedNeed(need=need, reached=(name, key) in self._reached) for key, need in needs.items()],
+                    cutoff=self._cutoff,
+                )
+            )
+            is not None
+        }
+
+    def _need_keys(self) -> frozenset[tuple[str, _NeedKey]]:
+        return frozenset((name, key) for name, needs in self._needs.items() for key in needs)
+
+    def _settle_cycle(self, members: list[dict[str, str]], declared: list[_DeclaredRequirement]) -> dict[str, str]:
+        """End a cycle on the strictest pin each package held in any of its ``members`` that is safe.
+
+        Strictest is the earliest moment, and a member that left the package unpinned counts as the
+        cutoff, so a forward pin only some members asked for gives way to a stricter one. Such a mix
+        of members is no pass's own answer, so it is checked instead of re-decided: walked at those
+        pins, no reached requirement may see a cut release it could lock (:meth:`_Need.tolerates` -
+        seeing nothing is allowed, uv then backtracks to an older release, which is the
+        stricter-never-looser price). A package that fails moves to the next looser pin one of the
+        members held, and the walk is checked again; every pin tried is one a member held, so the
+        result is never looser than the cycle itself.
+
+        Raises:
+            _UnjudgeableError: When a package fails even at the loosest pin any member held.
+        """
+        ladders = {
+            name: sorted({member.get(name) for member in members}, key=self._pin_moment)
+            for name in sorted({name for member in members for name in member})
+        }
+        rungs = dict.fromkeys(ladders, 0)
+        while True:
+            settled = {name: pin for name, ladder in ladders.items() if (pin := ladder[rungs[name]]) is not None}
+            self.pins = settled
+            self._pass(declared)
+            failing = self._cut_packages(settled)
+            if not failing:
+                return settled
+            for name in failing:
+                rungs[name] += 1
+                if name not in ladders or rungs[name] == len(ladders[name]):
+                    raise _UnjudgeableError(f"floor pins cycled, and no pin the cycle held is safe for {name}")
+
+    def _cut_packages(self, pins: dict[str, str]) -> list[str]:
+        """The packages whose reached requirements would see a cut release they could lock at ``pins``."""
+        failing = {
+            name
+            for name, key in self._reached
+            if not self._needs[name][key].tolerates(self._pin_moment(pins.get(name)))
+        }
+        return sorted(failing)
+
+    def _pin_moment(self, pin: str | None) -> datetime:
+        return self._cutoff if pin is None else _as_moment(pin)
 
     def add(self, requirement: Requirement, *, python: str | None) -> None:
         name = normalize(requirement.name)
