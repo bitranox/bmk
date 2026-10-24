@@ -377,8 +377,9 @@ def test_venv_version_none_when_absent(tmp_path: Path) -> None:
         ("cpython 3.10.19 0", "3.10"),
         ("pypy 3.11.13 0", "pypy@3.11"),
         ("cpython 3.13.5 1", "3.13t"),
+        ("graalpy 3.11.7 0", "3.11"),
     ],
-    ids=["cpython", "pypy", "free-threaded"],
+    ids=["cpython", "pypy", "free-threaded", "unknown-implementation"],
 )
 def test_the_request_names_the_venvs_kind_of_interpreter(probe: str, uv_request: str) -> None:
     assert venv_mod._python_request(venv_mod._parse_interpreter_probe(probe)) == uv_request
@@ -462,6 +463,25 @@ def test_a_newer_pypy_download_does_not_make_a_cpython_minor_need_an_install() -
     listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.99", installed=False, implementation="pypy")])
 
     assert venv_mod._listing_needs_install(listing, "3.12") is False
+
+
+@pytest.mark.os_agnostic
+def test_an_unknown_implementation_never_counts_as_cpython() -> None:
+    """An implementation bmk has no member for (decoded as OTHER) is never taken for CPython."""
+    listing = json.dumps(
+        [_entry("3.12.15", installed=True), _entry("3.12.99", installed=False, implementation="graalpy")]
+    )
+
+    assert venv_mod._listing_needs_install(listing, "3.12") is False
+    assert (
+        venv_mod._highest_installed_patch(
+            json.dumps(
+                [_entry("3.12.15", installed=True), _entry("3.12.99", installed=True, implementation="graalpy")]
+            ),
+            "3.12",
+        )
+        == "3.12.15"
+    )
 
 
 @pytest.mark.os_agnostic

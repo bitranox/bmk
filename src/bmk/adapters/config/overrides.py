@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import orjson
 from lib_layered_config import Config
@@ -185,7 +185,20 @@ def _refuse_conflicts(dotted_keys: list[str]) -> None:
             raise ValueError(f"conflicting --set overrides: {key} is given a value and {nested} puts a key under it")
 
 
-def nest_overrides(raw_overrides: tuple[str, ...]) -> tuple[dict[str, dict[str, object]], frozenset[str]]:
+class NestedOverrides(NamedTuple):
+    """The ``--set`` values parsed together: what they override, and which keys.
+
+    Attributes:
+        tree: The nested override mapping, section first, ready for ``Config.with_overrides``.
+        dotted_keys: Every dotted key the overrides set, so provenance can name the CLI for
+            exactly those.
+    """
+
+    tree: dict[str, dict[str, object]]
+    dotted_keys: frozenset[str]
+
+
+def nest_overrides(raw_overrides: tuple[str, ...]) -> NestedOverrides:
     """Parse ``--set`` values into the nested mapping they override, checking them together.
 
     Args:
@@ -200,8 +213,8 @@ def nest_overrides(raw_overrides: tuple[str, ...]) -> tuple[dict[str, dict[str, 
             value, another puts a key under it).
 
     Example:
-        >>> tree, keys = nest_overrides(("a.b=1", "a.c.d=x"))
-        >>> tree, sorted(keys)
+        >>> nested = nest_overrides(("a.b=1", "a.c.d=x"))
+        >>> nested.tree, sorted(nested.dotted_keys)
         ({'a': {'b': 1, 'c': {'d': 'x'}}}, ['a.b', 'a.c.d'])
     """
     parsed = [parse_override(raw) for raw in raw_overrides]
@@ -210,7 +223,7 @@ def nest_overrides(raw_overrides: tuple[str, ...]) -> tuple[dict[str, dict[str, 
     overrides: dict[str, dict[str, object]] = {}
     for override in parsed:
         _nest_override(overrides, override)
-    return overrides, frozenset(dotted_keys)
+    return NestedOverrides(tree=overrides, dotted_keys=frozenset(dotted_keys))
 
 
 def _dotted_keys(data: Mapping[str, object], prefix: str = "") -> Iterator[str]:
@@ -291,21 +304,22 @@ def apply_overrides(config: Config, raw_overrides: tuple[str, ...]) -> Config:
     if not raw_overrides:
         return config
 
-    overrides, overridden = nest_overrides(raw_overrides)
+    nested = nest_overrides(raw_overrides)
 
     # Rebuilt rather than returned straight from with_overrides, which shares
     # the original provenance map by design: the merged value is the CLI's and
     # its recorded origin still named the file it replaced, so `config` sent a
     # reader to a file holding the old value.
-    merged = config.with_overrides(overrides)
+    merged = config.with_overrides(nested.tree)
     merged_as_dict = merged.as_dict()
-    return Config(merged_as_dict, _provenance_naming_the_cli(config, merged_as_dict, overridden))
+    return Config(merged_as_dict, _provenance_naming_the_cli(config, merged_as_dict, nested.dotted_keys))
 
 
 __all__ = [
     "CLI_LAYER",
     "CoercedValue",
     "ConfigOverride",
+    "NestedOverrides",
     "apply_overrides",
     "coerce_value",
     "nest_overrides",

@@ -412,8 +412,7 @@ def _permission_overrides(cli_ctx: CLIContext) -> Mapping[str, object] | None:
             (``--set lib_layered_config.default_permissions=5`` or ``=null``); one stderr
             line names it, exit 78, nothing is deployed.
     """
-    tree, _ = nest_overrides(cli_ctx.set_overrides)
-    section = tree.get(_LAYERED_CONFIG_SECTION, {})
+    section = nest_overrides(cli_ctx.set_overrides).tree.get(_LAYERED_CONFIG_SECTION, {})
     if _PERMISSIONS_KEY not in section:
         return None
     value = section[_PERMISSIONS_KEY]

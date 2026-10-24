@@ -188,12 +188,46 @@ class PyrightPlatform(str, Enum):
     DARWIN = "Darwin"
 
 
+class PythonImplementation(str, Enum):
+    """A Python implementation, as ``sys.implementation.name`` and uv's ``implementation`` spell it.
+
+    Several implementations can be installed for the same ``X.Y``, and uv provisions default
+    CPython for a bare ``X.Y`` request, so which one a venv or an installed interpreter is decides
+    both the patch comparison and the request that rebuilds a venv.
+
+    Only the implementations bmk tells apart are members. Any other name (``graalpy``, a spelling
+    in another case) decodes to ``OTHER`` rather than failing: an unknown implementation is still a
+    valid interpreter, merely neither CPython nor PyPy.
+
+    Attributes:
+        CPYTHON: The reference implementation, the one ``uv python install X.Y`` installs.
+        PYPY: PyPy; uv rebuilds one only when asked for ``pypy@X.Y``.
+        OTHER: Any implementation not listed above.
+
+    Example:
+        >>> PythonImplementation("pypy")
+        <PythonImplementation.PYPY: 'pypy'>
+        >>> PythonImplementation("graalpy")
+        <PythonImplementation.OTHER: 'other'>
+    """
+
+    CPYTHON = "cpython"
+    PYPY = "pypy"
+    OTHER = "other"
+
+    @classmethod
+    def _missing_(cls, value: object) -> PythonImplementation:
+        """Every name that is no member's value is ``OTHER``, so decoding never fails."""
+        return cls.OTHER
+
+
 __all__ = [
     "BumpPart",
     "DeployTarget",
     "OutputFormat",
     "PipelineResult",
     "PyrightPlatform",
+    "PythonImplementation",
     "ToolOutputFormat",
     "VenvProvisioning",
 ]
