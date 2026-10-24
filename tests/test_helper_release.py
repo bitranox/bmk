@@ -1,7 +1,5 @@
 """Behaviour tests for makescripts._release: version validation, default remote, command existence."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import subprocess
@@ -9,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from bmk.adapters.stagerunner.helpers._release import _cmd_exists, _get_default_remote
+from bmk.adapters.stagerunner.helpers._release import cmd_exists, get_default_remote
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 if TYPE_CHECKING:
@@ -24,7 +22,7 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# _get_default_remote
+# get_default_remote
 # ---------------------------------------------------------------------------
 
 
@@ -38,7 +36,7 @@ def test_get_default_remote_returns_origin_when_no_tool_section() -> None:
     """Falls back to 'origin' when [tool] section is absent."""
     config = _make_config({"project": {"name": "test", "version": "1.0.0"}})
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -51,7 +49,7 @@ def test_get_default_remote_returns_origin_when_no_git_section() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -64,7 +62,7 @@ def test_get_default_remote_returns_configured_remote() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "upstream"
+    assert get_default_remote(config) == "upstream"
 
 
 @pytest.mark.os_agnostic
@@ -77,7 +75,7 @@ def test_get_default_remote_handles_non_dict_tool_value() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -90,7 +88,7 @@ def test_get_default_remote_handles_non_dict_git_value() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -103,7 +101,7 @@ def test_get_default_remote_handles_non_string_remote_value() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -116,7 +114,7 @@ def test_get_default_remote_handles_empty_string_remote() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -129,7 +127,7 @@ def test_get_default_remote_handles_whitespace_only_remote() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "origin"
+    assert get_default_remote(config) == "origin"
 
 
 @pytest.mark.os_agnostic
@@ -142,33 +140,33 @@ def test_get_default_remote_strips_whitespace_from_remote() -> None:
         }
     )
 
-    assert _get_default_remote(config) == "upstream"
+    assert get_default_remote(config) == "upstream"
 
 
 # ---------------------------------------------------------------------------
-# _cmd_exists
+# cmd_exists
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_cmd_exists_returns_true_for_python3() -> None:
     """python3 is always available in the test environment."""
-    assert _cmd_exists("python3") is True
+    assert cmd_exists("python3") is True
 
 
 @pytest.mark.os_agnostic
 def test_cmd_exists_returns_false_for_nonexistent_command() -> None:
     """A clearly nonexistent command returns False."""
-    assert _cmd_exists("nonexistent_command_xyz_12345") is False
+    assert cmd_exists("nonexistent_command_xyz_12345") is False
 
 
 # ---------------------------------------------------------------------------
-# _ensure_clean
+# ensure_clean
 # ---------------------------------------------------------------------------
 
 
 class TestEnsureClean:
-    """Tests for _ensure_clean function."""
+    """Tests for ensure_clean function."""
 
     @pytest.fixture
     def release_module(self) -> Any:
@@ -181,9 +179,9 @@ class TestEnsureClean:
     def test_passes_on_clean_tree(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """No error when both diff commands return 0."""
         clean: subprocess.CompletedProcess[str] = subprocess.CompletedProcess([], 0)
-        monkeypatch.setattr(release_module, "_run", lambda _args, **_kw: clean)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "run", lambda _args, **_kw: clean)  # type: ignore[reportUnknownLambdaType]
 
-        release_module._ensure_clean()  # Should not raise
+        release_module.ensure_clean()  # Should not raise
 
     @pytest.mark.os_agnostic
     def test_raises_on_unstaged_changes(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,10 +192,10 @@ class TestEnsureClean:
                 subprocess.CompletedProcess[str]([], 0),  # staged = clean
             ]
         )
-        monkeypatch.setattr(release_module, "_run", lambda _args, **_kw: next(results))  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "run", lambda _args, **_kw: next(results))  # type: ignore[reportUnknownLambdaType]
 
         with pytest.raises(SystemExit):
-            release_module._ensure_clean()
+            release_module.ensure_clean()
 
     @pytest.mark.os_agnostic
     def test_raises_on_staged_changes(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,10 +206,10 @@ class TestEnsureClean:
                 subprocess.CompletedProcess[str]([], 1),  # staged = dirty
             ]
         )
-        monkeypatch.setattr(release_module, "_run", lambda _args, **_kw: next(results))  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "run", lambda _args, **_kw: next(results))  # type: ignore[reportUnknownLambdaType]
 
         with pytest.raises(SystemExit):
-            release_module._ensure_clean()
+            release_module.ensure_clean()
 
 
 # ---------------------------------------------------------------------------
@@ -237,23 +235,23 @@ class TestReleaseOrchestrator:
         config = _make_config({"project": {"name": "test", "version": "1.2.3"}})
 
         monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(release_module, "_ensure_clean", lambda: None)
-        monkeypatch.setattr(release_module, "_git_branch", lambda: "main")
-        monkeypatch.setattr(release_module, "_git_push", lambda remote, ref: calls["push"].append((remote, ref)))  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(release_module, "_git_tag_exists", lambda _tag: False)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "ensure_clean", lambda: None)
+        monkeypatch.setattr(release_module, "git_branch", lambda: "main")
+        monkeypatch.setattr(release_module, "git_push", lambda remote, ref: calls["push"].append((remote, ref)))  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "git_tag_exists", lambda _tag: False)  # type: ignore[reportUnknownLambdaType]
         monkeypatch.setattr(
             release_module,
-            "_git_create_annotated_tag",
+            "git_create_annotated_tag",
             lambda tag, _msg: calls["tag_create"].append(tag),  # type: ignore[reportUnknownLambdaType]
         )
-        monkeypatch.setattr(release_module, "_gh_available", lambda: True)
-        monkeypatch.setattr(release_module, "_gh_release_exists", lambda _tag: False)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "gh_available", lambda: True)
+        monkeypatch.setattr(release_module, "gh_release_exists", lambda _tag: False)  # type: ignore[reportUnknownLambdaType]
         monkeypatch.setattr(
             release_module,
-            "_gh_release_create",
+            "gh_release_create",
             lambda tag, _title, _body: calls["gh_create"].append(tag),  # type: ignore[reportUnknownLambdaType]
         )
-        monkeypatch.setattr(release_module, "_gh_release_edit", lambda tag, _title, _body: calls["gh_edit"].append(tag))  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "gh_release_edit", lambda tag, _title, _body: calls["gh_edit"].append(tag))  # type: ignore[reportUnknownLambdaType]
 
         return calls
 
@@ -325,7 +323,7 @@ class TestReleaseOrchestrator:
         tmp_path: Path,
     ) -> None:
         """Skips tag creation when tag already exists locally."""
-        monkeypatch.setattr(release_module, "_git_tag_exists", lambda _tag: True)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "git_tag_exists", lambda _tag: True)  # type: ignore[reportUnknownLambdaType]
 
         result = release_module.release(project_dir=tmp_path)
 
@@ -351,7 +349,7 @@ class TestReleaseOrchestrator:
         tmp_path: Path,
     ) -> None:
         """Edits existing GitHub release instead of creating new one."""
-        monkeypatch.setattr(release_module, "_gh_release_exists", lambda _tag: True)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(release_module, "gh_release_exists", lambda _tag: True)  # type: ignore[reportUnknownLambdaType]
 
         result = release_module.release(project_dir=tmp_path)
 
@@ -369,7 +367,7 @@ class TestReleaseOrchestrator:
         capsys: CaptureFixture[str],
     ) -> None:
         """Prints message and continues when gh CLI is unavailable."""
-        monkeypatch.setattr(release_module, "_gh_available", lambda: False)
+        monkeypatch.setattr(release_module, "gh_available", lambda: False)
 
         result = release_module.release(project_dir=tmp_path)
 

@@ -198,7 +198,7 @@ def test_a_test_all_cell_never_installs_a_python(tmp_path: Path, stub_uv: StubUv
         offered_json=_NEWER_3_12_ON_OFFER,
     )
 
-    result = _matrix._run_cell(tmp_path, "3.12", quiet=True)
+    result = _matrix.run_version_cell(tmp_path, "3.12", quiet=True)
 
     assert result.status is CellStatus.ERROR
     cmds = stub_uv.commands()

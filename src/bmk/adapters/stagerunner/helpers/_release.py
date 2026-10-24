@@ -35,7 +35,23 @@ from bmk.domain.version import version_problem
 if TYPE_CHECKING:
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
-__all__ = ["main", "release", "shipped_skill_needs_a_bump"]
+__all__ = [
+    "cmd_exists",
+    "ensure_clean",
+    "get_default_remote",
+    "gh_available",
+    "gh_release_create",
+    "gh_release_edit",
+    "gh_release_exists",
+    "git_branch",
+    "git_create_annotated_tag",
+    "git_push",
+    "git_tag_exists",
+    "main",
+    "release",
+    "run",
+    "shipped_skill_needs_a_bump",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -43,69 +59,69 @@ __all__ = ["main", "release", "shipped_skill_needs_a_bump"]
 # ---------------------------------------------------------------------------
 
 
-def _run(args: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run(args: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
     """Run a subprocess command."""
     return subprocess.run(args, check=check, capture_output=capture, text=True)
 
 
-def _cmd_exists(name: str) -> bool:
+def cmd_exists(name: str) -> bool:
     """Check if an executable exists on PATH."""
     return shutil.which(name) is not None
 
 
-def _git_branch() -> str:
+def git_branch() -> str:
     """Get the current git branch name."""
-    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture=True)
+    result = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture=True)
     return result.stdout.strip()
 
 
-def _git_tag_exists(name: str) -> bool:
+def git_tag_exists(name: str) -> bool:
     """Check if a git tag exists locally."""
-    result = _run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{name}"], check=False, capture=True)
+    result = run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{name}"], check=False, capture=True)
     return result.returncode == 0
 
 
-def _git_create_annotated_tag(name: str, message: str) -> None:
+def git_create_annotated_tag(name: str, message: str) -> None:
     """Create an annotated git tag."""
-    _run(["git", "tag", "-a", name, "-m", message])
+    run(["git", "tag", "-a", name, "-m", message])
 
 
-def _git_push(remote: str, ref: str) -> None:
+def git_push(remote: str, ref: str) -> None:
     """Push a ref to a remote repository."""
-    _run(["git", "push", remote, ref])
+    run(["git", "push", remote, ref])
 
 
-def _gh_available() -> bool:
+def gh_available() -> bool:
     """Check if the GitHub CLI (gh) is available."""
-    return _cmd_exists("gh")
+    return cmd_exists("gh")
 
 
-def _gh_release_exists(tag: str) -> bool:
+def gh_release_exists(tag: str) -> bool:
     """Check if a GitHub release exists for the given tag."""
-    result = _run(["gh", "release", "view", tag], check=False, capture=True)
+    result = run(["gh", "release", "view", tag], check=False, capture=True)
     return result.returncode == 0
 
 
-def _gh_release_create(tag: str, title: str, body: str) -> None:
+def gh_release_create(tag: str, title: str, body: str) -> None:
     """Create a new GitHub release."""
-    _run(["gh", "release", "create", tag, "-t", title, "-n", body], check=False)
+    run(["gh", "release", "create", tag, "-t", title, "-n", body], check=False)
 
 
-def _gh_release_edit(tag: str, title: str, body: str) -> None:
+def gh_release_edit(tag: str, title: str, body: str) -> None:
     """Edit an existing GitHub release."""
-    _run(["gh", "release", "edit", tag, "-t", title, "-n", body], check=False)
+    run(["gh", "release", "edit", tag, "-t", title, "-n", body], check=False)
 
 
-def _ensure_clean() -> None:
+def ensure_clean() -> None:
     """Ensure the git working tree has no uncommitted changes."""
-    unstaged = _run(["git", "diff", "--quiet"], check=False, capture=True)
-    staged = _run(["git", "diff", "--cached", "--quiet"], check=False, capture=True)
+    unstaged = run(["git", "diff", "--quiet"], check=False, capture=True)
+    staged = run(["git", "diff", "--cached", "--quiet"], check=False, capture=True)
     if unstaged.returncode != 0 or staged.returncode != 0:
         print("[release] Working tree not clean. Commit or stash changes first.", file=sys.stderr)
         raise SystemExit(1)
 
 
-def _get_default_remote(config: PyprojectConfig) -> str:
+def get_default_remote(config: PyprojectConfig) -> str:
     """Read default git remote from pyproject.toml [tool.git].default-remote.
 
     Falls back to "origin" if not configured (absent, blank, or not a string).
@@ -231,34 +247,34 @@ def release(*, project_dir: Path, remote: str | None = None) -> int:
         return 1
 
     if remote is None:
-        remote = _get_default_remote(config)
+        remote = get_default_remote(config)
 
     print(f"[release] Target version {version}")
     print(f"[release] Remote: {remote}")
 
-    _ensure_clean()
+    ensure_clean()
 
     # Push branch
-    branch = _git_branch()
+    branch = git_branch()
     print(f"[release] Pushing branch {branch} to {remote}")
-    _git_push(remote, branch)
+    git_push(remote, branch)
 
     # Tag and push
     tag = f"v{version}"
-    if _git_tag_exists(tag):
+    if git_tag_exists(tag):
         print(f"[release] Tag {tag} already exists locally")
     else:
-        _git_create_annotated_tag(tag, f"Release {tag}")
+        git_create_annotated_tag(tag, f"Release {tag}")
     print(f"[release] Pushing tag {tag}")
-    _git_push(remote, tag)
+    git_push(remote, tag)
 
     # Create or edit GitHub release
-    if _gh_available():
-        if _gh_release_exists(tag):
-            _gh_release_edit(tag, tag, f"Release {tag}")
+    if gh_available():
+        if gh_release_exists(tag):
+            gh_release_edit(tag, tag, f"Release {tag}")
         else:
             print(f"[release] Creating GitHub release {tag}")
-            _gh_release_create(tag, tag, f"Release {tag}")
+            gh_release_create(tag, tag, f"Release {tag}")
     else:
         print("[release] gh CLI not found; skipping GitHub release creation")
 

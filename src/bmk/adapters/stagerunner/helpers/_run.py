@@ -36,7 +36,11 @@ from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 if TYPE_CHECKING:
     from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
-__all__ = ["run_cli"]
+__all__ = [
+    "extract_dependency_names",
+    "find_local_dependencies",
+    "run_cli",
+]
 
 _RE_DEPENDENCY_NAME = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9._]*)")
 
@@ -46,7 +50,7 @@ _RE_DEPENDENCY_NAME = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9._]*)")
 # ---------------------------------------------------------------------------
 
 
-def _extract_dependency_names(config: PyprojectConfig) -> list[str]:
+def extract_dependency_names(config: PyprojectConfig) -> list[str]:
     """Extract normalized dependency package names from config.
 
     Returns names with hyphens replaced by underscores for filesystem matching.
@@ -73,7 +77,7 @@ class LocalDependency(NamedTuple):
     path: str
 
 
-def _find_local_dependencies(project_dir: Path, config: PyprojectConfig) -> list[LocalDependency]:
+def find_local_dependencies(project_dir: Path, config: PyprojectConfig) -> list[LocalDependency]:
     """Find sibling directories that match project dependencies.
 
     Scans the parent directory for subdirectories that match dependency names
@@ -87,7 +91,7 @@ def _find_local_dependencies(project_dir: Path, config: PyprojectConfig) -> list
         The local dependencies, in the order the project declares them.
     """
     parent_dir = project_dir.parent
-    dependency_names = _extract_dependency_names(config)
+    dependency_names = extract_dependency_names(config)
 
     local_deps: list[LocalDependency] = []
     for dep_name in dependency_names:
@@ -135,7 +139,7 @@ def run_cli(*, project_dir: Path, args: list[str]) -> int:
 
     command = ["uvx", "--from", str(project_dir), "--no-cache"]
 
-    for dependency in _find_local_dependencies(project_dir, config):
+    for dependency in find_local_dependencies(project_dir, config):
         command.extend(["--with", dependency.path])
 
     command.extend([project_name, *forwarded])

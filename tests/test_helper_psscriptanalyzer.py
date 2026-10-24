@@ -1,7 +1,5 @@
 """Behaviour tests for makescripts._psscriptanalyzer: config reading, pwsh detection, file discovery, and orchestration."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import contextlib
@@ -16,13 +14,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
 from bmk.adapters.stagerunner.helpers._psscriptanalyzer import (
-    _exclude_rule_fragment,
-    _ps_single_quote,
     check_pwsh,
     ensure_psscriptanalyzer,
+    exclude_rule_fragment,
     find_ps1_files,
     get_excluded_rules,
     main,
+    ps_single_quote,
     run_psscriptanalyzer,
 )
 from bmk.adapters.stagerunner.helpers._toml_config import PSScriptAnalyzerConfig
@@ -354,17 +352,17 @@ def test_run_psscriptanalyzer_verbose_prints_command(tmp_path: Path, capsys: pyt
 @pytest.mark.os_agnostic
 def test_ps_single_quote_doubles_embedded_quotes() -> None:
     """A single quote is escaped by doubling, the only escape in a PS single-quoted string."""
-    assert _ps_single_quote("plain") == "'plain'"
-    assert _ps_single_quote("o'brien") == "'o''brien'"
-    assert _ps_single_quote("a'; rm -rf /; '") == "'a''; rm -rf /; '''"
+    assert ps_single_quote("plain") == "'plain'"
+    assert ps_single_quote("o'brien") == "'o''brien'"
+    assert ps_single_quote("a'; rm -rf /; '") == "'a''; rm -rf /; '''"
 
 
 @pytest.mark.os_agnostic
 def test_exclude_rule_fragment_quotes_each_element_or_omits_when_empty() -> None:
     """Rules become a quoted PS array; no rules means no -ExcludeRule flag at all."""
-    assert _exclude_rule_fragment(()) == ""
-    assert _exclude_rule_fragment(("PSAvoidUsingWriteHost",)) == " -ExcludeRule 'PSAvoidUsingWriteHost'"
-    assert _exclude_rule_fragment(("PSFoo", "PSBar")) == " -ExcludeRule 'PSFoo','PSBar'"
+    assert exclude_rule_fragment(()) == ""
+    assert exclude_rule_fragment(("PSAvoidUsingWriteHost",)) == " -ExcludeRule 'PSAvoidUsingWriteHost'"
+    assert exclude_rule_fragment(("PSFoo", "PSBar")) == " -ExcludeRule 'PSFoo','PSBar'"
 
 
 @pytest.mark.os_agnostic
@@ -376,7 +374,7 @@ def test_run_psscriptanalyzer_escapes_a_file_path_with_a_quote(tmp_path: Path) -
     ) as mock_run:
         run_psscriptanalyzer(pwsh="/usr/bin/pwsh", files=[nasty], exclude_rules=("PSAvoidUsingWriteHost",))
     command = mock_run.call_args[0][0][3]
-    assert _ps_single_quote(str(nasty)) in command
+    assert ps_single_quote(str(nasty)) in command
     assert "o''brien" in command  # the quote was doubled, not left raw
 
 

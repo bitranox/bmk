@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the version matrix helper (`test-all`).
 
 Two layers, no patching of internals:
@@ -22,12 +21,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from bmk.adapters.stagerunner.helpers._matrix import (
-    _MAX_DETAIL_LINES,
-    _WORKERS_ENV,
+    MAX_DETAIL_LINES,
+    WORKERS_ENV,
     CellResult,
     CellStatus,
-    _cell_env,
-    _tail,
+    cell_env,
+    failure_excerpt,
     main,
     pytest_marker_args,
     resolve_workers,
@@ -366,7 +365,7 @@ def test_cell_env_puts_the_cells_bin_first_on_path(tmp_path: Path) -> None:
     pytest runs as a ToolAction with the stage runner's env.
     """
     venv = tmp_path / ".venv-3.12"
-    env = _cell_env(venv)
+    env = cell_env(venv)
 
     expected_bin = str(venv_python(venv).parent)
     assert env["PATH"].split(os.pathsep)[0] == expected_bin
@@ -377,7 +376,7 @@ def test_cell_env_puts_the_cells_bin_first_on_path(tmp_path: Path) -> None:
 def test_cell_env_pins_the_interpreter_for_venv_aware_tools(tmp_path: Path) -> None:
     """VIRTUAL_ENV and PIPAPI_PYTHON_LOCATION name the cell, not whatever was active."""
     venv = tmp_path / ".venv-3.12"
-    env = _cell_env(venv)
+    env = cell_env(venv)
 
     assert env["VIRTUAL_ENV"] == str(venv)
     assert env["PIPAPI_PYTHON_LOCATION"] == str(venv_python(venv))
@@ -390,8 +389,8 @@ def test_failure_detail_hoists_verdicts_above_trailing_log_noise() -> None:
     The suite logs to stderr, so on a real failure the last lines are routine chatter and the
     verdict has scrolled past - which made a genuine matrix failure read as no output at all.
     """
-    noise = "\n".join(f"[INFO]: routine chatter {i}" for i in range(_MAX_DETAIL_LINES * 2))
-    detail = _tail(f"FAILED tests/test_thing.py::test_the_real_cause\n{noise}")
+    noise = "\n".join(f"[INFO]: routine chatter {i}" for i in range(MAX_DETAIL_LINES * 2))
+    detail = failure_excerpt(f"FAILED tests/test_thing.py::test_the_real_cause\n{noise}")
 
     assert "FAILED tests/test_thing.py::test_the_real_cause" in detail
 
@@ -423,7 +422,7 @@ def test_resolve_workers_reads_the_pyproject_setting(tmp_path: Path) -> None:
 def test_resolve_workers_env_override_beats_pyproject(tmp_path: Path) -> None:
     _write_pyproject_with_workers(tmp_path, ["3.10", "3.12", "3.14"], 1)
 
-    workers = resolve_workers(tmp_path, ["3.10", "3.12", "3.14"], env={_WORKERS_ENV: "2"})
+    workers = resolve_workers(tmp_path, ["3.10", "3.12", "3.14"], env={WORKERS_ENV: "2"})
 
     assert workers == 2
 
@@ -449,7 +448,7 @@ def test_resolve_workers_rejects_less_than_one_from_env(tmp_path: Path, bad_valu
     _write_pyproject(tmp_path, ["3.10", "3.12"])
 
     with pytest.raises(RefusalError) as excinfo:
-        resolve_workers(tmp_path, ["3.10", "3.12"], env={_WORKERS_ENV: bad_value})
+        resolve_workers(tmp_path, ["3.10", "3.12"], env={WORKERS_ENV: bad_value})
     assert excinfo.value.kind is RefusalKind.INVALID_ARGUMENT
 
 
@@ -457,7 +456,7 @@ def test_resolve_workers_rejects_a_non_integer_env_value(tmp_path: Path) -> None
     _write_pyproject(tmp_path, ["3.10", "3.12"])
 
     with pytest.raises(RefusalError) as excinfo:
-        resolve_workers(tmp_path, ["3.10", "3.12"], env={_WORKERS_ENV: "not-a-number"})
+        resolve_workers(tmp_path, ["3.10", "3.12"], env={WORKERS_ENV: "not-a-number"})
     assert excinfo.value.kind is RefusalKind.INVALID_ARGUMENT
 
 
@@ -475,7 +474,7 @@ class _PrepareSpy:
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize(
     ("env_value", "pyproject_workers", "named"),
-    [("0", None, _WORKERS_ENV), ("not-a-number", None, _WORKERS_ENV), ("", 0, "[tool.scripts.test-all].workers")],
+    [("0", None, WORKERS_ENV), ("not-a-number", None, WORKERS_ENV), ("", 0, "[tool.scripts.test-all].workers")],
     ids=["env-zero", "env-not-a-number", "pyproject-zero"],
 )
 def test_main_refuses_a_bad_worker_count_with_exit_2_before_preparing_any_python(
@@ -493,7 +492,7 @@ def test_main_refuses_a_bad_worker_count_with_exit_2_before_preparing_any_python
     prepare = _PrepareSpy()
     cells = _FakeCells({})
 
-    rc = main(project_dir=tmp_path, prepare_minors=prepare, run_cell=cells, env={_WORKERS_ENV: env_value})
+    rc = main(project_dir=tmp_path, prepare_minors=prepare, run_cell=cells, env={WORKERS_ENV: env_value})
 
     err = capsys.readouterr().err
     assert rc == 2

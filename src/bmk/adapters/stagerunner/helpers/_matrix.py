@@ -44,14 +44,25 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
-__all__ = ["CellResult", "CellStatus", "main", "pytest_marker_args", "resolve_workers"]
+__all__ = [
+    "MAX_DETAIL_LINES",
+    "WORKERS_ENV",
+    "CellResult",
+    "CellStatus",
+    "cell_env",
+    "failure_excerpt",
+    "main",
+    "pytest_marker_args",
+    "resolve_workers",
+    "run_version_cell",
+]
 
-_MAX_DETAIL_LINES = 40  # how much of a failing tool's output to surface per cell
+MAX_DETAIL_LINES = 40  # how much of a failing tool's output to surface per cell
 
 #: Overrides `[tool.scripts.test-all].workers` for one run; empty/unset means "read
 #: pyproject.toml instead". Named after the setting it overrides, like `BMK_GIT_REMOTE`
 #: overrides `[tool.git].default-remote` - see `git_ops.py`.
-_WORKERS_ENV = "BMK_TEST_ALL_WORKERS"
+WORKERS_ENV = "BMK_TEST_ALL_WORKERS"
 
 
 class CellStatus(str, Enum):
@@ -90,7 +101,7 @@ class _GateOutcome(NamedTuple):
 _VERDICT_PREFIXES = ("FAILED", "ERROR", "error:")
 
 
-def _tail(text: str) -> str:
+def failure_excerpt(text: str) -> str:
     """The lines that explain a cell's failure - the verdicts first, then the tail.
 
     A plain tail is not enough: the suite logs to stderr, so on a real failure the last
@@ -100,12 +111,12 @@ def _tail(text: str) -> str:
     """
     lines = text.strip().splitlines()
     verdicts = [line for line in lines if line.startswith(_VERDICT_PREFIXES)]
-    tail = lines[-_MAX_DETAIL_LINES:]
+    tail = lines[-MAX_DETAIL_LINES:]
     hoisted = [line for line in verdicts if line not in tail]
     return "\n".join(hoisted + tail)
 
 
-def _cell_env(venv: Path) -> dict[str, str]:
+def cell_env(venv: Path) -> dict[str, str]:
     """Environment pinning a cell's subprocesses at that cell's own venv.
 
     A cell must not inherit the ambient environment unchanged. The matrix runs as a
@@ -144,14 +155,14 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> _GateOut
     pytest runs from the venv's own interpreter (the project is installed there), with the
     project's ``exclude-markers`` filter; pyright is pinned at it with ``--pythonpath``.
     ``-p no:cacheprovider`` keeps parallel cells from racing on a shared ``.pytest_cache``.
-    Both run under ``_cell_env`` so the cell's own tools resolve.
+    Both run under ``cell_env`` so the cell's own tools resolve.
     """
     python = venv_python(venv)
-    env = _cell_env(venv)
+    env = cell_env(venv)
     pytest_cmd = [str(python), "-m", "pytest", *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
     result = subprocess.run(pytest_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
-        return _GateOutcome(CellStatus.FAIL, _tail(result.stdout + result.stderr))
+        return _GateOutcome(CellStatus.FAIL, failure_excerpt(result.stdout + result.stderr))
 
     # The same runs as make test's pyright stage (pyright_runs): pyright checks one platform per
     # run, so a cell typed for the host alone passes a Windows-only error that only the older Python
@@ -163,11 +174,11 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> _GateOut
         checked = subprocess.run(pyright_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
         if checked.returncode != 0:
             header = f"pyright {' '.join(extra)}:\n" if extra else ""
-            return _GateOutcome(CellStatus.FAIL, header + _tail(checked.stdout + checked.stderr))
+            return _GateOutcome(CellStatus.FAIL, header + failure_excerpt(checked.stdout + checked.stderr))
     return _GateOutcome(CellStatus.PASSED, "")
 
 
-def _run_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResult:
+def run_version_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResult:
     """Provision ``.venv-<minor>`` and run its gates. Provisioning failure is ERROR, not FAIL.
 
     ``install_python=False``: :func:`main` already prepared every minor, serially, before any cell.
@@ -273,14 +284,14 @@ def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, s
     resolved_env: Mapping[str, str] = env if env is not None else os.environ
     default = min(len(minors), os.cpu_count() or 4)
 
-    raw_env = resolved_env.get(_WORKERS_ENV, "").strip()
+    raw_env = resolved_env.get(WORKERS_ENV, "").strip()
     if raw_env:
         try:
             configured = int(raw_env)
         except ValueError:
-            msg = f"{_WORKERS_ENV} must be an integer, got: {raw_env!r}"
+            msg = f"{WORKERS_ENV} must be an integer, got: {raw_env!r}"
             raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT) from None
-        _reject_below_one(configured, source=_WORKERS_ENV)
+        _reject_below_one(configured, source=WORKERS_ENV)
         return min(configured, len(minors))
 
     configured_pyproject = _workers_from_pyproject(project_dir)
@@ -294,7 +305,7 @@ def main(
     *,
     project_dir: Path,
     quiet: bool = True,
-    run_cell: Callable[..., CellResult] = _run_cell,
+    run_cell: Callable[..., CellResult] = run_version_cell,
     prepare_minors: Callable[..., None] = ensure_minors_installed,
     env: Mapping[str, str] | None = None,
 ) -> int:

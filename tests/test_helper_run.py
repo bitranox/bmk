@@ -1,7 +1,5 @@
 """Behaviour tests for makescripts._run: dependency extraction, local discovery, and CLI invocation."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import subprocess
@@ -10,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bmk.adapters.stagerunner.helpers._run import _extract_dependency_names, _find_local_dependencies, run_cli
+from bmk.adapters.stagerunner.helpers._run import extract_dependency_names, find_local_dependencies, run_cli
 from bmk.adapters.stagerunner.helpers._toml_config import ProjectSection, PyprojectConfig
 
 if TYPE_CHECKING:
@@ -28,7 +26,7 @@ def _config_with_dependencies(deps: list[str]) -> PyprojectConfig:
 
 
 # ---------------------------------------------------------------------------
-# _extract_dependency_names - normalisation
+# extract_dependency_names - normalisation
 # ---------------------------------------------------------------------------
 
 
@@ -37,7 +35,7 @@ def test_extract_dependency_names_normalises_hyphens() -> None:
     """Hyphens in package names are replaced by underscores."""
     config = _config_with_dependencies(["rich-click", "lib-log-rich"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["rich_click", "lib_log_rich"]
 
@@ -47,7 +45,7 @@ def test_extract_dependency_names_strips_version_specifiers() -> None:
     """Version specifiers are removed, only package name is returned."""
     config = _config_with_dependencies(["rich-click>=1.9.7", "pydantic>=2.12.5"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["rich_click", "pydantic"]
 
@@ -57,7 +55,7 @@ def test_extract_dependency_names_strips_extras() -> None:
     """Extras brackets are stripped, only the base package name is returned."""
     config = _config_with_dependencies(["pyright[nodejs]>=1.1.408"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["pyright"]
 
@@ -67,7 +65,7 @@ def test_extract_dependency_names_handles_empty_dependencies() -> None:
     """Returns empty list when project has no dependencies."""
     config = _config_with_dependencies([])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == []
 
@@ -77,7 +75,7 @@ def test_extract_dependency_names_handles_exact_version_pin() -> None:
     """Exact version pins (==) are stripped correctly."""
     config = _config_with_dependencies(["orjson==3.11.7"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["orjson"]
 
@@ -87,7 +85,7 @@ def test_extract_dependency_names_handles_tilde_version() -> None:
     """Tilde version constraints (~=) are stripped correctly."""
     config = _config_with_dependencies(["requests~=2.31.0"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["requests"]
 
@@ -97,7 +95,7 @@ def test_extract_dependency_names_preserves_underscores() -> None:
     """Underscore names pass through unchanged."""
     config = _config_with_dependencies(["lib_layered_config>=5.0.0"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["lib_layered_config"]
 
@@ -107,7 +105,7 @@ def test_extract_dependency_names_handles_whitespace() -> None:
     """Leading and trailing whitespace in dependency strings is ignored."""
     config = _config_with_dependencies(["  rich-click>=1.0  "])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["rich_click"]
 
@@ -117,13 +115,13 @@ def test_extract_dependency_names_handles_bare_name() -> None:
     """Bare package names without version specifiers are returned as-is (normalised)."""
     config = _config_with_dependencies(["requests"])
 
-    result = _extract_dependency_names(config)
+    result = extract_dependency_names(config)
 
     assert result == ["requests"]
 
 
 # ---------------------------------------------------------------------------
-# _find_local_dependencies - no matches
+# find_local_dependencies - no matches
 # ---------------------------------------------------------------------------
 
 
@@ -134,7 +132,7 @@ def test_find_local_dependencies_returns_empty_when_no_siblings(tmp_path: Path) 
     project_dir.mkdir()
     config = _config_with_dependencies(["nonexistent-package"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert result == []
 
@@ -148,13 +146,13 @@ def test_find_local_dependencies_ignores_sibling_without_pyproject(tmp_path: Pat
     sibling.mkdir()
     config = _config_with_dependencies(["some-lib"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert result == []
 
 
 # ---------------------------------------------------------------------------
-# _find_local_dependencies - matching siblings
+# find_local_dependencies - matching siblings
 # ---------------------------------------------------------------------------
 
 
@@ -168,7 +166,7 @@ def test_find_local_dependencies_finds_underscore_sibling(tmp_path: Path) -> Non
     (sibling / "pyproject.toml").write_text("[project]\nname = 'rich-click'\n")
     config = _config_with_dependencies(["rich-click>=1.0"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
     assert result[0].package_name == "rich-click"
@@ -185,7 +183,7 @@ def test_find_local_dependencies_finds_hyphen_sibling(tmp_path: Path) -> None:
     (sibling / "pyproject.toml").write_text("[project]\nname = 'lib-log-rich'\n")
     config = _config_with_dependencies(["lib-log-rich>=6.0"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
     assert result[0].package_name == "lib-log-rich"
@@ -205,7 +203,7 @@ def test_find_local_dependencies_prefers_underscore_over_hyphen(tmp_path: Path) 
     (hyphen_sibling / "pyproject.toml").write_text("[project]\nname = 'my-lib'\n")
     config = _config_with_dependencies(["my-lib>=1.0"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
     assert result[0].package_name == "my-lib"
@@ -222,7 +220,7 @@ def test_find_local_dependencies_returns_hyphen_package_name(tmp_path: Path) -> 
     (sibling / "pyproject.toml").write_text("[project]\nname = 'lib-layered-config'\n")
     config = _config_with_dependencies(["lib_layered_config>=5.0"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert len(result) == 1
     assert result[0].package_name == "lib-layered-config"
@@ -244,7 +242,7 @@ def test_find_local_dependencies_discovers_multiple_siblings(tmp_path: Path) -> 
 
     config = _config_with_dependencies(["lib-alpha>=1.0", "lib-beta>=2.0", "unrelated-pkg"])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     found_names = [dependency.package_name for dependency in result]
     assert "lib-alpha" in found_names
@@ -259,7 +257,7 @@ def test_find_local_dependencies_with_empty_dependencies(tmp_path: Path) -> None
     project_dir.mkdir()
     config = _config_with_dependencies([])
 
-    result = _find_local_dependencies(project_dir, config)
+    result = find_local_dependencies(project_dir, config)
 
     assert result == []
 

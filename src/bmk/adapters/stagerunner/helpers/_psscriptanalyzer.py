@@ -45,9 +45,11 @@ _FALLBACK_EXCLUDED_RULES: tuple[str, ...] = (
 __all__ = [
     "check_pwsh",
     "ensure_psscriptanalyzer",
+    "exclude_rule_fragment",
     "find_ps1_files",
     "get_excluded_rules",
     "main",
+    "ps_single_quote",
     "run_psscriptanalyzer",
 ]
 
@@ -150,7 +152,7 @@ def find_ps1_files(project_dir: Path) -> list[Path]:
     return find_project_files(project_dir, ".ps1")
 
 
-def _ps_single_quote(value: str) -> str:
+def ps_single_quote(value: str) -> str:
     """Wrap ``value`` in a PowerShell single-quoted string literal.
 
     PowerShell single-quoted strings take everything verbatim; the only escape is a
@@ -160,7 +162,7 @@ def _ps_single_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _exclude_rule_fragment(exclude_rules: tuple[str, ...]) -> str:
+def exclude_rule_fragment(exclude_rules: tuple[str, ...]) -> str:
     """Build ``-ExcludeRule 'A','B'`` (each element PS-escaped), or ``""`` when empty.
 
     Each rule is emitted as its own single-quoted array element rather than an unquoted
@@ -169,7 +171,7 @@ def _exclude_rule_fragment(exclude_rules: tuple[str, ...]) -> str:
     """
     if not exclude_rules:
         return ""
-    array = ",".join(_ps_single_quote(rule) for rule in exclude_rules)
+    array = ",".join(ps_single_quote(rule) for rule in exclude_rules)
     return f" -ExcludeRule {array}"
 
 
@@ -203,8 +205,8 @@ def run_psscriptanalyzer(
     if not files:
         return 0
 
-    file_array = ",".join(_ps_single_quote(str(f)) for f in files)
-    exclude_fragment = _exclude_rule_fragment(exclude_rules)
+    file_array = ",".join(ps_single_quote(str(f)) for f in files)
+    exclude_fragment = exclude_rule_fragment(exclude_rules)
     # Each file is analysed by name. `-Recurse` is deliberately absent: it would re-expand
     # any directory back into the tree this list was filtered out of.
     collect = (

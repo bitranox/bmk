@@ -1,7 +1,5 @@
 """Coverage for _release's git/gh subprocess wrappers and main() delegation."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import subprocess
@@ -31,22 +29,22 @@ class _FakeRun:
 @pytest.mark.os_agnostic
 def test_git_branch_returns_stripped_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_release.subprocess, "run", _FakeRun(0, "main\n"))
-    assert _release._git_branch() == "main"
+    assert _release.git_branch() == "main"
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize(("rc", "expected"), [(0, True), (1, False)])
 def test_git_tag_exists(monkeypatch: pytest.MonkeyPatch, rc: int, expected: bool) -> None:
     monkeypatch.setattr(_release.subprocess, "run", _FakeRun(rc))
-    assert _release._git_tag_exists("v1.0.0") is expected
+    assert _release.git_tag_exists("v1.0.0") is expected
 
 
 @pytest.mark.os_agnostic
 def test_git_create_tag_and_push_build_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeRun(0)
     monkeypatch.setattr(_release.subprocess, "run", fake)
-    _release._git_create_annotated_tag("v1.2.3", "release 1.2.3")
-    _release._git_push("origin", "v1.2.3")
+    _release.git_create_annotated_tag("v1.2.3", "release 1.2.3")
+    _release.git_push("origin", "v1.2.3")
     assert fake.calls[0][:3] == ["git", "tag", "-a"]
     assert fake.calls[1] == ["git", "push", "origin", "v1.2.3"]
 
@@ -58,22 +56,22 @@ def test_gh_available(monkeypatch: pytest.MonkeyPatch, which: str | None, expect
         return which
 
     monkeypatch.setattr(_release.shutil, "which", fake_which)
-    assert _release._gh_available() is expected
+    assert _release.gh_available() is expected
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize(("rc", "expected"), [(0, True), (1, False)])
 def test_gh_release_exists(monkeypatch: pytest.MonkeyPatch, rc: int, expected: bool) -> None:
     monkeypatch.setattr(_release.subprocess, "run", _FakeRun(rc))
-    assert _release._gh_release_exists("v1.0.0") is expected
+    assert _release.gh_release_exists("v1.0.0") is expected
 
 
 @pytest.mark.os_agnostic
 def test_gh_release_create_and_edit_build_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeRun(0)
     monkeypatch.setattr(_release.subprocess, "run", fake)
-    _release._gh_release_create("v1.2.3", "1.2.3", "notes")
-    _release._gh_release_edit("v1.2.3", "1.2.3", "notes")
+    _release.gh_release_create("v1.2.3", "1.2.3", "notes")
+    _release.gh_release_edit("v1.2.3", "1.2.3", "notes")
     assert fake.calls[0][:3] == ["gh", "release", "create"]
     assert fake.calls[1][:3] == ["gh", "release", "edit"]
 

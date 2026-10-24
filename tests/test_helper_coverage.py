@@ -1,7 +1,5 @@
 """Behaviour tests for makescripts._coverage: coverage management, git resolution, and Codecov upload."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import os
@@ -17,20 +15,20 @@ from pydantic import ValidationError
 from bmk.adapters.stagerunner.helpers._coverage import (
     CoverageConfig,
     RepoRemote,
-    _build_codecov_args,
-    _build_codecov_env,
-    _build_env,
-    _check_codecov_prerequisites,
-    _find_dotenv_upward,
-    _get_repo_metadata_from_git,
-    _handle_codecov_result,
-    _resolve_commit_sha,
-    _resolve_git_branch,
-    _resolve_git_service,
+    build_codecov_args,
+    build_codecov_env,
+    build_env,
+    check_codecov_prerequisites,
     ensure_codecov_token,
+    find_dotenv_upward,
+    get_repo_metadata_from_git,
+    handle_codecov_result,
     main,
     prune_coverage_data_files,
     remove_report_artifacts,
+    resolve_commit_sha,
+    resolve_git_branch,
+    resolve_git_service,
     run_coverage_tests,
     upload_coverage_report,
 )
@@ -281,7 +279,7 @@ def test_remove_report_artifacts_defaults_to_cwd(tmp_path: Path, monkeypatch: py
 
 
 # ---------------------------------------------------------------------------
-# _build_env
+# build_env
 # ---------------------------------------------------------------------------
 
 
@@ -290,7 +288,7 @@ def test_build_env_sets_pythonpath(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     """Puts project src_path at the front of PYTHONPATH."""
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
-    env = _build_env(tmp_path, "src")
+    env = build_env(tmp_path, "src")
 
     assert env["PYTHONPATH"] == str(tmp_path / "src")
 
@@ -300,7 +298,7 @@ def test_build_env_appends_existing_pythonpath(tmp_path: Path, monkeypatch: pyte
     """Appends existing PYTHONPATH to the new value."""
     monkeypatch.setenv("PYTHONPATH", "/existing/path")
 
-    env = _build_env(tmp_path, "src")
+    env = build_env(tmp_path, "src")
 
     parts = env["PYTHONPATH"].split(os.pathsep)
     assert parts[0] == str(tmp_path / "src")
@@ -746,7 +744,7 @@ def test_run_coverage_tests_uses_every_configured_value(tmp_path: Path, capsys: 
 
 
 # ---------------------------------------------------------------------------
-# _find_dotenv_upward
+# find_dotenv_upward
 # ---------------------------------------------------------------------------
 
 
@@ -755,7 +753,7 @@ def test_find_dotenv_upward_finds_in_start_dir(tmp_path: Path) -> None:
     """Finds .env in the start directory itself."""
     (tmp_path / ".env").write_text("TOKEN=abc")
 
-    result = _find_dotenv_upward(tmp_path)
+    result = find_dotenv_upward(tmp_path)
 
     assert result is not None
     assert result.name == ".env"
@@ -768,7 +766,7 @@ def test_find_dotenv_upward_finds_in_parent(tmp_path: Path) -> None:
     child.mkdir(parents=True)
     (tmp_path / ".env").write_text("TOKEN=abc")
 
-    result = _find_dotenv_upward(child)
+    result = find_dotenv_upward(child)
 
     assert result is not None
     assert result == (tmp_path / ".env").resolve()
@@ -780,7 +778,7 @@ def test_find_dotenv_upward_returns_none_when_missing(tmp_path: Path) -> None:
     child = tmp_path / "deep" / "nested"
     child.mkdir(parents=True)
 
-    result = _find_dotenv_upward(child)
+    result = find_dotenv_upward(child)
 
     # Might find a real .env on the filesystem; only assert it's None or a Path
     # In isolated tmp_path, unlikely to have .env in /tmp ancestors
@@ -842,7 +840,7 @@ def test_ensure_codecov_token_returns_none_for_empty_dotenv_value(
 
 
 # ---------------------------------------------------------------------------
-# _resolve_commit_sha
+# resolve_commit_sha
 # ---------------------------------------------------------------------------
 
 
@@ -851,7 +849,7 @@ def test_resolve_commit_sha_returns_env_var(monkeypatch: pytest.MonkeyPatch) -> 
     """Returns GITHUB_SHA from environment when set."""
     monkeypatch.setenv("GITHUB_SHA", "abc123def456")
 
-    result = _resolve_commit_sha()
+    result = resolve_commit_sha()
 
     assert result == "abc123def456"
 
@@ -861,7 +859,7 @@ def test_resolve_commit_sha_strips_whitespace(monkeypatch: pytest.MonkeyPatch) -
     """Strips whitespace from GITHUB_SHA env var."""
     monkeypatch.setenv("GITHUB_SHA", "  abc123  ")
 
-    result = _resolve_commit_sha()
+    result = resolve_commit_sha()
 
     assert result == "abc123"
 
@@ -875,7 +873,7 @@ def test_resolve_commit_sha_falls_back_to_git(monkeypatch: pytest.MonkeyPatch) -
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="deadbeef1234\n"),
     ):
-        result = _resolve_commit_sha()
+        result = resolve_commit_sha()
 
     assert result == "deadbeef1234"
 
@@ -889,7 +887,7 @@ def test_resolve_commit_sha_returns_none_on_git_failure(monkeypatch: pytest.Monk
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
-        result = _resolve_commit_sha()
+        result = resolve_commit_sha()
 
     assert result is None
 
@@ -903,13 +901,13 @@ def test_resolve_commit_sha_returns_none_for_empty_output(monkeypatch: pytest.Mo
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout=""),
     ):
-        result = _resolve_commit_sha()
+        result = resolve_commit_sha()
 
     assert result is None
 
 
 # ---------------------------------------------------------------------------
-# _resolve_git_branch
+# resolve_git_branch
 # ---------------------------------------------------------------------------
 
 
@@ -918,7 +916,7 @@ def test_resolve_git_branch_returns_env_var(monkeypatch: pytest.MonkeyPatch) -> 
     """Returns GITHUB_REF_NAME from environment when set."""
     monkeypatch.setenv("GITHUB_REF_NAME", "feature-branch")
 
-    result = _resolve_git_branch()
+    result = resolve_git_branch()
 
     assert result == "feature-branch"
 
@@ -928,7 +926,7 @@ def test_resolve_git_branch_strips_whitespace(monkeypatch: pytest.MonkeyPatch) -
     """Strips whitespace from GITHUB_REF_NAME env var."""
     monkeypatch.setenv("GITHUB_REF_NAME", "  main  ")
 
-    result = _resolve_git_branch()
+    result = resolve_git_branch()
 
     assert result == "main"
 
@@ -942,7 +940,7 @@ def test_resolve_git_branch_falls_back_to_git(monkeypatch: pytest.MonkeyPatch) -
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="develop\n"),
     ):
-        result = _resolve_git_branch()
+        result = resolve_git_branch()
 
     assert result == "develop"
 
@@ -956,7 +954,7 @@ def test_resolve_git_branch_returns_none_on_git_failure(monkeypatch: pytest.Monk
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
-        result = _resolve_git_branch()
+        result = resolve_git_branch()
 
     assert result is None
 
@@ -970,7 +968,7 @@ def test_resolve_git_branch_returns_none_for_detached_head(monkeypatch: pytest.M
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="HEAD\n"),
     ):
-        result = _resolve_git_branch()
+        result = resolve_git_branch()
 
     assert result is None
 
@@ -984,50 +982,50 @@ def test_resolve_git_branch_returns_none_for_empty_output(monkeypatch: pytest.Mo
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout=""),
     ):
-        result = _resolve_git_branch()
+        result = resolve_git_branch()
 
     assert result is None
 
 
 # ---------------------------------------------------------------------------
-# _resolve_git_service
+# resolve_git_service
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_resolve_git_service_maps_github() -> None:
     """Maps github.com to 'github'."""
-    assert _resolve_git_service("github.com") == "github"
+    assert resolve_git_service("github.com") == "github"
 
 
 @pytest.mark.os_agnostic
 def test_resolve_git_service_maps_gitlab() -> None:
     """Maps gitlab.com to 'gitlab'."""
-    assert _resolve_git_service("gitlab.com") == "gitlab"
+    assert resolve_git_service("gitlab.com") == "gitlab"
 
 
 @pytest.mark.os_agnostic
 def test_resolve_git_service_maps_bitbucket() -> None:
     """Maps bitbucket.org to 'bitbucket'."""
-    assert _resolve_git_service("bitbucket.org") == "bitbucket"
+    assert resolve_git_service("bitbucket.org") == "bitbucket"
 
 
 @pytest.mark.os_agnostic
 def test_resolve_git_service_returns_none_for_unknown_host() -> None:
     """Returns None for unrecognised hosts."""
-    assert _resolve_git_service("gitea.example.com") is None
+    assert resolve_git_service("gitea.example.com") is None
 
 
 @pytest.mark.os_agnostic
 def test_resolve_git_service_returns_none_for_none() -> None:
     """Returns None when host is None."""
-    assert _resolve_git_service(None) is None
+    assert resolve_git_service(None) is None
 
 
 @pytest.mark.os_agnostic
 def test_resolve_git_service_case_insensitive() -> None:
     """Host matching is case-insensitive."""
-    assert _resolve_git_service("GitHub.com") == "github"
+    assert resolve_git_service("GitHub.com") == "github"
 
 
 # ---------------------------------------------------------------------------
@@ -1060,7 +1058,7 @@ def test_repo_remote_slug_is_none_when_both_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_metadata_from_git - SSH URLs
+# get_repo_metadata_from_git - SSH URLs
 # ---------------------------------------------------------------------------
 
 
@@ -1071,7 +1069,7 @@ def test_get_repo_metadata_parses_ssh_url() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com:myorg/myrepo.git\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote == RepoRemote("github.com", "myorg", "myrepo")
 
@@ -1083,13 +1081,13 @@ def test_get_repo_metadata_parses_ssh_url_without_git_suffix() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@gitlab.com:team/project\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote == RepoRemote("gitlab.com", "team", "project")
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_metadata_from_git - HTTPS URLs
+# get_repo_metadata_from_git - HTTPS URLs
 # ---------------------------------------------------------------------------
 
 
@@ -1100,7 +1098,7 @@ def test_get_repo_metadata_parses_https_url() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://github.com/myorg/myrepo.git\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote == RepoRemote("github.com", "myorg", "myrepo")
 
@@ -1112,7 +1110,7 @@ def test_get_repo_metadata_parses_https_url_without_git_suffix() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://bitbucket.org/team/project\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote == RepoRemote("bitbucket.org", "team", "project")
 
@@ -1124,13 +1122,13 @@ def test_get_repo_metadata_parses_http_url() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="http://gitea.local/dev/app.git\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote == RepoRemote("gitea.local", "dev", "app")
 
 
 # ---------------------------------------------------------------------------
-# _get_repo_metadata_from_git - error / edge cases
+# get_repo_metadata_from_git - error / edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -1141,7 +1139,7 @@ def test_get_repo_metadata_returns_none_on_git_failure() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(128),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote is None
 
@@ -1153,20 +1151,20 @@ def test_get_repo_metadata_returns_none_for_unknown_format() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="svn://example.com/repo\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote is None
 
 
 # ---------------------------------------------------------------------------
-# _check_codecov_prerequisites
+# check_codecov_prerequisites
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_check_prerequisites_returns_none_when_report_missing(tmp_path: Path) -> None:
     """Returns None when coverage report file does not exist."""
-    result = _check_codecov_prerequisites(tmp_path, "coverage.xml")
+    result = check_codecov_prerequisites(tmp_path, "coverage.xml")
 
     assert result is None
 
@@ -1180,7 +1178,7 @@ def test_check_prerequisites_returns_none_when_no_token_outside_ci(
     monkeypatch.delenv("CODECOV_TOKEN", raising=False)
     monkeypatch.delenv("CI", raising=False)
 
-    result = _check_codecov_prerequisites(tmp_path, "coverage.xml")
+    result = check_codecov_prerequisites(tmp_path, "coverage.xml")
 
     assert result is None
 
@@ -1194,7 +1192,7 @@ def test_check_prerequisites_returns_none_when_codecovcli_missing(
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value=None):
-        result = _check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="token123")
+        result = check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="token123")
 
     assert result is None
 
@@ -1206,7 +1204,7 @@ def test_check_prerequisites_returns_uploader_path(tmp_path: Path, monkeypatch: 
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"):
-        result = _check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="token123")
+        result = check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="token123")
 
     assert result == "/usr/bin/codecovcli"
 
@@ -1219,13 +1217,13 @@ def test_check_prerequisites_allows_ci_without_token(tmp_path: Path, monkeypatch
     monkeypatch.setenv("CI", "true")
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"):
-        result = _check_codecov_prerequisites(tmp_path, "coverage.xml")
+        result = check_codecov_prerequisites(tmp_path, "coverage.xml")
 
     assert result == "/usr/bin/codecovcli"
 
 
 # ---------------------------------------------------------------------------
-# _build_codecov_args
+# build_codecov_args
 # ---------------------------------------------------------------------------
 
 
@@ -1235,7 +1233,7 @@ def test_build_codecov_args_includes_required_flags(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)):
-        args = _build_codecov_args(
+        args = build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             coverage_report_file="coverage.xml",
@@ -1256,7 +1254,7 @@ def test_build_codecov_args_includes_branch(monkeypatch: pytest.MonkeyPatch) -> 
     """Adds --branch flag when branch is resolved."""
     monkeypatch.setenv("GITHUB_REF_NAME", "main")
 
-    args = _build_codecov_args(
+    args = build_codecov_args(
         uploader="/usr/bin/codecovcli",
         commit_sha="abc123",
     )
@@ -1271,7 +1269,7 @@ def test_build_codecov_args_includes_git_service(monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)):
-        args = _build_codecov_args(
+        args = build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             remote=RepoRemote("github.com", "", ""),
@@ -1291,7 +1289,7 @@ def test_build_codecov_args_includes_slug(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(128)):
-        args = _build_codecov_args(
+        args = build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             remote=RepoRemote("", "myorg", "myrepo"),
@@ -1302,14 +1300,14 @@ def test_build_codecov_args_includes_slug(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 # ---------------------------------------------------------------------------
-# _build_codecov_env
+# build_codecov_env
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_build_codecov_env_always_sets_no_combine() -> None:
     """Always includes CODECOV_NO_COMBINE=1."""
-    env = _build_codecov_env(None)
+    env = build_codecov_env(None)
 
     assert env["CODECOV_NO_COMBINE"] == "1"
 
@@ -1317,7 +1315,7 @@ def test_build_codecov_env_always_sets_no_combine() -> None:
 @pytest.mark.os_agnostic
 def test_build_codecov_env_sets_slug_when_available() -> None:
     """Sets CODECOV_SLUG when owner and name are provided."""
-    env = _build_codecov_env(RepoRemote("github.com", "myorg", "myrepo"))
+    env = build_codecov_env(RepoRemote("github.com", "myorg", "myrepo"))
 
     assert env["CODECOV_SLUG"] == "myorg/myrepo"
 
@@ -1325,20 +1323,20 @@ def test_build_codecov_env_sets_slug_when_available() -> None:
 @pytest.mark.os_agnostic
 def test_build_codecov_env_omits_slug_when_missing() -> None:
     """Omits CODECOV_SLUG when owner or name is empty."""
-    env = _build_codecov_env(RepoRemote("github.com", "", "myrepo"))
+    env = build_codecov_env(RepoRemote("github.com", "", "myrepo"))
 
     assert "CODECOV_SLUG" not in env
 
 
 # ---------------------------------------------------------------------------
-# _handle_codecov_result
+# handle_codecov_result
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_handle_codecov_result_returns_true_on_success(capsys: pytest.CaptureFixture[str]) -> None:
     """Returns True and prints success message for exit code 0."""
-    result = _handle_codecov_result(0)
+    result = handle_codecov_result(0)
 
     assert result is True
     assert "upload succeeded" in capsys.readouterr().out
@@ -1347,7 +1345,7 @@ def test_handle_codecov_result_returns_true_on_success(capsys: pytest.CaptureFix
 @pytest.mark.os_agnostic
 def test_handle_codecov_result_returns_false_on_failure(capsys: pytest.CaptureFixture[str]) -> None:
     """Returns False and prints failure message for non-zero exit code."""
-    result = _handle_codecov_result(1)
+    result = handle_codecov_result(1)
 
     assert result is False
     assert "upload failed" in capsys.readouterr().err
@@ -1632,7 +1630,7 @@ def test_get_repo_metadata_returns_none_for_ssh_without_colon() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com/owner/repo.git\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote is None
 
@@ -1644,7 +1642,7 @@ def test_get_repo_metadata_returns_none_for_ssh_single_path_segment() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="git@github.com:repoonly\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote is None
 
@@ -1656,7 +1654,7 @@ def test_get_repo_metadata_returns_none_for_https_too_few_parts() -> None:
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run",
         return_value=_make_completed(0, stdout="https://github.com/owner-only\n"),
     ):
-        remote = _get_repo_metadata_from_git()
+        remote = get_repo_metadata_from_git()
 
     assert remote is None
 

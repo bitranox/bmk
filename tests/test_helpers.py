@@ -154,7 +154,7 @@ class TestCoverageFileManagement:
 
 
 class TestBuildEnv:
-    """Tests for _build_env function."""
+    """Tests for build_env function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -167,10 +167,10 @@ class TestBuildEnv:
     def test_build_env_adds_src_to_pythonpath(
         self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """_build_env adds src path to PYTHONPATH."""
+        """build_env adds src path to PYTHONPATH."""
         monkeypatch.delenv("PYTHONPATH", raising=False)
 
-        env = coverage_module._build_env(tmp_path, "src")
+        env = coverage_module.build_env(tmp_path, "src")
 
         assert str(tmp_path / "src") in env["PYTHONPATH"]
 
@@ -178,10 +178,10 @@ class TestBuildEnv:
     def test_build_env_preserves_existing_pythonpath(
         self, coverage_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """_build_env preserves existing PYTHONPATH."""
+        """build_env preserves existing PYTHONPATH."""
         monkeypatch.setenv("PYTHONPATH", "/existing/path")
 
-        env = coverage_module._build_env(tmp_path, "src")
+        env = coverage_module.build_env(tmp_path, "src")
 
         assert "/existing/path" in env["PYTHONPATH"]
         assert str(tmp_path / "src") in env["PYTHONPATH"]
@@ -214,7 +214,7 @@ class TestEnsureCodecovToken:
     ) -> None:
         """ensure_codecov_token returns None when no .env file in hierarchy."""
         monkeypatch.delenv("CODECOV_TOKEN", raising=False)
-        monkeypatch.setattr(coverage_module, "_find_dotenv_upward", lambda _start: None)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(coverage_module, "find_dotenv_upward", lambda _start: None)  # type: ignore[reportUnknownLambdaType]
 
         result = coverage_module.ensure_codecov_token(tmp_path)
 
@@ -287,7 +287,7 @@ CODECOV_TOKEN=found-token
 
 
 class TestFindDotenvUpward:
-    """Tests for _find_dotenv_upward helper."""
+    """Tests for find_dotenv_upward helper."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -298,33 +298,33 @@ class TestFindDotenvUpward:
 
     @pytest.mark.os_agnostic
     def test_finds_env_in_start_dir(self, coverage_module: Any, tmp_path: Path) -> None:
-        """_find_dotenv_upward finds .env in the start directory."""
+        """find_dotenv_upward finds .env in the start directory."""
         env_file = tmp_path / ".env"
         env_file.write_text("KEY=value\n")
 
-        result = coverage_module._find_dotenv_upward(tmp_path)
+        result = coverage_module.find_dotenv_upward(tmp_path)
 
         assert result == env_file
 
     @pytest.mark.os_agnostic
     def test_finds_env_in_parent(self, coverage_module: Any, tmp_path: Path) -> None:
-        """_find_dotenv_upward finds .env in a parent directory."""
+        """find_dotenv_upward finds .env in a parent directory."""
         env_file = tmp_path / ".env"
         env_file.write_text("KEY=value\n")
         child = tmp_path / "a" / "b"
         child.mkdir(parents=True)
 
-        result = coverage_module._find_dotenv_upward(child)
+        result = coverage_module.find_dotenv_upward(child)
 
         assert result == env_file
 
     @pytest.mark.os_agnostic
     def test_returns_none_when_no_env_file(self, coverage_module: Any, tmp_path: Path) -> None:
-        """_find_dotenv_upward returns None when no .env exists in hierarchy."""
+        """find_dotenv_upward returns None when no .env exists in hierarchy."""
         child = tmp_path / "empty"
         child.mkdir()
 
-        result = coverage_module._find_dotenv_upward(child)
+        result = coverage_module.find_dotenv_upward(child)
 
         # May return None or find a .env above tmp_path - assert type is correct
         assert result is None or result.name == ".env"
@@ -354,8 +354,8 @@ class TestGitServiceHelpers:
         ],
     )
     def test_resolve_git_service_maps_hosts(self, coverage_module: Any, host: str | None, expected: str | None) -> None:
-        """_resolve_git_service maps host names to service identifiers."""
-        assert coverage_module._resolve_git_service(host) == expected
+        """resolve_git_service maps host names to service identifiers."""
+        assert coverage_module.resolve_git_service(host) == expected
 
     @pytest.mark.os_agnostic
     @pytest.mark.parametrize(
@@ -374,7 +374,7 @@ class TestGitServiceHelpers:
 
 
 class TestBuildCodecovEnv:
-    """Tests for _build_codecov_env function."""
+    """Tests for build_codecov_env function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -385,21 +385,21 @@ class TestBuildCodecovEnv:
 
     @pytest.mark.os_agnostic
     def test_always_sets_no_combine(self, coverage_module: Any) -> None:
-        """_build_codecov_env always sets CODECOV_NO_COMBINE."""
-        env = coverage_module._build_codecov_env(None)
+        """build_codecov_env always sets CODECOV_NO_COMBINE."""
+        env = coverage_module.build_codecov_env(None)
 
         assert env["CODECOV_NO_COMBINE"] == "1"
 
     @pytest.mark.os_agnostic
     def test_sets_slug_when_owner_and_name_provided(self, coverage_module: Any) -> None:
-        """_build_codecov_env sets CODECOV_SLUG when owner and name provided."""
-        env = coverage_module._build_codecov_env(coverage_module.RepoRemote("github.com", "myorg", "myrepo"))
+        """build_codecov_env sets CODECOV_SLUG when owner and name provided."""
+        env = coverage_module.build_codecov_env(coverage_module.RepoRemote("github.com", "myorg", "myrepo"))
 
         assert env["CODECOV_SLUG"] == "myorg/myrepo"
 
 
 class TestHandleCodecovResult:
-    """Tests for _handle_codecov_result function."""
+    """Tests for handle_codecov_result function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -410,8 +410,8 @@ class TestHandleCodecovResult:
 
     @pytest.mark.os_agnostic
     def test_returns_true_on_success(self, coverage_module: Any, capsys: CaptureFixture[str]) -> None:
-        """_handle_codecov_result returns True on exit code 0."""
-        result = coverage_module._handle_codecov_result(0)
+        """handle_codecov_result returns True on exit code 0."""
+        result = coverage_module.handle_codecov_result(0)
 
         assert result is True
         captured = capsys.readouterr()
@@ -419,8 +419,8 @@ class TestHandleCodecovResult:
 
     @pytest.mark.os_agnostic
     def test_returns_false_on_failure(self, coverage_module: Any, capsys: CaptureFixture[str]) -> None:
-        """_handle_codecov_result returns False on non-zero exit code."""
-        result = coverage_module._handle_codecov_result(1)
+        """handle_codecov_result returns False on non-zero exit code."""
+        result = coverage_module.handle_codecov_result(1)
 
         assert result is False
         captured = capsys.readouterr()
@@ -447,7 +447,7 @@ class TestMain:
     ) -> None:
         """main() returns 0 and prints warning when CODECOV_TOKEN is missing."""
         monkeypatch.delenv("CODECOV_TOKEN", raising=False)
-        monkeypatch.setattr(coverage_module, "_find_dotenv_upward", lambda _start: None)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(coverage_module, "find_dotenv_upward", lambda _start: None)  # type: ignore[reportUnknownLambdaType]
 
         result = coverage_module.main(
             project_dir=tmp_path,
@@ -1093,7 +1093,7 @@ class TestExtractDependenciesFromList:
 
 
 class TestResolveCommitSha:
-    """Tests for _resolve_commit_sha function."""
+    """Tests for resolve_commit_sha function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -1107,7 +1107,7 @@ class TestResolveCommitSha:
         """Returns GITHUB_SHA env var when set."""
         monkeypatch.setenv("GITHUB_SHA", "abc123")
 
-        result = coverage_module._resolve_commit_sha()
+        result = coverage_module.resolve_commit_sha()
 
         assert result == "abc123"
 
@@ -1116,7 +1116,7 @@ class TestResolveCommitSha:
         """Strips whitespace from GITHUB_SHA."""
         monkeypatch.setenv("GITHUB_SHA", "  abc123  \n")
 
-        result = coverage_module._resolve_commit_sha()
+        result = coverage_module.resolve_commit_sha()
 
         assert result == "abc123"
 
@@ -1127,7 +1127,7 @@ class TestResolveCommitSha:
         fake = subprocess.CompletedProcess([], 0, stdout="def456\n")
         monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._resolve_commit_sha()
+        result = coverage_module.resolve_commit_sha()
 
         assert result == "def456"
 
@@ -1138,7 +1138,7 @@ class TestResolveCommitSha:
         fake = subprocess.CompletedProcess([], 1, stdout="", stderr="fatal")
         monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._resolve_commit_sha()
+        result = coverage_module.resolve_commit_sha()
 
         assert result is None
 
@@ -1149,13 +1149,13 @@ class TestResolveCommitSha:
         fake = subprocess.CompletedProcess([], 0, stdout="   \n")
         monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._resolve_commit_sha()
+        result = coverage_module.resolve_commit_sha()
 
         assert result is None
 
 
 class TestResolveGitBranch:
-    """Tests for _resolve_git_branch function."""
+    """Tests for resolve_git_branch function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -1169,7 +1169,7 @@ class TestResolveGitBranch:
         """Returns GITHUB_REF_NAME env var when set."""
         monkeypatch.setenv("GITHUB_REF_NAME", "main")
 
-        result = coverage_module._resolve_git_branch()
+        result = coverage_module.resolve_git_branch()
 
         assert result == "main"
 
@@ -1180,7 +1180,7 @@ class TestResolveGitBranch:
         fake = subprocess.CompletedProcess([], 0, stdout="develop\n")
         monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._resolve_git_branch()
+        result = coverage_module.resolve_git_branch()
 
         assert result == "develop"
 
@@ -1191,7 +1191,7 @@ class TestResolveGitBranch:
         fake = subprocess.CompletedProcess([], 0, stdout="HEAD\n")
         monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._resolve_git_branch()
+        result = coverage_module.resolve_git_branch()
 
         assert result is None
 
@@ -1202,13 +1202,13 @@ class TestResolveGitBranch:
         fake = subprocess.CompletedProcess([], 1, stdout="", stderr="fatal")
         monkeypatch.setattr(coverage_module.subprocess, "run", lambda *_a, **_kw: fake)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._resolve_git_branch()
+        result = coverage_module.resolve_git_branch()
 
         assert result is None
 
 
 class TestCheckCodecovPrerequisites:
-    """Tests for _check_codecov_prerequisites function."""
+    """Tests for check_codecov_prerequisites function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -1220,7 +1220,7 @@ class TestCheckCodecovPrerequisites:
     @pytest.mark.os_agnostic
     def test_returns_none_when_report_missing(self, coverage_module: Any, tmp_path: Path) -> None:
         """Returns None when coverage report file does not exist."""
-        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+        result = coverage_module.check_codecov_prerequisites(tmp_path, "coverage.xml")
 
         assert result is None
 
@@ -1233,7 +1233,7 @@ class TestCheckCodecovPrerequisites:
         monkeypatch.delenv("CODECOV_TOKEN", raising=False)
         monkeypatch.delenv("CI", raising=False)
 
-        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+        result = coverage_module.check_codecov_prerequisites(tmp_path, "coverage.xml")
 
         assert result is None
 
@@ -1246,7 +1246,7 @@ class TestCheckCodecovPrerequisites:
         monkeypatch.setenv("CODECOV_TOKEN", "tok")
         monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: None)  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+        result = coverage_module.check_codecov_prerequisites(tmp_path, "coverage.xml")
 
         assert result is None
 
@@ -1259,7 +1259,7 @@ class TestCheckCodecovPrerequisites:
         monkeypatch.setenv("CODECOV_TOKEN", "tok")
         monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: "/usr/bin/codecovcli")  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+        result = coverage_module.check_codecov_prerequisites(tmp_path, "coverage.xml")
 
         assert result == "/usr/bin/codecovcli"
 
@@ -1273,7 +1273,7 @@ class TestCheckCodecovPrerequisites:
         monkeypatch.setenv("CI", "true")
         monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: "/usr/bin/codecovcli")  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml")
+        result = coverage_module.check_codecov_prerequisites(tmp_path, "coverage.xml")
 
         assert result == "/usr/bin/codecovcli"
 
@@ -1287,13 +1287,13 @@ class TestCheckCodecovPrerequisites:
         monkeypatch.delenv("CI", raising=False)
         monkeypatch.setattr(coverage_module.shutil, "which", lambda _name: "/usr/bin/codecovcli")  # type: ignore[reportUnknownLambdaType]
 
-        result = coverage_module._check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="my-token")
+        result = coverage_module.check_codecov_prerequisites(tmp_path, "coverage.xml", codecov_token="my-token")
 
         assert result == "/usr/bin/codecovcli"
 
 
 class TestBuildCodecovArgs:
-    """Tests for _build_codecov_args function."""
+    """Tests for build_codecov_args function."""
 
     @pytest.fixture
     def coverage_module(self) -> Any:
@@ -1305,9 +1305,9 @@ class TestBuildCodecovArgs:
     @pytest.mark.os_agnostic
     def test_includes_required_args(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Required args (file, sha, name) are always present."""
-        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+        monkeypatch.setattr(coverage_module, "resolve_git_branch", lambda: None)
 
-        args = coverage_module._build_codecov_args(
+        args = coverage_module.build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             coverage_report_file="coverage.xml",
@@ -1322,9 +1322,9 @@ class TestBuildCodecovArgs:
     @pytest.mark.os_agnostic
     def test_includes_branch_when_resolved(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Includes --branch when git branch is resolved."""
-        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: "main")
+        monkeypatch.setattr(coverage_module, "resolve_git_branch", lambda: "main")
 
-        args = coverage_module._build_codecov_args(
+        args = coverage_module.build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
         )
@@ -1335,9 +1335,9 @@ class TestBuildCodecovArgs:
     @pytest.mark.os_agnostic
     def test_includes_git_service_for_known_host(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Includes --git-service for known hosts."""
-        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+        monkeypatch.setattr(coverage_module, "resolve_git_branch", lambda: None)
 
-        args = coverage_module._build_codecov_args(
+        args = coverage_module.build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             remote=coverage_module.RepoRemote("github.com", "", ""),
@@ -1349,9 +1349,9 @@ class TestBuildCodecovArgs:
     @pytest.mark.os_agnostic
     def test_includes_slug_when_complete(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Includes --slug when owner and name are both present."""
-        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+        monkeypatch.setattr(coverage_module, "resolve_git_branch", lambda: None)
 
-        args = coverage_module._build_codecov_args(
+        args = coverage_module.build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             remote=coverage_module.RepoRemote("", "myorg", "myrepo"),
@@ -1363,9 +1363,9 @@ class TestBuildCodecovArgs:
     @pytest.mark.os_agnostic
     def test_excludes_optional_when_none(self, coverage_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """Omits --branch, --git-service, --slug when values are None."""
-        monkeypatch.setattr(coverage_module, "_resolve_git_branch", lambda: None)
+        monkeypatch.setattr(coverage_module, "resolve_git_branch", lambda: None)
 
-        args = coverage_module._build_codecov_args(
+        args = coverage_module.build_codecov_args(
             uploader="/usr/bin/codecovcli",
             commit_sha="abc123",
             remote=coverage_module.RepoRemote("unknown.example.com", "", ""),

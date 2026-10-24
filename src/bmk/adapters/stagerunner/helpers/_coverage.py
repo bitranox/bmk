@@ -43,10 +43,20 @@ from bmk.adapters.stagerunner.helpers._toml_config import coerce_table
 from bmk.domain.enums import ToolOutputFormat
 
 __all__ = [
+    "build_codecov_args",
+    "build_codecov_env",
+    "build_env",
+    "check_codecov_prerequisites",
     "ensure_codecov_token",
+    "find_dotenv_upward",
+    "get_repo_metadata_from_git",
+    "handle_codecov_result",
     "main",
     "prune_coverage_data_files",
     "remove_report_artifacts",
+    "resolve_commit_sha",
+    "resolve_git_branch",
+    "resolve_git_service",
     "run_coverage_tests",
     "upload_coverage_report",
 ]
@@ -230,7 +240,7 @@ def remove_report_artifacts(
 # ---------------------------------------------------------------------------
 
 
-def _build_env(project_dir: Path, src_path: str) -> dict[str, str]:
+def build_env(project_dir: Path, src_path: str) -> dict[str, str]:
     """Build environment for subprocess execution.
 
     Args:
@@ -488,7 +498,7 @@ def run_coverage_tests(
     prune_coverage_data_files(project_dir)
     remove_report_artifacts(project_dir, config.coverage_report_file)
 
-    base_env = _build_env(project_dir, config.src_path)
+    base_env = build_env(project_dir, config.src_path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         run = _CoverageRun(
@@ -517,7 +527,7 @@ def run_coverage_tests(
 # ---------------------------------------------------------------------------
 
 
-def _find_dotenv_upward(start_dir: Path) -> Path | None:
+def find_dotenv_upward(start_dir: Path) -> Path | None:
     """Search for .env file in start_dir and its parents up to filesystem root."""
     current = start_dir.resolve()
     for directory in [current, *current.parents]:
@@ -548,7 +558,7 @@ def ensure_codecov_token(project_dir: Path | None = None) -> str | None:
     from dotenv import dotenv_values  # noqa: PLC0415
 
     start = project_dir or Path.cwd()
-    env_path = _find_dotenv_upward(start)
+    env_path = find_dotenv_upward(start)
     if env_path is None:
         return None
 
@@ -561,7 +571,7 @@ def ensure_codecov_token(project_dir: Path | None = None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_commit_sha() -> str | None:
+def resolve_commit_sha() -> str | None:
     """Resolve the current git commit SHA from environment or git."""
     sha = os.getenv("GITHUB_SHA")
     if sha:
@@ -578,7 +588,7 @@ def _resolve_commit_sha() -> str | None:
     return candidate or None
 
 
-def _resolve_git_branch() -> str | None:
+def resolve_git_branch() -> str | None:
     """Resolve the current git branch from environment or git."""
     branch = os.getenv("GITHUB_REF_NAME")
     if branch:
@@ -620,7 +630,7 @@ _GIT_SERVICE_BY_HOST = {
 }
 
 
-def _resolve_git_service(repo_host: str | None) -> GitService | None:
+def resolve_git_service(repo_host: str | None) -> GitService | None:
     """Map repository host to Codecov git service identifier.
 
     Args:
@@ -665,7 +675,7 @@ class RepoRemote(NamedTuple):
         return None
 
 
-def _get_repo_metadata_from_git() -> RepoRemote | None:
+def get_repo_metadata_from_git() -> RepoRemote | None:
     """Extract repo metadata from git remote origin.
 
     Returns:
@@ -727,24 +737,24 @@ def upload_coverage_report(
     if project_dir is None:
         project_dir = Path.cwd()
 
-    uploader = _check_codecov_prerequisites(project_dir, coverage_report_file, codecov_token=codecov_token)
+    uploader = check_codecov_prerequisites(project_dir, coverage_report_file, codecov_token=codecov_token)
     if uploader is None:
         return False
 
-    commit_sha = _resolve_commit_sha()
+    commit_sha = resolve_commit_sha()
     if commit_sha is None:
         print("[codecov] Unable to resolve git commit; skipping upload", file=sys.stderr)
         return True
 
-    remote = _get_repo_metadata_from_git()
+    remote = get_repo_metadata_from_git()
 
-    args = _build_codecov_args(
+    args = build_codecov_args(
         uploader=uploader,
         commit_sha=commit_sha,
         coverage_report_file=coverage_report_file,
         remote=remote,
     )
-    env_overrides = _build_codecov_env(remote)
+    env_overrides = build_codecov_env(remote)
 
     # Build subprocess environment without mutating os.environ
     env = os.environ.copy()
@@ -758,10 +768,10 @@ def upload_coverage_report(
         check=False,
         cwd=project_dir,
     )
-    return _handle_codecov_result(result.returncode)
+    return handle_codecov_result(result.returncode)
 
 
-def _check_codecov_prerequisites(
+def check_codecov_prerequisites(
     project_dir: Path,
     coverage_report_file: str = DEFAULT_COVERAGE_REPORT_FILE,
     *,
@@ -798,7 +808,7 @@ def _check_codecov_prerequisites(
     return uploader
 
 
-def _build_codecov_args(
+def build_codecov_args(
     *,
     uploader: str,
     commit_sha: str,
@@ -831,14 +841,14 @@ def _build_codecov_args(
         "local",
     ]
 
-    branch = _resolve_git_branch()
+    branch = resolve_git_branch()
     if branch:
         args.extend(["--branch", branch])
 
     if remote is None:
         return args
 
-    git_service = _resolve_git_service(remote.host)
+    git_service = resolve_git_service(remote.host)
     if git_service:
         args.extend(["--git-service", git_service.value])
 
@@ -848,7 +858,7 @@ def _build_codecov_args(
     return args
 
 
-def _build_codecov_env(remote: RepoRemote | None) -> dict[str, str]:
+def build_codecov_env(remote: RepoRemote | None) -> dict[str, str]:
     """Build environment overrides for codecov upload.
 
     Args:
@@ -863,7 +873,7 @@ def _build_codecov_env(remote: RepoRemote | None) -> dict[str, str]:
     return env_overrides
 
 
-def _handle_codecov_result(exit_code: int) -> bool:
+def handle_codecov_result(exit_code: int) -> bool:
     """Handle the codecov upload result.
 
     Args:
