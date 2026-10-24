@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.24.1] 2026-10-24 13:41:02
+
 ### Fixed
 
 - **`bmk test` and `bmk custom` stop with exit 78 on a refused `[bmk.supply_chain]` value.** They
