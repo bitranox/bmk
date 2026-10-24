@@ -6,6 +6,34 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- A refusal now exits with the same code on every OS. A malformed `[tool.bmk.pipelines]` overlay,
+  a `bmk_makescripts/stages.toml` whose `pipelines` is not a table, and a `pyproject.toml` or
+  `stages.toml` that is not valid TOML or not UTF-8 exit **78** (configuration error) with one
+  `Error:` line naming the file. They used to exit 22 on Linux and macOS and 87 on Windows, with
+  the exception's text. `--traceback` still shows the traceback.
+- `make test-all` with a worker count below 1 (`BMK_TEST_ALL_WORKERS` or
+  `[tool.scripts.test-all].workers`) refuses before installing any Python, exit 2, without the
+  stray `SystemExit: 2` line.
+- The `devops-bmk` skill covers release cascades, the codecov upload in a repo with no remote,
+  dependency floors that `make test` raises, and the `plugin.json` bump.
+
+### Fixed
+
+- The cooldown floor pins settle when the pins cycle. A forward pin that stopped reaching the
+  requirement which asked for it made the passes repeat the same states until bmk gave up with
+  "floor pins did not settle within 50 passes" and wrote no pin, leaving a release with only some
+  of its files visible to `uv lock`. bmk now ends such a cycle on the strictest pin each package
+  held in it, keeping a looser one only where the stricter would still expose a partly visible
+  release.
+- A passing JSON-mode run is quiet again: the HTTP client's per-request INFO lines
+  (`HTTP Request: GET https://pypi.org/...`, one per PyPI document) no longer reach the console.
+  Its warnings and errors still do.
+- A `Makefile` that is not UTF-8 no longer aborts every command: the version check treats it as
+  not bmk's, and `bmk install` refuses to replace it.
+- An empty interactive commit message is refused with one `Error:` line instead of a traceback.
+
 ## [3.26.0] 2026-10-24 23:15:15
 
 ### Fixed
