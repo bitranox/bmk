@@ -126,3 +126,36 @@ def test_custom_command_reports_a_bad_overlay_without_pydantic_internals(
     assert "https://errors.pydantic.dev" not in err
     assert "input_value" not in err
     assert "validation errors for Overlay" not in err
+
+
+@pytest.mark.os_agnostic
+def test_a_stages_toml_pipelines_key_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
+    """``pipelines`` belongs to bmk; a wrong shape there must not silently hand over to pyproject."""
+    _two_overlays(tmp_path, "pipelines = 3\n")
+
+    with pytest.raises(ValueError, match="must be a table") as raised:
+        load_overlay(tmp_path, "deploy")
+
+    assert str(raised.value) == "invalid bmk_makescripts/stages.toml [pipelines]:\n  must be a table"
+
+
+@pytest.mark.os_agnostic
+def test_a_pyproject_pipelines_key_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "0.1.0"\n\n[tool.bmk]\npipelines = 5\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="must be a table") as raised:
+        load_overlay(tmp_path, "deploy")
+
+    assert str(raised.value) == "invalid [tool.bmk.pipelines]:\n  must be a table"
+
+
+@pytest.mark.os_agnostic
+def test_a_wrong_shaped_shared_tool_table_still_reads_as_no_overlay(tmp_path: Path) -> None:
+    """``[tool]`` is shared with every other tool; its shape is not bmk's to refuse."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "0.1.0"\ntool = 3\n', encoding="utf-8"
+    )
+
+    assert load_overlay(tmp_path, "deploy") is None

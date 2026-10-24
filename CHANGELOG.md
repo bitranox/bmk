@@ -39,8 +39,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **`bmk_makescripts/stages.toml` wins whenever it names a pipeline.** An empty
   `[pipelines.<name>]` table there fell through to the `pyproject.toml` overlay, and a section that
   is not a table (an `[[pipelines.<name>]]` typo) was ignored silently while also hiding the
-  `pyproject.toml` overlay. An empty table now means "no overlay", and a non-table section is
-  refused with `must be a table`.
+  `pyproject.toml` overlay. An empty table now means "no overlay", and a non-table section, or a
+  `pipelines` key that is not a table in either file, is refused with `must be a table`.
 
 ### Changed
 

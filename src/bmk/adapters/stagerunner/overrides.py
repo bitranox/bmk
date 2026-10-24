@@ -77,13 +77,26 @@ def apply_overlay(stages: Sequence[Stage], overlay: Overlay) -> tuple[Stage, ...
     return tuple(result)
 
 
-def _pipelines_from(path: Path, root_keys: tuple[str, ...]) -> dict[str, Any]:
+def _pipelines_from(path: Path, root_keys: tuple[str, ...], *, where: str) -> dict[str, Any]:
+    """The ``pipelines`` table under ``root_keys`` of ``path``; empty when the file or a key is absent.
+
+    A wrong-shaped SHARED parent (``tool`` in pyproject.toml) reads as "not configured", as every
+    other pyproject reader does. The last key is bmk's own, so a wrong shape there is refused:
+    ignoring it would silently hand the pipeline over to the other file's overlay.
+
+    Raises:
+        ValueError: The last of ``root_keys`` is present but not a table.
+    """
     if not path.is_file():
         return {}
     node: dict[str, Any] = rtoml.load(path)
-    for key in root_keys:
-        child = node.get(key, {})
+    for depth, key in enumerate(root_keys, start=1):
+        if key not in node:
+            return {}
+        child = node[key]
         if not isinstance(child, dict):
+            if depth == len(root_keys):
+                raise ValueError(f"invalid {where}:\n  must be a table")
             return {}
         node = cast("dict[str, Any]", child)
     return node
@@ -96,8 +109,10 @@ def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
         ValueError: The overlay is not a table, or is malformed; the message names the file's
             table and each problem on its own line as ``<dotted location>: <reason>``.
     """
-    pyproject = _pipelines_from(cwd / "pyproject.toml", ("tool", "bmk", "pipelines"))
-    stages_toml = _pipelines_from(cwd / "bmk_makescripts" / "stages.toml", ("pipelines",))
+    pyproject = _pipelines_from(cwd / "pyproject.toml", ("tool", "bmk", "pipelines"), where="[tool.bmk.pipelines]")
+    stages_toml = _pipelines_from(
+        cwd / "bmk_makescripts" / "stages.toml", ("pipelines",), where="bmk_makescripts/stages.toml [pipelines]"
+    )
 
     # stages.toml wins whenever it names the pipeline, even with an empty table: precedence is by
     # presence, so an empty table there is a deliberate "no overlay", not a fall-through. The
