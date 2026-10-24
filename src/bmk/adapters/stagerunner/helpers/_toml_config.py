@@ -27,6 +27,8 @@ __all__ = [
     "CleanConfig",
     "GitConfig",
     "PSScriptAnalyzerConfig",
+    "PoetryDepSpec",
+    "PoetrySourceKind",
     "ProjectSection",
     "PyprojectConfig",
     "ScriptsConfig",
@@ -254,39 +256,222 @@ class PoetryVersionOperator(str, Enum):
     TILDE = "~"
 
 
+class PoetrySourceKind(str, Enum):
+    """Where a Poetry dependency comes from, which decides whether PyPI may be asked about it.
+
+    Only a REGISTRY dependency is a PyPI requirement. A GIT, URL or PATH dependency is rendered
+    as a PEP 508 direct reference (``name @ ...``), which the dependency stage skips. A
+    PRIVATE_INDEX dependency names a ``source`` other than PyPI: the same name on PyPI may be an
+    unrelated (or squatted) package, so it is not offered to PyPI at all.
+    """
+
+    REGISTRY = "registry"
+    PRIVATE_INDEX = "private-index"
+    GIT = "git"
+    URL = "url"
+    PATH = "path"
+
+
+class _PoetryClause(BaseModel):
+    """One comparison of a Poetry constraint, already in PEP 440 terms (``>=``, ``3.8``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    operator: str
+    version: str
+
+
+# A Poetry constraint is a run of clauses separated by commas or plain whitespace, each an
+# optional operator then a version (``>= 2.13, < 3`` and ``^2.13,<2.20`` alike). The longer
+# operators come first so ``~=`` is never read as Poetry's ``~`` followed by ``=``.
+_POETRY_CLAUSE_RE = re.compile(
+    r"\s*,?\s*(?P<op>===|~=|==|!=|>=|<=|\^|~|>|<|=)?\s*(?P<ver>\*|[0-9][0-9A-Za-z.*+!_-]*)\s*"
+)
+
+# Poetry separates alternatives with ``||`` (a single ``|`` is accepted too).
+_POETRY_OR_RE = re.compile(r"\s*\|\|?\s*")
+
+# The PyPI source name Poetry predefines; naming it explicitly is still a PyPI dependency.
+_POETRY_PYPI_SOURCE = "pypi"
+
+
+def _poetry_pep440_operator(operator: str) -> str:
+    """The PEP 440 operator for one Poetry clause operator.
+
+    Caret and tilde become the ``>=`` floor (see ``PoetryVersionOperator``); no operator, or a
+    single ``=``, is Poetry's exact pin.
+    """
+    if operator in {member.value for member in PoetryVersionOperator}:
+        return ">="
+    if operator in {"", "="}:
+        return "=="
+    return operator
+
+
+def _poetry_clauses(text: str) -> tuple[_PoetryClause, ...] | None:
+    """Split one Poetry conjunction into PEP 440 clauses, dropping ``*`` (it constrains nothing).
+
+    Returns:
+        The clauses (empty for no constraint), or None when the text holds anything the
+        clause grammar does not cover, so the caller can degrade instead of emitting it.
+    """
+    clauses: list[_PoetryClause] = []
+    text = text.strip()
+    position = 0
+    while position < len(text):
+        match = _POETRY_CLAUSE_RE.match(text, position)
+        if match is None or match.end() == position:
+            return None
+        position = match.end()
+        if match.group("ver") != "*":
+            clauses.append(
+                _PoetryClause(operator=_poetry_pep440_operator(match.group("op") or ""), version=match.group("ver"))
+            )
+    return tuple(clauses)
+
+
+def _python_marker_clause(clause: _PoetryClause) -> str:
+    """One clause as a marker comparison.
+
+    ``python_version`` is only ``X.Y``, so a bound naming a patch (``<3.11.2``) must compare
+    against ``python_full_version`` or 3.11.5 would read as below it.
+    """
+    release_parts = [part for part in clause.version.split(".") if part != "*"]
+    variable = "python_full_version" if len(release_parts) >= 3 else "python_version"
+    return f'{variable} {clause.operator} "{clause.version}"'
+
+
+def _poetry_python_marker(constraint: str) -> str:
+    """A Poetry ``python`` constraint as a PEP 508 marker; empty when it limits nothing.
+
+    An alternative the clause grammar cannot read degrades to no condition, the module's
+    usual fallback for a value it does not understand.
+    """
+    texts = _POETRY_OR_RE.split(constraint.strip())
+    alternatives: list[str] = []
+    for text in texts:
+        clauses = _poetry_clauses(text)
+        if not clauses:
+            # None (unreadable) or () (``*``): this alternative admits every Python.
+            return ""
+        joined = " and ".join(_python_marker_clause(clause) for clause in clauses)
+        alternatives.append(f"({joined})" if len(clauses) > 1 and len(texts) > 1 else joined)
+    return " or ".join(alternatives)
+
+
+def _parenthesise_disjunction(marker: str) -> str:
+    """Wrap a marker holding ``or`` so joining it with ``and`` keeps its meaning."""
+    return f"({marker})" if " or " in marker else marker
+
+
 class PoetryDepSpec(BaseModel):
-    """A single Poetry dependency: name, Poetry-style version constraint, extras."""
+    """One Poetry dependency constraint, with the conditions and source that decide where it applies.
+
+    Built from the TOML table itself (``extra`` keys such as ``optional`` or ``develop`` are
+    ignored); every field degrades a wrong-typed value the way the rest of this module does.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     name: str
-    version: str = ""
-    extras: tuple[str, ...] = ()
+    version: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    extras: Annotated[tuple[str, ...], BeforeValidator(coerce_str_tuple)] = ()
+    markers: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    python: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    platform: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    git: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    branch: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    tag: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    rev: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    subdirectory: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    url: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    path: Annotated[str, BeforeValidator(_coerce_str)] = ""
+    source: Annotated[str, BeforeValidator(_coerce_str)] = ""
+
+    @property
+    def source_kind(self) -> PoetrySourceKind:
+        """Where the package comes from; git wins over url over path, as only one is meaningful."""
+        if self.git:
+            return PoetrySourceKind.GIT
+        if self.url:
+            return PoetrySourceKind.URL
+        if self.path:
+            return PoetrySourceKind.PATH
+        if self.source and self.source.strip().lower() != _POETRY_PYPI_SOURCE:
+            return PoetrySourceKind.PRIVATE_INDEX
+        return PoetrySourceKind.REGISTRY
 
     def to_requirement_string(self) -> str:
-        """Convert to a PEP 508 requirement string."""
-        if not self.version or self.version == "*":
-            return self.name
-        for operator in PoetryVersionOperator:
-            if self.version.startswith(operator.value):
-                return f"{self.name}>={self.version[len(operator.value) :]}"
-        return f"{self.name}{self.version}"
+        """Convert to a PEP 508 requirement string carrying this constraint's conditions.
+
+        Returns:
+            ``name[extras]<specifier>; <marker>`` for a PyPI dependency, a direct reference
+            ``name[extras] @ <url> ; <marker>`` for a git/url/path one, and an empty string
+            for one from a private index (the dependency stage skips both of the last two).
+
+        Examples:
+            >>> PoetryDepSpec(name="tomli", version="^2", python="<3.11").to_requirement_string()
+            'tomli>=2; python_version < "3.11"'
+            >>> PoetryDepSpec(name="foo", git="https://h/foo.git", tag="v1").to_requirement_string()
+            'foo @ git+https://h/foo.git@v1'
+        """
+        kind = self.source_kind
+        if kind is PoetrySourceKind.PRIVATE_INDEX:
+            return ""
+        head = f"{self.name}[{','.join(self.extras)}]" if self.extras else self.name
+        marker = self._marker()
+        if kind is PoetrySourceKind.REGISTRY:
+            return f"{head}{self._specifier()}" + (f"; {marker}" if marker else "")
+        # PEP 508 needs whitespace between a URL and the ';' that starts its marker.
+        return f"{head} @ {self._direct_reference()}" + (f" ; {marker}" if marker else "")
+
+    def _specifier(self) -> str:
+        """The PEP 440 specifier; empty for ``*``, no version, or text the clause grammar cannot read."""
+        if _POETRY_OR_RE.search(self.version):
+            # PEP 440 has no "or"; no floor at all is the honest reading of alternatives.
+            return ""
+        clauses = _poetry_clauses(self.version)
+        return ",".join(f"{c.operator}{c.version}" for c in clauses) if clauses else ""
+
+    def _marker(self) -> str:
+        """``markers``, ``python`` and ``platform`` joined with ``and``; empty when none applies."""
+        platform = self.platform.strip()
+        parts = [
+            self.markers.strip(),
+            _poetry_python_marker(self.python),
+            f'sys_platform == "{platform}"' if platform else "",
+        ]
+        return " and ".join(_parenthesise_disjunction(part) for part in parts if part)
+
+    def _direct_reference(self) -> str:
+        """The URL of a git/url/path dependency, in the form pip and uv accept after ``@``."""
+        fragment = f"#subdirectory={self.subdirectory}" if self.subdirectory else ""
+        if self.source_kind is PoetrySourceKind.GIT:
+            url = self.git if self.git.startswith("git+") else f"git+{self.git}"
+            ref = self.rev or self.tag or self.branch
+            return f"{url}@{ref}{fragment}" if ref else f"{url}{fragment}"
+        if self.source_kind is PoetrySourceKind.URL:
+            return f"{self.url}{fragment}"
+        return self.path
 
 
-def _parse_poetry_dep_entry(name: str, spec: Any) -> PoetryDepSpec:
-    """A Poetry dependency value is either a bare version string or a table with its
-    own version/extras keys; any other shape is treated as "no version, no extras".
+def _parse_poetry_dep_entry(name: str, spec: Any) -> tuple[PoetryDepSpec, ...]:
+    """A Poetry dependency value is a bare version string, a table, or a LIST of tables (one
+    per constraint, each with its own python/markers); any other shape is treated as "no
+    version, no conditions".
     """
     if isinstance(spec, str):
-        return PoetryDepSpec(name=name, version=spec)
+        return (PoetryDepSpec(name=name, version=spec),)
     if isinstance(spec, dict):
-        typed_spec = cast("dict[str, Any]", spec)
-        return PoetryDepSpec(
-            name=name,
-            version=_coerce_str(typed_spec.get("version")),
-            extras=coerce_str_tuple(typed_spec.get("extras")),
+        return (PoetryDepSpec.model_validate({**cast("dict[str, Any]", spec), "name": name}),)
+    if isinstance(spec, list):
+        return tuple(
+            dep
+            for item in cast("list[Any]", spec)
+            if isinstance(item, (str, dict))
+            for dep in _parse_poetry_dep_entry(name, item)
         )
-    return PoetryDepSpec(name=name)
+    return (PoetryDepSpec(name=name),)
 
 
 def _parse_poetry_deps(v: Any) -> tuple[PoetryDepSpec, ...]:
@@ -304,7 +489,7 @@ def _parse_poetry_deps(v: Any) -> tuple[PoetryDepSpec, ...]:
         name = str(name_raw)
         if name.lower() == "python":
             continue
-        result.append(_parse_poetry_dep_entry(name, spec))
+        result.extend(_parse_poetry_dep_entry(name, spec))
     return tuple(result)
 
 
