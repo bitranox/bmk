@@ -11,11 +11,19 @@ signal-to-exit-code translation automatically.
 
 Contents:
     * :class:`ExitCode` - IntEnum of all exit codes used by this application.
+    * :data:`REFUSAL_EXIT_CODES` - the one exit code for each kind of refusal.
 """
 
 from __future__ import annotations
 
 from enum import IntEnum
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Final
+
+from bmk.domain.errors import RefusalKind
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class ExitCode(IntEnum):
@@ -54,4 +62,19 @@ class ExitCode(IntEnum):
     SIGNAL_TERM = 143
 
 
-__all__ = ["ExitCode"]
+#: How ``main()`` ends a :class:`~bmk.domain.errors.RefusalError` that no command handled.
+#: Fixed values, so a refusal exits the same on every OS; the generic crash handler would
+#: use the platform's errno for the exception type instead (EINVAL is 22 on POSIX, 87 on
+#: Windows). Read-only, so no caller can re-map a kind for everyone else.
+REFUSAL_EXIT_CODES: Final[Mapping[RefusalKind, ExitCode]] = MappingProxyType(
+    {
+        RefusalKind.CONFIG: ExitCode.CONFIG_ERROR,
+        RefusalKind.INVALID_ARGUMENT: ExitCode.INVALID_ARGUMENT,
+        RefusalKind.NOT_FOUND: ExitCode.FILE_NOT_FOUND,
+        RefusalKind.PERMISSION: ExitCode.PERMISSION_DENIED,
+        RefusalKind.PRECONDITION: ExitCode.GENERAL_ERROR,
+    }
+)
+
+
+__all__ = ["REFUSAL_EXIT_CODES", "ExitCode"]

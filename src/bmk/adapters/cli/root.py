@@ -116,9 +116,10 @@ def cli(
             from .commands.install_cmd import check_makefile_update  # noqa: PLC0415
 
             check_makefile_update()
-        except (OSError, click.Abort):
-            # Best-effort convenience check; an I/O error or a declined prompt
-            # (non-interactive Abort) must never block the command the user actually ran.
+        except (OSError, UnicodeDecodeError, click.Abort):
+            # Best-effort convenience check; an I/O error, a Makefile that is not UTF-8 text, or
+            # a declined prompt (non-interactive Abort) must never block the command the user
+            # actually ran.
             pass
 
     if ctx.invoked_subcommand is None:

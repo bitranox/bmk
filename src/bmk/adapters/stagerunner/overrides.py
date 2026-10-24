@@ -8,7 +8,8 @@ is safe and cross-OS. Sources, in ascending precedence:
 2. ``bmk_makescripts/stages.toml``  -> ``[pipelines.<prefix>]`` (wins if present)
 
 This parses untrusted project config, so the overlay is a Pydantic model
-validated at this boundary; a malformed overlay surfaces as a clear ``ValueError``.
+validated at this boundary; a file that will not parse, or a malformed overlay,
+surfaces as an :class:`OverlayRefusedError` naming the file or table to fix.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import rtoml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from bmk.domain.errors import ConfigurationError
 
 from .actions import ToolAction
 from .model import Stage, StageContext
@@ -28,6 +31,14 @@ if TYPE_CHECKING:
     from pydantic_core import ErrorDetails
 
 _MAX_ARGV = 256
+
+
+class OverlayRefusedError(ConfigurationError, ValueError):
+    """The project's pipeline overlay cannot be used; the message names what to fix.
+
+    A configuration refusal, so the CLI exits ``CONFIG_ERROR`` (78) on every OS. Also a
+    ValueError: a malformed overlay is a bad value, and a caller may handle it as one.
+    """
 
 
 class StageSpec(BaseModel):
@@ -77,26 +88,33 @@ def apply_overlay(stages: Sequence[Stage], overlay: Overlay) -> tuple[Stage, ...
     return tuple(result)
 
 
-def _pipelines_from(path: Path, root_keys: tuple[str, ...], *, where: str) -> dict[str, Any]:
+def _pipelines_from(path: Path, root_keys: tuple[str, ...], *, label: str, where: str) -> dict[str, Any]:
     """The ``pipelines`` table under ``root_keys`` of ``path``; empty when the file or a key is absent.
 
     A wrong-shaped SHARED parent (``tool`` in pyproject.toml) reads as "not configured", as every
     other pyproject reader does. The last key is bmk's own, so a wrong shape there is refused:
     ignoring it would silently hand the pipeline over to the other file's overlay.
 
+    A file that is not UTF-8 TOML is refused too, rather than read as "no overlay": its overlay
+    may well be in there, and running the built-in stages instead would be a silent substitution.
+
     Raises:
-        ValueError: The last of ``root_keys`` is present but not a table.
+        OverlayRefusedError: ``path`` (shown as ``label``) is not UTF-8 or not valid TOML, or the
+            last of ``root_keys`` is present but not a table.
     """
     if not path.is_file():
         return {}
-    node: dict[str, Any] = rtoml.load(path)
+    try:
+        node: dict[str, Any] = rtoml.load(path)
+    except (rtoml.TomlParsingError, UnicodeDecodeError) as exc:
+        raise OverlayRefusedError(f"cannot read {label}:\n  {exc}") from exc
     for depth, key in enumerate(root_keys, start=1):
         if key not in node:
             return {}
         child = node[key]
         if not isinstance(child, dict):
             if depth == len(root_keys):
-                raise ValueError(f"invalid {where}:\n  must be a table")
+                raise OverlayRefusedError(f"invalid {where}:\n  must be a table")
             return {}
         node = cast("dict[str, Any]", child)
     return node
@@ -106,12 +124,18 @@ def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
     """Load and validate the overlay for ``prefix``; ``stages.toml`` wins whenever it names it.
 
     Raises:
-        ValueError: The overlay is not a table, or is malformed; the message names the file's
-            table and each problem on its own line as ``<dotted location>: <reason>``.
+        OverlayRefusedError: A file will not parse, or the overlay is not a table, or is
+            malformed; the message names the file or its table and each problem on its own line
+            as ``<dotted location>: <reason>``.
     """
-    pyproject = _pipelines_from(cwd / "pyproject.toml", ("tool", "bmk", "pipelines"), where="[tool.bmk.pipelines]")
+    pyproject = _pipelines_from(
+        cwd / "pyproject.toml", ("tool", "bmk", "pipelines"), label="pyproject.toml", where="[tool.bmk.pipelines]"
+    )
     stages_toml = _pipelines_from(
-        cwd / "bmk_makescripts" / "stages.toml", ("pipelines",), where="bmk_makescripts/stages.toml [pipelines]"
+        cwd / "bmk_makescripts" / "stages.toml",
+        ("pipelines",),
+        label="bmk_makescripts/stages.toml",
+        where="bmk_makescripts/stages.toml [pipelines]",
     )
 
     # stages.toml wins whenever it names the pipeline, even with an empty table: precedence is by
@@ -125,7 +149,7 @@ def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
     else:
         return None
     if not isinstance(section, dict):
-        raise ValueError(f"invalid {where} overlay:\n  must be a table")
+        raise OverlayRefusedError(f"invalid {where} overlay:\n  must be a table")
     if not section:
         return None
     try:
@@ -133,7 +157,7 @@ def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
     except ValidationError as exc:
         problems = "".join(f"\n  {_problem(item)}" for item in exc.errors(include_url=False))
         msg = f"invalid {where} overlay:{problems}"
-        raise ValueError(msg) from exc
+        raise OverlayRefusedError(msg) from exc
 
 
 def _problem(item: ErrorDetails) -> str:
@@ -157,6 +181,7 @@ def resolve_stages(cwd: Path, prefix: str, base: Sequence[Stage]) -> list[Stage]
 
 __all__ = [
     "Overlay",
+    "OverlayRefusedError",
     "StageSpec",
     "apply_overlay",
     "load_overlay",

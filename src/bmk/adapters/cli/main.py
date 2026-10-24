@@ -18,6 +18,7 @@ import lib_log_rich.runtime
 
 import bmk_toollock
 from bmk import __init__conf__
+from bmk.domain.errors import RefusalError
 
 from .constants import TRACEBACK_SUMMARY_LIMIT, TRACEBACK_VERBOSE_LIMIT
 from .context import (
@@ -25,6 +26,7 @@ from .context import (
     restore_traceback_state,
     snapshot_traceback_state,
 )
+from .exit_codes import REFUSAL_EXIT_CODES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -43,11 +45,12 @@ def _run_cli(argv: Sequence[str] | None, *, services_factory: Callable[[], AppSe
         Exit code produced by the command.
     """
     # Deferred: importing `.root` registers every CLI command module, which is real
-    # import weight. Code that references `main` without invoking it (wiring, other
-    # entry points) must not pay for that just by importing this module.
+    # import weight, and `safe_console` pulls in rich_click. Code that references `main`
+    # without invoking it (wiring, other entry points) must not pay for that just by
+    # importing this module.
     import click  # noqa: PLC0415
 
-    from .root import cli  # noqa: PLC0415
+    from . import root, safe_console  # noqa: PLC0415
 
     # Use Click's native invocation with obj parameter since lib_cli_exit_tools.run_cli
     # doesn't support passing obj. We replicate its behavior while adding obj support.
@@ -61,7 +64,7 @@ def _run_cli(argv: Sequence[str] | None, *, services_factory: Callable[[], AppSe
         # same way, so the exit code arrives here as a return value and never as an Exit.
         # Commands therefore exit through ctx.exit() and never raise a bare SystemExit, which
         # would fall into the catch-all branch below and print as "SystemExit: N".
-        exit_code = cli.main(
+        exit_code = root.cli.main(
             args=args,
             prog_name=__init__conf__.shell_command,
             obj=services_factory,
@@ -71,17 +74,42 @@ def _run_cli(argv: Sequence[str] | None, *, services_factory: Callable[[], AppSe
     except click.ClickException as exc:
         exc.show()
         return exc.exit_code
+    except RefusalError as exc:
+        # A deliberate refusal is not a crash: one line and a fixed code, never the generic
+        # handler below, whose code is the OS's errno for the exception type and so differs
+        # between POSIX and Windows for the same refusal.
+        if not _print_active_exception():
+            safe_console.echo(f"Error: {exc}", err=True)
+        return int(REFUSAL_EXIT_CODES[exc.kind])
     except BaseException as exc:
         # Catch BaseException (not just Exception) to handle SystemExit, KeyboardInterrupt,
         # and all errors at the CLI boundary. This ensures consistent error formatting via
         # lib_cli_exit_tools regardless of exception type. Intentional, not a bug.
-        tracebacks_enabled = bool(getattr(lib_cli_exit_tools.config, "traceback", False))
-        apply_traceback_preferences(tracebacks_enabled)
-        length_limit = TRACEBACK_VERBOSE_LIMIT if tracebacks_enabled else TRACEBACK_SUMMARY_LIMIT
-        lib_cli_exit_tools.print_exception_message(trace_back=tracebacks_enabled, length_limit=length_limit)
+        _print_active_exception(always=True)
         return lib_cli_exit_tools.get_system_exit_code(exc)
     finally:
         restore_signals()
+
+
+def _print_active_exception(*, always: bool = False) -> bool:
+    """Render the exception being handled through lib_cli_exit_tools, honouring ``--traceback``.
+
+    Must be called from inside an ``except`` block: the renderer reads ``sys.exc_info()``.
+
+    Args:
+        always: Render a summary even when tracebacks are off. A crash always says what
+            happened; a refusal prints its own one-line message instead.
+
+    Returns:
+        Whether anything was rendered.
+    """
+    tracebacks_enabled = bool(getattr(lib_cli_exit_tools.config, "traceback", False))
+    if not (tracebacks_enabled or always):
+        return False
+    apply_traceback_preferences(tracebacks_enabled)
+    length_limit = TRACEBACK_VERBOSE_LIMIT if tracebacks_enabled else TRACEBACK_SUMMARY_LIMIT
+    lib_cli_exit_tools.print_exception_message(trace_back=tracebacks_enabled, length_limit=length_limit)
+    return True
 
 
 def _warn_if_environment_was_replaced(installation: tuple[int, int, int] | None) -> None:

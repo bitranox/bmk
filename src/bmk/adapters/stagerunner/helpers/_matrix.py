@@ -37,6 +37,7 @@ from bmk.adapters.stagerunner.venv import (
     venv_python,
     venv_version,
 )
+from bmk.domain.errors import RefusalError, RefusalKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -236,13 +237,13 @@ def _workers_from_pyproject(project_dir: Path) -> int | None:
 def _reject_below_one(value: int, *, source: str) -> None:
     """A configured worker count below 1 is a deliberate but nonsensical instruction -
     unlike an absent or wrong-shaped value, this does not degrade to the default.
+
+    Raises:
+        RefusalError: ``value`` is below 1; the message names ``source``.
     """
     if value < 1:
-        print(
-            f"[test-all] {source} must be >= 1 (1 means serial), got: {value}",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
+        msg = f"{source} must be >= 1 (1 means serial), got: {value}"
+        raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT)
 
 
 def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, str] | None = None) -> int:
@@ -256,13 +257,17 @@ def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, s
     A configured value is capped at ``len(minors)`` (no point asking for more threads
     than there are cells) but never raised - a project that explicitly asks for
     ``workers = 1`` gets exactly the serial behaviour it declared. An explicit value
-    below 1 is refused with ``SystemExit(2)`` naming which setting was wrong; a
+    below 1, or a non-integer env value, is refused with a :class:`RefusalError` naming
+    which setting was wrong; a
     wrong-shaped or unparsable value falls back to the default instead, matching how
     every other pyproject-authored setting in this project degrades (see
     ``_toml_config.py``) - only a value the project MEANT to set to something invalid is
     an error. Called only with a non-empty ``minors`` (``main`` takes the no-classifiers
     fallback before this is reached), so capping against ``len(minors)`` never collapses
     to zero.
+
+    Raises:
+        RefusalError: The env var or the pyproject setting holds a worker count bmk refuses.
     """
     resolved_env: Mapping[str, str] = env if env is not None else os.environ
     default = min(len(minors), os.cpu_count() or 4)
@@ -272,11 +277,8 @@ def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, s
         try:
             configured = int(raw_env)
         except ValueError:
-            print(
-                f"[test-all] {_WORKERS_ENV} must be an integer, got: {raw_env!r}",
-                file=sys.stderr,
-            )
-            raise SystemExit(2) from None
+            msg = f"{_WORKERS_ENV} must be an integer, got: {raw_env!r}"
+            raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT) from None
         _reject_below_one(configured, source=_WORKERS_ENV)
         return min(configured, len(minors))
 
@@ -308,17 +310,25 @@ def main(
     ``prepare_minors`` installs or upgrades every declared Python, serially, before the first
     cell: doing it inside the cells let one cell's install rewrite uv's minor aliases while
     another cell synced its venv, which then had no interpreter (bmk OPEN-WORK [102]).
+
+    A refused worker count returns 2 with one stderr line, before any Python is installed:
+    raising past this helper would leave the stage engine nothing to report but a crash.
     """
     minors = all_python_minors(project_dir)
     if not minors:
         return _run_default_cell(project_dir, quiet=quiet)
+
+    try:
+        workers = resolve_workers(project_dir, minors, env=env)
+    except RefusalError as exc:
+        print(f"[test-all] {exc}", file=sys.stderr)
+        return 2
 
     prepare_minors(project_dir, minors, quiet=quiet)
 
     def run(minor: str) -> CellResult:
         return run_cell(project_dir, minor, quiet=quiet)
 
-    workers = resolve_workers(project_dir, minors, env=env)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(run, minors))
 

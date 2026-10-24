@@ -49,6 +49,17 @@ def _deploy_makefile(target: Path) -> None:
         shutil.copy2(_BUNDLED_COOLDOWN, target.with_name(_DEPLOYED_COOLDOWN))
 
 
+def _first_line(path: Path) -> str | None:
+    """The first line of ``path``, or None when it is not UTF-8 text.
+
+    bmk writes its Makefile as UTF-8, so a file that will not decode is not one bmk manages.
+    """
+    try:
+        return path.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
+    except UnicodeDecodeError:
+        return None
+
+
 def _extract_version(first_line: str) -> str | None:
     """Extract version from a sentinel line like '# BMK MAKEFILE 1.0.0'.
 
@@ -78,14 +89,16 @@ def check_makefile_update() -> bool:
     writes to would block the read forever. The update is then declined, as the prompt's own
     default would, and stderr names ``bmk install`` as the way to apply it.
 
-    Silently returns False on any I/O error or non-interactive Abort.
+    Returns False for a Makefile that is not UTF-8 text: bmk did not write it. An I/O error
+    or a non-interactive ``click.Abort`` propagates; the root command treats the whole check
+    as best-effort.
     """
     target = Path.cwd() / "Makefile"
     if not target.is_file() or not _BUNDLED_MAKEFILE.is_file():
         return False
 
-    local_first = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
-    local_ver = _extract_version(local_first)
+    # A Makefile that is not UTF-8 reads as "", which carries no sentinel: bmk did not write it.
+    local_ver = _extract_version(_first_line(target) or "")
     if local_ver is None:
         return False
 
@@ -115,6 +128,32 @@ def check_makefile_update() -> bool:
     return True
 
 
+def _install_into(target: Path) -> ExitCode | None:
+    """Install the bundled Makefile at ``target``, or update one bmk manages.
+
+    A Makefile bmk did not write - no sentinel, or not UTF-8 text at all - is left untouched.
+
+    Returns:
+        None when the Makefile was written; the exit code when it was refused.
+    """
+    if not target.exists():
+        logger.info("Installing bmk Makefile")
+        safe_console.echo("Installing bmk Makefile")
+        _deploy_makefile(target)
+        return None
+    first_line = _first_line(target)
+    if first_line is None:
+        safe_console.echo("Makefile exists but is not UTF-8 text, so bmk does not manage it - skipping", err=True)
+        return ExitCode.GENERAL_ERROR
+    if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
+        safe_console.echo("Makefile exists but is not managed by bmk - skipping", err=True)
+        return ExitCode.GENERAL_ERROR
+    logger.info("Updating existing bmk Makefile")
+    safe_console.echo("Updating existing bmk Makefile")
+    _deploy_makefile(target)
+    return None
+
+
 @click.command("install", context_settings=CLICK_CONTEXT_SETTINGS)
 def cli_install() -> None:
     """Install or update the bmk Makefile in the current directory.
@@ -135,21 +174,7 @@ def cli_install() -> None:
             safe_console.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
             makefile_exit = ExitCode.FILE_NOT_FOUND
         else:
-            target = Path.cwd() / "Makefile"
-
-            if target.exists():
-                first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
-                if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
-                    safe_console.echo("Makefile exists but is not managed by bmk - skipping", err=True)
-                    makefile_exit = ExitCode.GENERAL_ERROR
-                else:
-                    logger.info("Updating existing bmk Makefile")
-                    safe_console.echo("Updating existing bmk Makefile")
-                    _deploy_makefile(target)
-            else:
-                logger.info("Installing bmk Makefile")
-                safe_console.echo("Installing bmk Makefile")
-                _deploy_makefile(target)
+            makefile_exit = _install_into(Path.cwd() / "Makefile")
 
         # Deferred: keep `bmk install` (and thus command registration) from paying
         # for the prerequisites-check module unless this command actually runs.

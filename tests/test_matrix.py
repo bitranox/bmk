@@ -33,6 +33,7 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     resolve_workers,
 )
 from bmk.adapters.stagerunner.venv import venv_python
+from bmk.domain.errors import RefusalError, RefusalKind
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -437,26 +438,67 @@ def test_resolve_workers_is_capped_at_the_number_of_cells(tmp_path: Path) -> Non
 def test_resolve_workers_rejects_less_than_one_from_pyproject(tmp_path: Path, bad_value: int) -> None:
     _write_pyproject_with_workers(tmp_path, ["3.10", "3.12"], bad_value)
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(RefusalError) as excinfo:
         resolve_workers(tmp_path, ["3.10", "3.12"], env={})
-    assert excinfo.value.code == 2
+    assert excinfo.value.kind is RefusalKind.INVALID_ARGUMENT
 
 
 @pytest.mark.parametrize("bad_value", ["0", "-1"])
 def test_resolve_workers_rejects_less_than_one_from_env(tmp_path: Path, bad_value: str) -> None:
     _write_pyproject(tmp_path, ["3.10", "3.12"])
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(RefusalError) as excinfo:
         resolve_workers(tmp_path, ["3.10", "3.12"], env={_WORKERS_ENV: bad_value})
-    assert excinfo.value.code == 2
+    assert excinfo.value.kind is RefusalKind.INVALID_ARGUMENT
 
 
 def test_resolve_workers_rejects_a_non_integer_env_value(tmp_path: Path) -> None:
     _write_pyproject(tmp_path, ["3.10", "3.12"])
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(RefusalError) as excinfo:
         resolve_workers(tmp_path, ["3.10", "3.12"], env={_WORKERS_ENV: "not-a-number"})
-    assert excinfo.value.code == 2
+    assert excinfo.value.kind is RefusalKind.INVALID_ARGUMENT
+
+
+class _PrepareSpy:
+    """Records every ``prepare_minors`` call, so a refusal can be shown to come before any install."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(self, _project_dir: Path, minors: list[str], *, quiet: bool = True) -> None:
+        _ = quiet
+        self.calls.append(list(minors))
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("env_value", "pyproject_workers", "named"),
+    [("0", None, _WORKERS_ENV), ("not-a-number", None, _WORKERS_ENV), ("", 0, "[tool.scripts.test-all].workers")],
+    ids=["env-zero", "env-not-a-number", "pyproject-zero"],
+)
+def test_main_refuses_a_bad_worker_count_with_exit_2_before_preparing_any_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    env_value: str,
+    pyproject_workers: int | None,
+    named: str,
+) -> None:
+    """A refused worker count is the helper's exit code, not a SystemExit escaping the stage engine."""
+    if pyproject_workers is None:
+        _write_pyproject(tmp_path, ["3.10", "3.12"])
+    else:
+        _write_pyproject_with_workers(tmp_path, ["3.10", "3.12"], pyproject_workers)
+    prepare = _PrepareSpy()
+    cells = _FakeCells({})
+
+    rc = main(project_dir=tmp_path, prepare_minors=prepare, run_cell=cells, env={_WORKERS_ENV: env_value})
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert f"[test-all] {named} must be" in err
+    assert prepare.calls == []
+    assert cells.seen == []
 
 
 def test_resolve_workers_ignores_a_non_integer_pyproject_value(tmp_path: Path) -> None:

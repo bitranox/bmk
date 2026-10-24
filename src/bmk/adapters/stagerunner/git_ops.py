@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from bmk.domain.errors import RefusalError, RefusalKind
 from bmk.domain.stages import normalize_returncode
 
 if TYPE_CHECKING:
@@ -24,6 +25,12 @@ if TYPE_CHECKING:
 _SENSITIVE = re.compile(r"\.env$|\.env\.|credentials|secret|\.key$|\.pem$|id_rsa", re.IGNORECASE)
 
 
+class EmptyCommitMessageError(RefusalError, ValueError):
+    """The person at the prompt entered no commit message; bmk will not commit without one."""
+
+    kind = RefusalKind.INVALID_ARGUMENT
+
+
 def resolve_message(
     args: Sequence[str],
     *,
@@ -31,7 +38,11 @@ def resolve_message(
     isatty: bool,
     prompt: Callable[[str], str] = input,
 ) -> str:
-    """Resolve the commit message: args -> BMK_COMMIT_MESSAGE -> prompt (tty) -> 'chores'."""
+    """Resolve the commit message: args -> BMK_COMMIT_MESSAGE -> prompt (tty) -> 'chores'.
+
+    Raises:
+        EmptyCommitMessageError: The prompt was answered with an empty message.
+    """
     message = " ".join(args).strip()
     if not message:
         message = env.get("BMK_COMMIT_MESSAGE", "").strip()
@@ -40,7 +51,7 @@ def resolve_message(
             message = prompt("Commit message: ").strip()
             if not message:
                 msg = "Commit message cannot be empty"
-                raise ValueError(msg)
+                raise EmptyCommitMessageError(msg)
         else:
             message = "chores"
     return message
@@ -79,9 +90,17 @@ def push_argv(ctx: StageContext) -> list[str]:
 
 
 def commit(ctx: StageContext) -> int:
-    """Stage all changes and create a timestamped commit (interactive stage)."""
+    """Stage all changes and create a timestamped commit (interactive stage).
+
+    An empty message at the prompt returns 1 with one stderr line and stages nothing; raised
+    out of the stage, it would be reported as a crash with a traceback.
+    """
     project = ctx.project_dir
-    message = resolve_message(ctx.args, env=ctx.env, isatty=sys.stdin.isatty())
+    try:
+        message = resolve_message(ctx.args, env=ctx.env, isatty=sys.stdin.isatty())
+    except EmptyCommitMessageError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     # Local time, matching the shell stage's `date` (not UTC).
     subject = f"{timestamp_prefix(datetime.now())} - {message}"
 
@@ -105,6 +124,7 @@ def commit(ctx: StageContext) -> int:
 
 
 __all__ = [
+    "EmptyCommitMessageError",
     "commit",
     "current_branch",
     "detect_sensitive",
