@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx2
 import pytest
 from packaging.markers import Marker
 from packaging.requirements import Requirement
 
-from bmk.adapters.stagerunner.helpers._dependencies import _extract_all_dependencies
+from bmk.adapters.stagerunner.helpers import _dependencies
+from bmk.adapters.stagerunner.helpers._dependencies import check_dependencies
 from bmk.adapters.stagerunner.helpers._toml_config import PoetrySourceKind, PyprojectConfig, load_pyproject_config
 
 if TYPE_CHECKING:
@@ -235,8 +237,18 @@ foo = { git = "https://github.com/org/foo.git", python = "<3.11" }
 
 
 @pytest.mark.os_agnostic
-def test_a_dependency_from_a_named_private_source_is_not_offered_to_pypi(tmp_path: Path) -> None:
-    """The same name on PyPI may be someone else's package, so the dependency stage leaves it out."""
+def test_a_dependency_from_a_named_private_source_is_not_offered_to_pypi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same name on PyPI may be someone else's package, so the dependency stage never asks PyPI about it."""
+    asked: list[str] = []
+
+    def unreachable_pypi(method: str, url: str, **_: object) -> object:
+        asked.append(url)
+        raise httpx2.ConnectError(f"{method} {url}: offline")
+
+    # PyPI is the one external edge of the dependency check; the test must not touch the network.
+    monkeypatch.setattr(_dependencies.httpx2, "stream", unreachable_pypi)
     config = _load(
         tmp_path,
         """
@@ -249,9 +261,11 @@ requests = "^2.31"
 
     assert internal.source_kind is PoetrySourceKind.PRIVATE_INDEX
     assert internal.to_requirement_string() == "internal-lib>=1.0"
-    checked = [dep.name for dep in _extract_all_dependencies(config)]
+    checked = [dep.name for dep in check_dependencies(tmp_path / "pyproject.toml")]
     assert "requests" in checked
     assert "internal-lib" not in checked
+    assert any("/requests/" in url for url in asked)
+    assert not any("internal-lib" in url for url in asked)
 
 
 @pytest.mark.os_agnostic

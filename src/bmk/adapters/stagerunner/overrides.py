@@ -90,22 +90,28 @@ def _pipelines_from(path: Path, root_keys: tuple[str, ...]) -> dict[str, Any]:
 
 
 def load_overlay(cwd: Path, prefix: str) -> Overlay | None:
-    """Load and validate the overlay for ``prefix`` (``stages.toml`` wins).
+    """Load and validate the overlay for ``prefix``; ``stages.toml`` wins whenever it names it.
 
     Raises:
-        ValueError: The overlay is malformed; the message names each problem on its own line
-            as ``<dotted location>: <reason>``.
+        ValueError: The overlay is not a table, or is malformed; the message names the file's
+            table and each problem on its own line as ``<dotted location>: <reason>``.
     """
     pyproject = _pipelines_from(cwd / "pyproject.toml", ("tool", "bmk", "pipelines"))
     stages_toml = _pipelines_from(cwd / "bmk_makescripts" / "stages.toml", ("pipelines",))
 
-    section: Any = stages_toml.get(prefix)
-    # The refusal names the table the person has to edit, which differs between the two files.
-    where = f"bmk_makescripts/stages.toml [pipelines.{prefix}]"
+    # stages.toml wins whenever it names the pipeline, even with an empty table: precedence is by
+    # presence, so an empty table there is a deliberate "no overlay", not a fall-through. The
+    # refusal names the table the person has to edit, which differs between the two files.
+    section: Any
+    if prefix in stages_toml:
+        section, where = stages_toml[prefix], f"bmk_makescripts/stages.toml [pipelines.{prefix}]"
+    elif prefix in pyproject:
+        section, where = pyproject[prefix], f"[tool.bmk.pipelines.{prefix}]"
+    else:
+        return None
+    if not isinstance(section, dict):
+        raise ValueError(f"invalid {where} overlay:\n  must be a table")
     if not section:
-        section = pyproject.get(prefix)
-        where = f"[tool.bmk.pipelines.{prefix}]"
-    if not isinstance(section, dict) or not section:
         return None
     try:
         return Overlay.model_validate(section)

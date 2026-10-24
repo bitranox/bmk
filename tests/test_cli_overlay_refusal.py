@@ -81,6 +81,35 @@ def test_a_bad_stages_toml_overlay_names_that_file_and_its_own_table(tmp_path: P
     )
 
 
+def _two_overlays(tmp_path: Path, stages_toml: str) -> None:
+    """A valid pyproject overlay for ``deploy`` beside a stages.toml holding ``stages_toml``."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "0.1.0"\n\n[tool.bmk.pipelines.deploy]\nremove = ["lint"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "bmk_makescripts").mkdir()
+    (tmp_path / "bmk_makescripts" / "stages.toml").write_text(stages_toml, encoding="utf-8")
+
+
+@pytest.mark.os_agnostic
+def test_an_empty_stages_toml_table_still_wins_over_pyproject(tmp_path: Path) -> None:
+    """stages.toml wins when it names the pipeline at all; an empty table is a definition, not an absence."""
+    _two_overlays(tmp_path, "[pipelines.deploy]\n")
+
+    assert load_overlay(tmp_path, "deploy") is None
+
+
+@pytest.mark.os_agnostic
+def test_a_stages_toml_section_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
+    """``[[pipelines.deploy]]`` (an array of tables) is a typo; ignoring it also dropped the pyproject overlay."""
+    _two_overlays(tmp_path, '[[pipelines.deploy]]\nremove = ["lint"]\n')
+
+    with pytest.raises(ValueError, match="overlay:") as raised:
+        load_overlay(tmp_path, "deploy")
+
+    assert str(raised.value) == "invalid bmk_makescripts/stages.toml [pipelines.deploy] overlay:\n  must be a table"
+
+
 @pytest.mark.os_agnostic
 def test_custom_command_reports_a_bad_overlay_without_pydantic_internals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
