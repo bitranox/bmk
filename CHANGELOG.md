@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.25.3] 2026-10-24 21:00:26
+
+### Changed
+
+- The `devops-bmk` skill says every `make test-all` cell runs pyright once per OS in
+  `[tool.ci].os`, as `make test` does, and that pytest runs on the host OS only. It also
+  explains how a `pythonPlatform` pinned in the pyright config and a
+  `pyrightconfig.<platform>.json` change those runs. It now names `make codecov`,
+  `config-generate-examples`, `send-notification`, the short aliases (`b`/`bmp`, `cl`/`cln`,
+  `p`/`psh`, `coverage`/`cov`) and `bmk.print_info()`.
+
 ## [3.25.2] 2026-10-24 18:52:21
 
 ### Changed
