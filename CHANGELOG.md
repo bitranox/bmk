@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Security
+
+- filelock is floored at 4.2.1 for GHSA-2g95-wg33-c5x2 on Python 3.11 and later. The fixed
+  release needs Python 3.11, so on 3.10 bmk keeps filelock 4.1.x; bmk uses only `FileLock`, not the
+  affected `SoftFileLock` / `MarkerSoftFileLock` / `SoftFileLease`. 4.2.1 is younger than bmk's
+  cooldown, so `[tool.uv]` pins it, as for certifi.
+
 ## [3.24.0] 2026-10-24 00:03:08
 
 ### Changed
