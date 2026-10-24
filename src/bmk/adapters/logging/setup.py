@@ -20,6 +20,7 @@ System Role:
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -244,6 +245,26 @@ def log_variables_hidden() -> Generator[None]:
         os.environ.update(hidden)
 
 
+#: Third-party loggers held at WARNING once stdlib logging is bridged into the console. httpx2 logs
+#: every request at INFO ("HTTP Request: GET ...") and httpcore2 every connection step, and the
+#: dependency check fetches one PyPI document per package, so at the shipped INFO console level a
+#: passing JSON-mode run printed a line per document. Those lines are the client's chatter, not
+#: bmk's output; their warnings and errors still reach the console.
+_QUIET_THIRD_PARTY_LOGGERS = ("httpx2", "httpcore2")
+
+
+def _bridge_std_logging() -> None:
+    """Forward stdlib records into the lib_log_rich runtime, keeping the HTTP client's chatter out.
+
+    ``attach_std_logging`` lowers the root logger to the runtime's minimum level, so every library
+    logger without its own level inherits it. Setting a level on the parent ``httpcore2`` covers
+    its ``httpcore2.connection`` / ``httpcore2.http11`` children, which inherit from it.
+    """
+    lib_log_rich.runtime.attach_std_logging()
+    for name in _QUIET_THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def _start_default_logging() -> None:
     """Start lib_log_rich with the package defaults; without the ``LOG_*`` variables only if needed.
 
@@ -311,9 +332,9 @@ def init_logging(config: Config, *, dotenv_path: str | None = None) -> None:
         # The type check of the section and lib_log_rich's own range checks (which also see the
         # LOG_* variables) both refuse here; neither has started the runtime.
         _start_default_logging()
-        lib_log_rich.runtime.attach_std_logging()
+        _bridge_std_logging()
         raise InvalidLoggingConfigError(_problems(exc)) from exc
-    lib_log_rich.runtime.attach_std_logging()
+    _bridge_std_logging()
 
 
 def check_logging_config(config: Config) -> None:

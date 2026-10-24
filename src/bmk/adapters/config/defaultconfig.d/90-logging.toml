@@ -68,6 +68,8 @@ environment = "prod"
 # Values: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
 # Environment Variable: BMK___LIB_LOG_RICH__CONSOLE_LEVEL=DEBUG
 # .env: LIB_LOG_RICH__CONSOLE_LEVEL=DEBUG
+# Note: the HTTP client's loggers (httpx2, httpcore2) are held at WARNING whatever this
+#       says, so the per-request INFO lines of the PyPI checks never reach the console
 console_level = "INFO"
 
 # Purpose: Where to send console output
