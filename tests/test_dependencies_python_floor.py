@@ -1,6 +1,6 @@
 """A raised floor must stay installable on the oldest Python the project supports.
 
-PyPI is the one external edge here, so the tests replace ``httpx2.stream`` with a fake index
+PyPI is the one external edge here, so ``pypi_stub`` routes every client to a fake index
 serving canned JSON per package, and drive ``check_dependencies`` / ``update_dependencies`` on
 a real ``pyproject.toml``.
 """
@@ -8,15 +8,14 @@ a real ``pyproject.toml``.
 from __future__ import annotations
 
 from collections import Counter
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import httpx2
-import orjson
 import pytest
 import rtoml
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
+from pypi_stub import document_path, serve_pypi
 
 from bmk.adapters.stagerunner.helpers import _dependencies
 from bmk.adapters.stagerunner.helpers._dependencies import (
@@ -26,7 +25,6 @@ from bmk.adapters.stagerunner.helpers._dependencies import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
     from pathlib import Path
 
 
@@ -45,19 +43,8 @@ _HYPOTHESIS: dict[str, Any] = {
 }
 
 
-class _FakeResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def iter_bytes(self) -> Iterator[bytes]:
-        yield self._body
-
-
 class _FakeIndex:
-    """Serves ``https://pypi.org/pypi/<name>/json`` from a dict, the way ``httpx2.stream`` would."""
+    """Serves ``https://pypi.org/pypi/<name>/json`` from a dict, as ``httpx2.MockTransport`` handler."""
 
     def __init__(self, packages: dict[str, dict[str, Any]]) -> None:
         self._packages = dict(packages)
@@ -71,21 +58,20 @@ class _FakeIndex:
         """Raise ``error`` on the ``fetch``-th request for ``name`` and every one after it."""
         self._failures[name] = (fetch, error)
 
-    @contextmanager
-    def stream(self, method: str, url: str, **_: object) -> Generator[_FakeResponse]:
-        assert method == "GET"
-        name = url.removeprefix("https://pypi.org/pypi/").removesuffix("/json")
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "GET"
+        name = document_path(request)
         self.fetches[name] += 1
         failure = self._failures.get(name)
         if failure is not None and self.fetches[name] >= failure[0]:
             raise failure[1]
-        yield _FakeResponse(orjson.dumps(self._packages[name]))
+        return httpx2.Response(200, json=self._packages[name])
 
 
 @pytest.fixture
 def pypi(monkeypatch: pytest.MonkeyPatch) -> _FakeIndex:
     index = _FakeIndex({"hypothesis": _HYPOTHESIS})
-    monkeypatch.setattr(_dependencies.httpx2, "stream", index.stream)
+    serve_pypi(monkeypatch, index.handle)
     return index
 
 

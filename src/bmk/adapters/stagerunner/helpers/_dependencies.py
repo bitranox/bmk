@@ -107,8 +107,6 @@ class DependencyStatus(str, Enum):
     ERROR = "error"
 
 
-# HTTP status codes
-_HTTP_NOT_FOUND = 404
 # A PyPI package's JSON metadata is at most a few MB; anything past this cap is treated as a
 # broken/hostile response rather than buffered into memory.
 _MAX_PYPI_BYTES = 32 * 1024 * 1024
@@ -256,20 +254,30 @@ def _parse_version_constraint(spec: str) -> _ParsedConstraint:
 # the Python hold then answer from the same document, so a second request that times out cannot
 # leave a floor raised past the oldest Python the first one showed it must stay installable on.
 _PYPI_DOCUMENTS: ContextVar[dict[str, PypiDocument | None] | None] = ContextVar("_PYPI_DOCUMENTS", default=None)
+# One connection pool per block: a fresh TLS handshake per document was most of the network cost
+# of a walk over every reached package.
+_PYPI_CLIENT: ContextVar[httpx2.Client | None] = ContextVar("_PYPI_CLIENT", default=None)
+_PYPI_TIMEOUT_SECONDS = 10.0
 
 
 @contextmanager
 def _one_fetch_per_package() -> Generator[None]:
-    """Within the block, ``_fetch_pypi_data`` downloads each package at most once.
+    """Within the block, ``_fetch_pypi_data`` downloads each package at most once, over one connection pool.
 
-    A nested block shares the outer one's documents, so a caller that checks twice (before and
-    after writing ``[tool.uv]``) reads each package once in all.
+    A nested block shares the outer one's documents and client, so a caller that checks twice
+    (before and after writing ``[tool.uv]``) reads each package once in all.
     """
-    token = _PYPI_DOCUMENTS.set(_PYPI_DOCUMENTS.get() if _PYPI_DOCUMENTS.get() is not None else {})
-    try:
+    if _PYPI_CLIENT.get() is not None:
         yield
-    finally:
-        _PYPI_DOCUMENTS.reset(token)
+        return
+    with httpx2.Client(timeout=_PYPI_TIMEOUT_SECONDS) as client:
+        client_token = _PYPI_CLIENT.set(client)
+        documents_token = _PYPI_DOCUMENTS.set({})
+        try:
+            yield
+        finally:
+            _PYPI_DOCUMENTS.reset(documents_token)
+            _PYPI_CLIENT.reset(client_token)
 
 
 def _fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocument | None:
@@ -294,15 +302,27 @@ def _fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocum
 def _download_pypi_data(normalized: str) -> PypiDocument | None:
     """Download one package's JSON document from PyPI, validated into a :class:`PypiDocument`.
 
+    Uses the block's client inside ``_one_fetch_per_package``, else a one-off client, so every
+    download takes the same path.
+    """
+    client = _PYPI_CLIENT.get()
+    if client is not None:
+        return _stream_pypi_document(client, normalized)
+    with httpx2.Client(timeout=_PYPI_TIMEOUT_SECONDS) as one_off:
+        return _stream_pypi_document(one_off, normalized)
+
+
+def _stream_pypi_document(client: httpx2.Client, normalized: str) -> PypiDocument | None:
+    """Stream ``https://pypi.org/pypi/<normalized>/json`` through ``client``; ``None`` when unavailable.
+
     Streamed with a hard byte cap so a broken or hostile endpoint cannot make bmk buffer an
     unbounded body into memory; a response past the cap is treated as unavailable (``None``).
     The URL is fixed to pypi.org, so this is defence-in-depth, not the primary trust boundary.
-    A body that is not JSON, or JSON that is not a document (not an object), is unavailable too.
+    Any HTTP error status (a 404 for an unknown package, a 5xx), a body that is not JSON, or JSON
+    that is not a document (not an object), is unavailable too.
     """
-    url = f"https://pypi.org/pypi/{normalized}/json"
-
     try:
-        with httpx2.stream("GET", url, timeout=10.0) as response:
+        with client.stream("GET", f"https://pypi.org/pypi/{normalized}/json") as response:
             response.raise_for_status()
             chunks: list[bytes] = []
             total = 0
@@ -312,11 +332,7 @@ def _download_pypi_data(normalized: str) -> PypiDocument | None:
                     return None
                 chunks.append(chunk)
         return PypiDocument.model_validate(orjson.loads(b"".join(chunks)))
-    except httpx2.HTTPStatusError as exc:
-        if exc.response.status_code == _HTTP_NOT_FOUND:
-            return None
-        return None
-    except (httpx2.RequestError, orjson.JSONDecodeError, ValidationError):
+    except (httpx2.HTTPStatusError, httpx2.RequestError, orjson.JSONDecodeError, ValidationError):
         # RequestError, not just ConnectError and timeouts: a connection reset mid-body (ReadError,
         # RemoteProtocolError) or a corrupt compressed body (DecodingError) is the same unavailable
         # index and must not crash the check.
@@ -718,16 +734,24 @@ def _file_installs_on(entry: PypiFile, python: str) -> bool:
         >>> _file_installs_on(wheel, "3.14.0"), _file_installs_on(wheel, "3.8.0")
         (True, False)
     """
-    requires = _specifier_or_none(entry.requires_python or "")
+    return _installs_on_python(entry.requires_python, entry.packagetype, entry.filename, python)
+
+
+# The settle passes ask about the same file on the same Python hundreds of thousands of times.
+@cache
+def _installs_on_python(
+    requires_python: str | None, packagetype: PackageType | None, filename: str, python: str
+) -> bool:
+    requires = _specifier_or_none(requires_python or "")
     if requires is not None and not requires.contains(python):
         return False
-    if entry.packagetype is not PackageType.BDIST_WHEEL:
+    if packagetype is not PackageType.BDIST_WHEEL:
         return True
     version = _version_or_none(python)
     if version is None:
         return True
     try:
-        tags = parse_wheel_filename(entry.filename)[3]
+        tags = parse_wheel_filename(filename)[3]
     except InvalidWheelFilename:
         return True
     runs = _interpreter_tags(version.major, version.minor)
@@ -1931,12 +1955,12 @@ class _FloorDemand:
         key: _NeedKey = (str(requirement.specifier), python, exact)
         need = self._needs.setdefault(name, {}).setdefault(key, _Need(releases=satisfying, python=python, exact=exact))
         self._reached.add((name, key))
+        # What uv resolves at the previous pass's pin - or at the default cutoff for a package with
+        # none - is what this pass walks: a package needing no pin still brings requirements whose
+        # own releases the cutoff can cut. A requirement first reached in this pass may see nothing
+        # there; its pin is recomputed below and walked next pass.
         pin = self.pins.get(name)
-        if pin is None:
-            return
-        # What uv resolves at the previous pass's pin is what this pass walks. A requirement first
-        # reached in this pass may see nothing there; its pin is recomputed below and walked next pass.
-        chosen = need.chosen(_as_moment(pin))
+        chosen = need.chosen(_as_moment(pin) if pin is not None else self._cutoff)
         if chosen is not None:
             self._walk(name, chosen, python=python, extras=extras)
 

@@ -14,7 +14,9 @@ import httpx2
 import orjson
 import pytest
 from packaging.specifiers import SpecifierSet
+from pypi_stub import serve_pypi
 
+from bmk.adapters.stagerunner.helpers import _dependencies
 from bmk.adapters.stagerunner.helpers._dependencies import (
     DependencyInfo,
     DependencyStatus,
@@ -40,6 +42,7 @@ from bmk.adapters.stagerunner.helpers._pypi_models import PypiDocument
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -83,28 +86,25 @@ def _make_dep(
     )
 
 
-def _mock_httpx_stream(*, status_code: int = 200, content: bytes = b"{}") -> MagicMock:
-    """Build a mock ``httpx2.stream`` context manager yielding a controllable response.
+def _serve(monkeypatch: pytest.MonkeyPatch, *, status_code: int = 200, content: bytes = b"{}") -> list[str]:
+    """Answer every PyPI request with ``status_code`` and ``content``; returns the URLs asked for."""
+    asked: list[str] = []
 
-    ``_fetch_pypi_data`` streams the body (``with httpx2.stream(...) as response`` then
-    ``response.iter_bytes()``), so the mock is the context manager; entering it returns the
-    response whose ``iter_bytes`` yields ``content`` in a single chunk.
-    """
-    resp = MagicMock(spec=httpx2.Response)
-    resp.status_code = status_code
-    resp.iter_bytes = MagicMock(return_value=[content])
-    resp.raise_for_status = MagicMock()
-    if status_code >= 400:
-        http_error = httpx2.HTTPStatusError(
-            "error",
-            request=MagicMock(spec=httpx2.Request),
-            response=resp,
-        )
-        resp.raise_for_status.side_effect = http_error
-    cm = MagicMock()
-    cm.__enter__ = MagicMock(return_value=resp)
-    cm.__exit__ = MagicMock(return_value=False)
-    return cm
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        asked.append(str(request.url))
+        return httpx2.Response(status_code, content=content)
+
+    serve_pypi(monkeypatch, handler)
+    return asked
+
+
+def _refuse(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    """Every PyPI request fails with ``error`` (an unreachable index)."""
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        raise error
+
+    serve_pypi(monkeypatch, handler)
 
 
 # ---------------------------------------------------------------------------
@@ -176,66 +176,72 @@ def test_parse_version_constraint_with_marker_and_extras() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_none_on_404(mock_stream: MagicMock) -> None:
+def test_fetch_pypi_data_returns_none_on_404(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when PyPI responds with 404."""
-    mock_stream.return_value = _mock_httpx_stream(status_code=404)
+    asked = _serve(monkeypatch, status_code=404)
 
-    result = _fetch_pypi_data("nonexistent-pkg")
-
-    assert result is None
+    assert _fetch_pypi_data("nonexistent-pkg") is None
+    assert asked == ["https://pypi.org/pypi/nonexistent-pkg/json"]
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_none_on_connection_error(mock_stream: MagicMock) -> None:
+def test_fetch_pypi_data_returns_none_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when httpx2 raises a ConnectError."""
-    mock_stream.side_effect = httpx2.ConnectError("connection refused")
-
-    result = _fetch_pypi_data("some-pkg")
-
-    assert result is None
-
-
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_none_on_timeout(mock_stream: MagicMock) -> None:
-    """Returns None when httpx2 raises a TimeoutException."""
-    mock_stream.side_effect = httpx2.TimeoutException("read timeout")
-
-    result = _fetch_pypi_data("some-pkg")
-
-    assert result is None
-
-
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_none_on_json_decode_error(mock_stream: MagicMock) -> None:
-    """Returns None when response body is not valid JSON."""
-    resp = _mock_httpx_stream(status_code=200, content=b"not json{{{")
-    mock_stream.return_value = resp
-
-    result = _fetch_pypi_data("some-pkg")
-
-    assert result is None
-
-
-@pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_none_when_the_json_is_not_a_document(mock_stream: MagicMock) -> None:
-    """JSON that is not an object is no PyPI document: the package reads as unavailable."""
-    mock_stream.return_value = _mock_httpx_stream(status_code=200, content=b'["not", "a", "document"]')
+    _refuse(monkeypatch, httpx2.ConnectError("connection refused"))
 
     assert _fetch_pypi_data("some-pkg") is None
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_parsed_json_on_success(mock_stream: MagicMock) -> None:
+def test_fetch_pypi_data_returns_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Returns None when httpx2 raises a TimeoutException."""
+    _refuse(monkeypatch, httpx2.ReadTimeout("read timeout"))
+
+    assert _fetch_pypi_data("some-pkg") is None
+
+
+@pytest.mark.os_agnostic
+def test_fetch_pypi_data_returns_none_on_json_decode_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Returns None when response body is not valid JSON."""
+    _serve(monkeypatch, content=b"not json{{{")
+
+    assert _fetch_pypi_data("some-pkg") is None
+
+
+@pytest.mark.os_agnostic
+def test_fetch_pypi_data_returns_none_when_the_json_is_not_a_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    """JSON that is not an object is no PyPI document: the package reads as unavailable."""
+    _serve(monkeypatch, content=b'["not", "a", "document"]')
+
+    assert _fetch_pypi_data("some-pkg") is None
+
+
+@pytest.mark.os_agnostic
+def test_fetch_pypi_data_returns_none_past_the_byte_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A body larger than the cap is unavailable rather than buffered whole."""
+    chunk = b" " * (1024 * 1024)
+    planned = _dependencies._MAX_PYPI_BYTES // len(chunk) + 1
+    served: list[int] = []
+
+    def oversized() -> Iterator[bytes]:
+        # Valid JSON once whitespace-padded, so only the cap can make it unavailable; finite, so a
+        # missing cap ends in a parsed document instead of an endless read.
+        yield b'{"info": {"version": "3.0.0"}}'
+        for _ in range(planned):
+            served.append(len(chunk))
+            yield chunk
+
+    serve_pypi(monkeypatch, lambda _request: httpx2.Response(200, content=oversized()))
+
+    assert _fetch_pypi_data("some-pkg") is None
+    assert len(served) < planned  # stopped at the cap, never read the body to its end
+
+
+@pytest.mark.os_agnostic
+def test_fetch_pypi_data_returns_parsed_json_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns the validated document on a successful response."""
     payload = {"info": {"version": "3.0.0"}}
-    resp = _mock_httpx_stream(status_code=200, content=orjson.dumps(payload))
-    mock_stream.return_value = resp
+    _serve(monkeypatch, content=orjson.dumps(payload))
 
     result = _fetch_pypi_data("some-pkg")
 
@@ -243,6 +249,29 @@ def test_fetch_pypi_data_returns_parsed_json_on_success(mock_stream: MagicMock) 
     assert result is not None
     assert result.info is not None
     assert result.info.version == "3.0.0"
+
+
+@pytest.mark.os_agnostic
+def test_one_block_reads_every_document_over_one_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inside ``_one_fetch_per_package`` all downloads share one connection pool, and a package is read once."""
+    asked = _serve(monkeypatch, content=orjson.dumps({"info": {"version": "1.0"}}))
+    built: list[httpx2.Client] = []
+    stub_client = httpx2.Client
+
+    def counting_client(**kwargs: Any) -> httpx2.Client:
+        client = stub_client(**kwargs)
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(httpx2, "Client", counting_client)
+
+    with _dependencies._one_fetch_per_package(), _dependencies._one_fetch_per_package():
+        for name in ("alpha", "beta", "alpha"):
+            assert _fetch_pypi_data(name) is not None
+
+    assert len(built) == 1
+    assert asked == ["https://pypi.org/pypi/alpha/json", "https://pypi.org/pypi/beta/json"]
+    assert built[0].is_closed
 
 
 # ---------------------------------------------------------------------------
@@ -1691,14 +1720,11 @@ def test_parse_version_constraint_only_upper_bound() -> None:
 
 
 @pytest.mark.os_agnostic
-@patch("bmk.adapters.stagerunner.helpers._dependencies.httpx2.stream")
-def test_fetch_pypi_data_returns_none_on_non_404_http_error(mock_stream: MagicMock) -> None:
+def test_fetch_pypi_data_returns_none_on_non_404_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None on non-404 HTTP errors (e.g. 500 server error)."""
-    mock_stream.return_value = _mock_httpx_stream(status_code=500)
+    _serve(monkeypatch, status_code=500)
 
-    result = _fetch_pypi_data("some-pkg")
-
-    assert result is None
+    assert _fetch_pypi_data("some-pkg") is None
 
 
 @pytest.mark.os_agnostic

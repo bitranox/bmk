@@ -6,6 +6,21 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- The cooldown floor pins now also judge the requirements of a package that needs no pin itself.
+  With `tool>=1.0` (no pin needed) requiring `gadget>=1.0`, a `gadget` release whose files straddle
+  the cooldown went unjudged and `uv lock` could lock it with only some of its files visible; bmk
+  now walks every package at the default cutoff and pins `gadget` too.
+
+### Changed
+
+- The dependency check reads all PyPI documents over one keep-alive connection pool and caches
+  the per-file "installs on this Python" answer, which the settle passes asked hundreds of
+  thousands of times. Together they pay for most of the wider walk above: on bmk's own
+  `pyproject.toml` the pin check takes 11-13 s (159 PyPI documents), against 6-6.5 s before the walk
+  (37 documents) and about 31 s for the walk without them.
+
 ## [3.25.3] 2026-10-24 21:00:26
 
 ### Changed

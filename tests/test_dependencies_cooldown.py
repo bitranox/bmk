@@ -2,7 +2,7 @@
 
 A floor bmk writes must stay resolvable under the cooldown uv itself enforces, or ``uv lock``
 fails; packages the project exempts (``exclude-newer-package``, our own packages) follow the newest
-release. PyPI is the one external edge, so ``httpx2.stream`` serves canned JSON per package, with
+release. PyPI is the one external edge, so ``pypi_stub`` serves canned JSON per package, with
 upload times relative to the real clock, and the tests drive ``check_dependencies`` /
 ``update_dependencies`` / ``ensure_uv_cooldown`` on a real ``pyproject.toml``.
 """
@@ -10,14 +10,13 @@ upload times relative to the real clock, and the tests drive ``check_dependencie
 from __future__ import annotations
 
 import io
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import httpx2
-import orjson
 import pytest
 import rtoml
+from pypi_stub import document_path, serve_pypi
 
 from bmk.adapters.config.loader import get_default_config_path
 from bmk.adapters.stagerunner.helpers import _dependencies, _supply_chain
@@ -40,7 +39,6 @@ from bmk.adapters.stagerunner.helpers._supply_chain import (
 from bmk.adapters.stagerunner.settings import BmkSettingsError, parse_bmk_settings
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
     from pathlib import Path
 
 _NOW = datetime.now(timezone.utc)
@@ -64,17 +62,6 @@ def _doc(version: str, releases: dict[str, list[dict[str, Any]]], requires: list
 _WIDGET = _doc("1.2", {"1.0": _uploaded(90), "1.1": _uploaded(30), "1.2": _uploaded(3)})
 
 
-class _FakeResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def iter_bytes(self) -> Iterator[bytes]:
-        yield self._body
-
-
 class _FakeIndex:
     """PyPI's JSON API: ``/pypi/<name>/json`` from ``packages``, ``/pypi/<name>/<version>/json`` from ``versions``."""
 
@@ -82,23 +69,21 @@ class _FakeIndex:
         self.packages = dict(packages)
         self.versions: dict[str, list[str]] = {}
 
-    @contextmanager
-    def stream(self, method: str, url: str, **_: object) -> Generator[_FakeResponse]:
-        assert method == "GET"
-        path = url.removeprefix("https://pypi.org/pypi/").removesuffix("/json")
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "GET"
+        path = document_path(request)
         if "/" in path:
             # A release no test describes requires nothing.
-            yield _FakeResponse(orjson.dumps({"info": {"requires_dist": self.versions.get(path, [])}}))
-            return
+            return httpx2.Response(200, json={"info": {"requires_dist": self.versions.get(path, [])}})
         if path not in self.packages:
             raise httpx2.ConnectError(f"{path}: PyPI unreachable")
-        yield _FakeResponse(orjson.dumps(self.packages[path]))
+        return httpx2.Response(200, json=self.packages[path])
 
 
 @pytest.fixture
 def pypi(monkeypatch: pytest.MonkeyPatch) -> _FakeIndex:
     index = _FakeIndex({"widget": _WIDGET})
-    monkeypatch.setattr(_dependencies.httpx2, "stream", index.stream)
+    serve_pypi(monkeypatch, index.handle)
     return index
 
 
@@ -1506,6 +1491,20 @@ def test_a_requirement_no_longer_reached_never_moves_a_forward_pin_further(tmp_p
     pins = _pins(pyproject)
     assert pins["gadget"] == _pin_of(90)
     assert pins["widget"] == _pin_of(5)
+
+
+@pytest.mark.os_agnostic
+def test_what_a_package_needing_no_pin_requires_is_judged_too(tmp_path: Path, pypi: _FakeIndex) -> None:
+    # tool needs no pin (its only release is 90 days old), so it was never walked, and the gadget
+    # it requires went unjudged: uv would lock gadget 2.0 with only its 15-day file.
+    pypi.packages["gadget"] = _doc("2.0", {"1.0": _uploaded(90), "2.0": [*_uploaded(15), *_uploaded(13)]})
+    pypi.packages["tool"] = _doc("1.0", {"1.0": _uploaded(90)})
+    pypi.versions["tool/1.0"] = ["gadget>=1.0"]
+    pyproject = _write(tmp_path, deps='"tool>=1.0"', tool_uv='exclude-newer = "14 days"')
+
+    assert _update(pyproject, _Uv(tmp_path), _NO_OWN) == 0
+
+    assert _pins(pyproject) == {"gadget": _pin_of(90)}
 
 
 @pytest.mark.os_agnostic
