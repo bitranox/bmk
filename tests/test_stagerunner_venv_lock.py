@@ -77,10 +77,8 @@ def lock_holder() -> Iterator[object]:
 
 
 # The installed CPython 3.12 the rebuild check is told about, one patch ahead of the venv's.
-_NEWER_3_12_INSTALLED = (
-    '[{"version": "3.12.9", "version_parts": {"major": 3, "minor": 12, "patch": 9}, '
-    '"implementation": "cpython", "path": "/stub/python3.12"}]'
-)
+#: What uv answers when asked which 3.12 it would build a venv on.
+_UV_BUILDS_ON_3_12 = "3.12.9"
 
 
 def _venv_on_an_older_patch(venv: Path) -> Path:
@@ -177,7 +175,7 @@ def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
     marker = _venv_on_an_older_patch(venv)
-    stub_uv.install(installed_json=_NEWER_3_12_INSTALLED)
+    stub_uv.install(found_version=_UV_BUILDS_ON_3_12)
     lock_holder(sync_lock_path(venv))  # type: ignore[operator]
 
     ensure_project_venv_at(project, venv, "3.12", quiet=True, install_python=False)
@@ -198,13 +196,13 @@ def test_the_rebuild_does_run_when_the_lock_is_free(
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
     marker = _venv_on_an_older_patch(venv)
-    stub_uv.install(installed_json=_NEWER_3_12_INSTALLED)
+    stub_uv.install(found_version=_UV_BUILDS_ON_3_12)
 
     ensure_project_venv_at(project, venv, "3.12", quiet=True, install_python=False)
 
     assert not marker.exists(), "a venv on the wrong patch is removed"
     cmds = stub_uv.commands()
-    asked = cmds.index(["uv", "python", "list", "--only-installed", "--output-format", "json"])
+    asked = cmds.index(["uv", "python", "find", "--system", "--no-python-downloads", "--show-version", "3.12"])
     assert cmds.index(["uv", "venv", "--python", "3.12", str(venv)]) > asked, "and recreated on the minor"
 
 

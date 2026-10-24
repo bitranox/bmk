@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from bmk.domain.enums import DeployTarget, OutputFormat
+from bmk.domain.enums import DeployTarget, OutputFormat, PythonVariant
 
 # ======================== OutputFormat ========================
 
@@ -76,3 +76,24 @@ def test_deploy_target_string_equality(member: DeployTarget, expected_str: str) 
 def test_deploy_target_member_count() -> None:
     """DeployTarget must have exactly 3 members."""
     assert len(DeployTarget) == 3
+
+
+# ======================== PythonVariant ========================
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("uv_spelling", "member"),
+    [("default", PythonVariant.DEFAULT), ("freethreaded", PythonVariant.FREETHREADED)],
+)
+def test_python_variant_decodes_uvs_spelling(uv_spelling: str, member: PythonVariant) -> None:
+    """The values are what ``uv python list --output-format json`` prints in ``variant`` (uv 0.13.0)."""
+    assert PythonVariant(uv_spelling) is member
+    assert type(member.value) is str
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("uv_spelling", ["debug", "freethreaded+debug", "gil", "Default", ""])
+def test_python_variant_decodes_an_unknown_spelling_as_other(uv_spelling: str) -> None:
+    """A variant bmk has no member for is still a real build, so decoding it never fails."""
+    assert PythonVariant(uv_spelling) is PythonVariant.OTHER

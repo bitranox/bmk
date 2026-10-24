@@ -221,6 +221,38 @@ class PythonImplementation(str, Enum):
         return cls.OTHER
 
 
+class PythonVariant(str, Enum):
+    """A build variant of one Python version, as uv's ``variant`` field spells it.
+
+    ``uv python install X.Y`` installs the ``default`` build, while uv also lists a free-threaded
+    one beside every 3.13+ minor, so only ``default`` says "the build bmk asks uv for".
+
+    Only the variants bmk tells apart are members. Any other spelling (``debug``,
+    ``freethreaded+debug``, one a later uv adds) decodes to ``OTHER`` rather than failing: an
+    unknown variant is still a real installation, merely not the default build.
+
+    Attributes:
+        DEFAULT: The GIL-enabled release build, the one ``uv python install X.Y`` installs.
+        FREETHREADED: The free-threaded build (``X.Yt``).
+        OTHER: Any variant not listed above.
+
+    Example:
+        >>> PythonVariant("freethreaded")
+        <PythonVariant.FREETHREADED: 'freethreaded'>
+        >>> PythonVariant("freethreaded+debug")
+        <PythonVariant.OTHER: 'other'>
+    """
+
+    DEFAULT = "default"
+    FREETHREADED = "freethreaded"
+    OTHER = "other"
+
+    @classmethod
+    def _missing_(cls, value: object) -> PythonVariant:
+        """Every spelling that is no member's value is ``OTHER``, so decoding never fails."""
+        return cls.OTHER
+
+
 __all__ = [
     "BumpPart",
     "DeployTarget",
@@ -228,6 +260,7 @@ __all__ = [
     "PipelineResult",
     "PyrightPlatform",
     "PythonImplementation",
+    "PythonVariant",
     "ToolOutputFormat",
     "VenvProvisioning",
 ]
