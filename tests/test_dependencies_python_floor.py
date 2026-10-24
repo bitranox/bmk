@@ -869,3 +869,63 @@ def test_a_raise_stops_where_some_supported_python_would_find_no_release_above_i
     update_dependencies(deps, pyproject, quiet=True)
 
     assert '"pythonnet>=3.1.0"' in pyproject.read_text(encoding="utf-8")
+
+
+def _binary_only_release(name: str, version: str, tags: str, *, uploaded: str) -> list[dict[str, Any]]:
+    """A release as PyPI lists one that ships wheels only: no sdist and no Requires-Python."""
+    return [
+        {
+            "filename": f"{name}-{version}-{tag}.whl",
+            "packagetype": "bdist_wheel",
+            "python_version": tag.split("-")[0],
+            "requires_python": None,
+            "yanked": False,
+            "upload_time_iso_8601": uploaded,
+        }
+        for tag in tags.split()
+    ]
+
+
+# pywin32 as PyPI lists it: every release is Windows wheels only with no Requires-Python, and 309 is
+# the first without a cp37 wheel, so only the wheel tags say that 3.7 cannot install it.
+_PYWIN32_WITH_CP37 = (
+    "cp310-cp310-win32 cp310-cp310-win_amd64 cp310-cp310-win_arm64 cp311-cp311-win32 cp311-cp311-win_amd64 "
+    "cp311-cp311-win_arm64 cp312-cp312-win32 cp312-cp312-win_amd64 cp312-cp312-win_arm64 cp313-cp313-win32 "
+    "cp313-cp313-win_amd64 cp313-cp313-win_arm64 cp37-cp37m-win32 cp37-cp37m-win_amd64 cp38-cp38-win32 "
+    "cp38-cp38-win_amd64 cp39-cp39-win32 cp39-cp39-win_amd64"
+)
+_PYWIN32_FROM_CP38 = (
+    "cp310-cp310-win32 cp310-cp310-win_amd64 cp310-cp310-win_arm64 cp311-cp311-win32 cp311-cp311-win_amd64 "
+    "cp311-cp311-win_arm64 cp312-cp312-win32 cp312-cp312-win_amd64 cp312-cp312-win_arm64 cp313-cp313-win32 "
+    "cp313-cp313-win_amd64 cp313-cp313-win_arm64 cp38-cp38-win32 cp38-cp38-win_amd64 cp39-cp39-win32 "
+    "cp39-cp39-win_amd64"
+)
+_PYWIN32: dict[str, Any] = {
+    "info": {"version": "310"},
+    "releases": {
+        "307": _binary_only_release("pywin32", "307", _PYWIN32_WITH_CP37, uploaded="2024-10-04T19:58:05.064380Z"),
+        "308": _binary_only_release("pywin32", "308", _PYWIN32_WITH_CP37, uploaded="2024-10-12T20:41:45.403469Z"),
+        "309": _binary_only_release("pywin32", "309", _PYWIN32_FROM_CP38, uploaded="2025-03-09T18:03:41.885121Z"),
+        "310": _binary_only_release("pywin32", "310", _PYWIN32_FROM_CP38, uploaded="2025-03-17T00:55:38.177173Z"),
+    },
+}
+
+
+@pytest.mark.os_agnostic
+def test_a_wheel_only_release_with_no_wheel_for_the_oldest_python_does_not_take_the_floor(
+    tmp_path: Path, pypi: _FakeIndex
+) -> None:
+    """No Requires-Python on any pywin32 file, so only the cp tags show that 309 dropped 3.7."""
+    pypi.serve("pywin32", _PYWIN32)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\nname = "demo"\nversion = "1.0.0"\nrequires-python = ">=3.7"\n'
+        'classifiers = [\n  "Programming Language :: Python :: 3.7",\n  "Programming Language :: Python :: 3.12",\n]\n'
+        'dependencies = ["pywin32>=307"]\n',
+        encoding="utf-8",
+    )
+
+    deps = check_dependencies(pyproject)
+    update_dependencies(deps, pyproject, quiet=True)
+
+    assert '"pywin32>=308"' in pyproject.read_text(encoding="utf-8")

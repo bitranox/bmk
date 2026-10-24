@@ -14,7 +14,9 @@ package; only a document that is not a JSON object at all is refused.
 Contents
 --------
 * ``parse_moment`` - an RFC 3339 timestamp as an aware datetime, or None.
-* ``PypiFile`` - one distribution file of a release (yanked, Requires-Python, upload time).
+* ``PackageType`` - the kinds of distribution file whose installability the check reads.
+* ``PypiFile`` - one distribution file of a release (name, kind, yanked, Requires-Python, upload
+  time).
 * ``PypiInfo`` - the ``info`` block (version, requirements).
 * ``PypiDocument`` - a whole package or release document.
 * ``PypiReleases`` - the ``releases`` map: version string to its files.
@@ -25,11 +27,13 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from datetime import datetime
+from enum import Enum
 from typing import TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
+    "PackageType",
     "PypiDocument",
     "PypiFile",
     "PypiInfo",
@@ -58,10 +62,24 @@ def parse_moment(text: str) -> datetime | None:
     return moment if moment.tzinfo is not None else None
 
 
+class PackageType(str, Enum):
+    """The ``packagetype`` values whose files the check judges beyond their Requires-Python.
+
+    An sdist builds wherever its Requires-Python admits; a wheel installs only where one of its
+    tags runs. Every other kind PyPI has served (``bdist_egg``, ``bdist_wininst``, ...) is read as
+    no known kind, and judged by Requires-Python alone.
+    """
+
+    SDIST = "sdist"
+    BDIST_WHEEL = "bdist_wheel"
+
+
 class PypiFile(BaseModel):
     """One distribution file of a release, as the check judges it.
 
     Attributes:
+        filename: The file's name, which carries a wheel's tags; empty when absent.
+        packagetype: The kind of file; None when absent or a kind :class:`PackageType` does not name.
         yanked: Whether the file is yanked (PEP 592).
         requires_python: The file's Requires-Python metadata; None when absent or empty.
         uploaded: The upload time; None when absent or not an RFC 3339 timestamp with a zone.
@@ -69,9 +87,24 @@ class PypiFile(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
+    filename: str = ""
+    packagetype: PackageType | None = None
     yanked: bool = False
     requires_python: str | None = None
     uploaded: datetime | None = Field(default=None, alias="upload_time_iso_8601")
+
+    @field_validator("filename", mode="before")
+    @classmethod
+    def _filename_text(cls, value: object) -> str:
+        # A name that is not text carries no tags; the file is then judged as if it had none.
+        return value if isinstance(value, str) else ""
+
+    @field_validator("packagetype", mode="before")
+    @classmethod
+    def _known_kind(cls, value: object) -> PackageType | None:
+        # An unknown kind is no reason to drop the file: it keeps the Requires-Python reading.
+        known = {kind.value: kind for kind in PackageType}
+        return known.get(value) if isinstance(value, str) else None
 
     @field_validator("yanked", mode="before")
     @classmethod
@@ -83,7 +116,7 @@ class PypiFile(BaseModel):
     @classmethod
     def _requires_python_text(cls, value: object) -> str | None:
         # Missing or empty metadata admits every Python, as pip treats it; anything else is judged as
-        # text, and text that is no specifier admits too (see _dependencies._installs_on).
+        # text, and text that is no specifier admits too (see _dependencies._file_installs_on).
         return str(value) if value else None
 
     @field_validator("uploaded", mode="before")
