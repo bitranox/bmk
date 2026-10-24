@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pydantic
 import pytest
 
-from bmk.adapters.stagerunner.helpers._pypi_models import PypiDocument, PypiFile, parse_moment
+from bmk.adapters.stagerunner.helpers._pypi_models import PackageType, PypiDocument, PypiFile, parse_moment
 
 
 @pytest.mark.os_agnostic
@@ -45,6 +45,14 @@ def test_a_document_that_is_not_an_object_is_refused() -> None:
         ({"requires_python": 3}, PypiFile(requires_python="3")),
         ({"upload_time_iso_8601": 12}, PypiFile()),
         ({"upload_time_iso_8601": "2026-10-12T00:15:37"}, PypiFile()),
+        ({"filename": 7, "packagetype": None}, PypiFile()),
+        ({"packagetype": "bdist_egg"}, PypiFile()),
+        ({"packagetype": 3}, PypiFile()),
+        ({"packagetype": "bdist_wheel"}, PypiFile(packagetype=PackageType.BDIST_WHEEL)),
+        (
+            {"packagetype": "sdist", "filename": "demo-1.0.tar.gz"},
+            PypiFile(packagetype=PackageType.SDIST, filename="demo-1.0.tar.gz"),
+        ),
     ],
 )
 def test_a_file_record_reads_each_field_leniently(raw: dict[str, object], expected: PypiFile) -> None:

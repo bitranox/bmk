@@ -33,7 +33,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
-from functools import cached_property, lru_cache
+from functools import cache, cached_property, lru_cache
 from itertools import product
 from math import prod
 from pathlib import Path
@@ -44,11 +44,13 @@ import orjson
 from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.tags import Tag, compatible_tags, cpython_tags
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
-from bmk.adapters.stagerunner.helpers._pypi_models import PypiDocument, PypiFile, PypiReleases
+from bmk.adapters.stagerunner.helpers._pypi_models import PackageType, PypiDocument, PypiFile, PypiReleases
 from bmk.adapters.stagerunner.helpers._supply_chain import (
     OwnPackageUnreadableError,
     ReleasePolicy,
@@ -674,18 +676,68 @@ def _specifier_or_none(text: str) -> SpecifierSet | None:
 
 
 def _installs_on(files: Iterable[PypiFile], python: str | None, *, yanked_ok: bool = False) -> bool:
-    """Whether a release has a file whose Requires-Python admits ``python``.
+    """Whether a release has a file that installs on ``python`` (see :func:`_file_installs_on`).
 
-    Yanked files count only with ``yanked_ok``. Missing or unparseable Requires-Python metadata
-    admits, as pip treats it. ``python`` None (the project names no oldest Python) admits any file.
+    Every judgement of whether a release installs on a Python comes through here, so the
+    floor, the cooldown pin and the lock judgement can never disagree about one release. Yanked
+    files count only with ``yanked_ok``. ``python`` None (the project names no oldest Python)
+    admits any file.
     """
-    for entry in files:
-        if entry.yanked and not yanked_ok:
-            continue
-        requires = _specifier_or_none(entry.requires_python or "")
-        if python is None or requires is None or requires.contains(python):
-            return True
-    return False
+    return any(
+        (yanked_ok or not entry.yanked) and (python is None or _file_installs_on(entry, python)) for entry in files
+    )
+
+
+def _file_installs_on(entry: PypiFile, python: str) -> bool:
+    """Whether one file installs on ``python``: its Requires-Python admits it, and a wheel runs there.
+
+    Missing or unparseable Requires-Python metadata admits, as pip treats it. An sdist builds
+    wherever that admits. A wheel also needs a tag whose interpreter and ABI the default CPython
+    build of that minor installs from: a wheel-only release with no Requires-Python (pywin32 310,
+    cp38 to cp313) is otherwise read as installable on 3.14, where it has no wheel. The platform is
+    never judged, since environment markers decide where a requirement applies at all. A wheel
+    whose name cannot be parsed, and any other kind of file, keep the Requires-Python reading: a
+    file the check cannot read is no evidence that the release does not install.
+
+    Example:
+        >>> wheel = PypiFile(filename="demo-1.0-cp39-abi3-win_amd64.whl", packagetype=PackageType.BDIST_WHEEL)
+        >>> _file_installs_on(wheel, "3.14.0"), _file_installs_on(wheel, "3.8.0")
+        (True, False)
+    """
+    requires = _specifier_or_none(entry.requires_python or "")
+    if requires is not None and not requires.contains(python):
+        return False
+    if entry.packagetype is not PackageType.BDIST_WHEEL:
+        return True
+    version = _version_or_none(python)
+    if version is None:
+        return True
+    try:
+        tags = parse_wheel_filename(entry.filename)[3]
+    except InvalidWheelFilename:
+        return True
+    runs = _interpreter_tags(version.major, version.minor)
+    return any(Tag(tag.interpreter, tag.abi, "any") in runs for tag in tags)
+
+
+@cache
+def _interpreter_tags(major: int, minor: int) -> frozenset[Tag]:
+    """Every interpreter and ABI pair the default CPython ``major.minor`` build installs wheels from.
+
+    The platform is fixed to ``any`` so a wheel is matched on its Python alone. The ABIs are named
+    explicitly: packaging otherwise reads them from the RUNNING interpreter, so a free-threaded or
+    debug build running bmk would change the answer for a Python it is not. ``cp37m`` is the ABI
+    CPython used before 3.8.
+
+    Example:
+        >>> Tag("cp39", "abi3", "any") in _interpreter_tags(3, 14)
+        True
+        >>> Tag("cp313", "cp313t", "any") in _interpreter_tags(3, 13)
+        False
+    """
+    python = (major, minor)
+    abis = [f"cp{major}{minor}", *([f"cp{major}{minor}m"] if python < (3, 8) else [])]
+    return frozenset((*cpython_tags(python, abis, ["any"]), *compatible_tags(python, f"cp{major}{minor}", ["any"])))
 
 
 def _installs_on_all(files: tuple[PypiFile, ...], pythons: tuple[str | None, ...], *, yanked_ok: bool = False) -> bool:
@@ -1419,7 +1471,7 @@ def _replace_lower_bound(match: re.Match[str], *, latest_version: str) -> str:
     """
     operator = match.group(1)
     # An upper bound or exclusion is the author's ceiling, never a floor to raise.
-    if operator in ("<", "<=", "!="):
+    if operator in _CEILING_OPERATORS:
         return match.group(0)
     # ">X" moved to a release must still admit it, so a strict floor is written inclusive.
     operator = ">=" if operator == ">" else operator
