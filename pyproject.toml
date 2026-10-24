@@ -28,7 +28,7 @@ dependencies = [
     "httpx2>=2.13.1",               # PyPI version lookups
     "python-dotenv>=1.2.4",        # reads CODECOV_TOKEN from .env, and the LOG_* lines of a .env
                                    # in adapters/logging/setup.py
-    "filelock>=4.1.0",              # the cross-process lock serialising venv provisioning
+    "filelock>=4.2.1; python_version >= \"3.11\"",              # the cross-process lock serialising venv provisioning
                                    # (adapters/stagerunner/venv.py). It already arrived here
                                    # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
                                    # far too fragile a provenance for something bmk imports: drop
@@ -41,6 +41,9 @@ dependencies = [
                                    # tests/conftest.py because network filesystems do not give
                                    # SQLite the locking semantics it needs - so a lock file that
                                    # can land on such a mount must not be built on it
+    "filelock>=4.1.0; python_version < \"3.11\"",  # 4.2.1+ fixes GHSA-2g95-wg33-c5x2 but needs 3.11;
+                                   # 3.10 keeps 4.1.x. bmk uses only FileLock, not the affected
+                                   # SoftFileLock / MarkerSoftFileLock / SoftFileLease.
     "packaging>=26.3",             # PEP 440 parsing/ordering of the PROJECT's own version in
                                    # domain/version.py (release gate, bump, plugin sync), and the
                                    # Requires-Python specifiers and markers the dependency update
@@ -143,7 +146,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "7 days"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, certifi = "2026-10-20T02:24:17Z", setuptools = "2026-10-19T20:11:44Z"}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, certifi = "2026-10-20T02:24:17Z", setuptools = "2026-10-19T20:11:44Z", filelock = "2026-10-17T16:48:13Z"}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"

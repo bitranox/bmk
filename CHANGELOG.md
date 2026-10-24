@@ -22,7 +22,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   crashing a stage with AttributeError or TypeError. A non-array `[tool.pip-audit].ignore-vulns`
   gives no ignore flags (a string used to give one flag per character, a table one per key), and
   a non-array wheel `packages` falls through to the scripts and name rules instead of taking a
-  string's first character as the package name.
+  string's first character as the package name. A scalar `[tool]` or `[tool.pyright]` no longer
+  crashes the venv step that keeps the venv out of pyright; the file is left alone.
 - A `.claude-plugin/plugin.json` that is valid JSON but not an object is reported ("cannot read
   plugin.json: not a JSON object") by the version sync and skipped by the release gate, instead
   of crashing both. A PyPI answer that is JSON but not an object reads as "package unavailable".
@@ -39,6 +40,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   plugin.json read is parsed into a typed model at the point it enters, bump kinds, tool names
   and pipeline results are enums end to end, and the `adapters.email.sender` re-export module is
   gone (import from `bmk.adapters.email`).
+
+### Security
+
+- filelock is floored at 4.2.1 for GHSA-2g95-wg33-c5x2 on Python 3.11 and later. The fixed
+  release needs Python 3.11, so on 3.10 bmk keeps filelock 4.1.x; bmk uses only `FileLock`, not the
+  affected `SoftFileLock` / `MarkerSoftFileLock` / `SoftFileLease`. 4.2.1 is younger than bmk's
+  cooldown, so `[tool.uv]` pins it, as for certifi.
 
 ## [3.24.0] 2026-10-24 00:03:08
 
