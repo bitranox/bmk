@@ -6,6 +6,43 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The project venv is no longer rebuilt on every run when uv builds it on a different
+  interpreter than the newest one installed.** bmk compared the venv with the newest installed
+  patch, but uv picks by its `python-preference` and PATH order. With
+  `UV_PYTHON_PREFERENCE=system` (or `python-preference` in `uv.toml` / `[tool.uv]`) and a distro
+  Python older than uv's own, every run printed `[venv] python 3.14.4 -> 3.14.8: rebuilding
+  .venv` and uv rebuilt it on 3.14.4 again; a free-threaded build with a higher patch did the
+  same. bmk now asks uv which interpreter `uv venv` would use
+  (`uv python find --system --show-version`) and rebuilds only when that differs.
+- **A wheel-only release counts as installable on a Python only if it ships a wheel for it.** A
+  release with no Requires-Python was taken as installable everywhere; pywin32 310 (wheels for
+  cp38 to cp313 only, no sdist) was judged installable on 3.14, so floors were raised onto a
+  release that cannot install there. Wheels are now judged by their tags (cpXY, abi3 from its
+  floor, py3), sdists by Requires-Python as before. A floor can now be reported as unsatisfiable
+  where it used to be raised.
+- **`[tool.poetry]` dependencies keep their conditions and sources.** `markers`, `python` and
+  `platform` were dropped, so `pywin32 = { version = "^306", markers = "sys_platform == 'win32'" }`
+  was installed on Linux (and failed) and `tomli = { version = "^2", python = "<3.11" }` was
+  demanded on 3.12. They now carry the marker. A `git`, `path` or `url` dependency, or one from a
+  named non-PyPI `source`, is no longer looked up on PyPI under its bare name. The list form
+  (several constraint tables) gives one requirement per table, extras are kept, a bare version is
+  an exact pin (`2.13.0` was read as part of the package name), and `~=` is kept as PEP 440's
+  operator.
+- **A malformed pipeline overlay is refused with one line per problem.** The message carried
+  pydantic's full report (input values, documentation links) cut at 500 characters; it is now
+  `invalid [tool.bmk.pipelines.<name>] overlay:` followed by `  <location>: <reason>` lines, and
+  an overlay from `bmk_makescripts/stages.toml` names that file and its `[pipelines.<name>]` table.
+  Exit code unchanged (22).
+
+### Changed
+
+- The `--output-format` option of the coverage, shellcheck and PSScriptAnalyzer helpers lists
+  `{text,json}` in its help and "invalid choice" text (was `{json,text}`); both values work as
+  before.
+- `bmk.adapters.stagerunner.venv.latest_installed_patch` is replaced by `patch_uv_builds_on`.
+
 ## [3.24.1] 2026-10-24 13:41:02
 
 ### Fixed
