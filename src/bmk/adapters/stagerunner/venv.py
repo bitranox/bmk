@@ -25,13 +25,14 @@ import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Any, NamedTuple, Protocol, cast
 
 from filelock import FileLock, Timeout
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.domain.enums import PythonImplementation
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -153,7 +154,7 @@ class _UvPythonEntry(BaseModel):
 
     version: str
     version_parts: _UvVersionParts
-    implementation: str
+    implementation: PythonImplementation
     path: str | None = None
     variant: str = "default"
     key: str = ""
@@ -216,7 +217,8 @@ def _highest_installed_patch(listing: str | None, minor: str) -> str | None:
     patches = [
         entry.version_parts.patch
         for entry in entries
-        if entry.implementation == "cpython" and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
+        if entry.implementation is PythonImplementation.CPYTHON
+        and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
     ]
     return f"{minor}.{max(patches)}" if patches else None
 
@@ -239,12 +241,12 @@ class _VenvInterpreter:
     """What a venv's interpreter says about itself.
 
     Attributes:
-        implementation: ``sys.implementation.name`` (``cpython``, ``pypy``, ...).
+        implementation: ``sys.implementation.name`` as a member; an unlisted name is ``OTHER``.
         version: ``X.Y.Z`` from ``sys.version_info``.
         gil_disabled: A free-threaded build (``Py_GIL_DISABLED``).
     """
 
-    implementation: str
+    implementation: PythonImplementation
     version: str
     gil_disabled: bool
 
@@ -254,7 +256,9 @@ def _parse_interpreter_probe(raw: str | None) -> _VenvInterpreter | None:
     fields = raw.split() if raw else []
     if len(fields) != _PROBE_FIELDS or fields[2] not in ("0", "1"):
         return None
-    return _VenvInterpreter(implementation=fields[0], version=fields[1], gil_disabled=fields[2] == "1")
+    return _VenvInterpreter(
+        implementation=PythonImplementation(fields[0]), version=fields[1], gil_disabled=fields[2] == "1"
+    )
 
 
 def _probe_interpreter(venv: Path) -> _VenvInterpreter | None:
@@ -532,6 +536,68 @@ def _pyright_covers(name: str, patterns: list[str]) -> bool:
     return False
 
 
+def _include_listing_something(v: Any) -> Any:
+    """``include`` as pyright reads it: absent, ``[]`` and any other empty value all mean "walk the
+    whole project", so each becomes None and only a non-empty value is left to validate."""
+    return v or None
+
+
+def _exclude_entries_as_text(v: Any) -> Any:
+    """An ``exclude`` array's entries as text, the way they are compared against bmk's venv names.
+
+    Anything that is not an array passes through unchanged to fail validation: an ``exclude`` that
+    is not a list is not ours to interpret.
+    """
+    return [str(item) for item in cast("list[Any]", v)] if isinstance(v, list) else v
+
+
+class _PyrightPaths(BaseModel):
+    """``[tool.pyright]``: only the ``include`` / ``exclude`` keys this module decides on.
+
+    ``project.py`` owns ``pythonPlatform`` in its own boundary model; each key has one reader.
+    ``exclude`` stays None only when the key is ABSENT, which is not the same as ``[]``: with no key
+    pyright's built-in defaults (``**/.*``) are in force and nothing may be written, while an empty
+    list has already replaced them.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    include: Annotated[list[str] | None, BeforeValidator(_include_listing_something)] = None
+    exclude: Annotated[list[str] | None, BeforeValidator(_exclude_entries_as_text)] = None
+
+
+class _PyrightTool(BaseModel):
+    """``[tool]``, narrowed to the one table :func:`ensure_venv_typecheck_excluded` reads."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    pyright: _PyrightPaths | None = None
+
+
+class _PyrightPyproject(BaseModel):
+    """A ``pyproject.toml``, narrowed to ``[tool.pyright]``."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    tool: _PyrightTool = Field(default_factory=_PyrightTool)
+
+
+def _pyright_excludes_to_extend(document: Mapping[str, Any]) -> list[str] | None:
+    """The current ``[tool.pyright].exclude`` entries when bmk may append to them, else None.
+
+    None for every case :func:`ensure_venv_typecheck_excluded` leaves alone: no ``[tool.pyright]``,
+    no ``exclude`` key, an ``include`` that lists something, and a section whose values are not of
+    the shape pyright takes (``exclude`` not a list, ``include`` neither empty nor a list of paths).
+    """
+    try:
+        pyright = _PyrightPyproject.model_validate(document).tool.pyright
+    except ValidationError:
+        return None
+    if pyright is None or pyright.exclude is None or pyright.include is not None:
+        return None
+    return pyright.exclude
+
+
 def ensure_venv_typecheck_excluded(cwd: Path, venv: Path) -> None:
     """Keep bmk's venvs out of the project's pyright run.
 
@@ -565,22 +631,18 @@ def ensure_venv_typecheck_excluded(cwd: Path, venv: Path) -> None:
     except (OSError, ValueError, _typed_tomlkit.TOMLKitError):
         return
 
-    tool: Mapping[str, Any] = document.get("tool", {})
-    pyright: Mapping[str, Any] | None = tool.get("pyright")
-    if pyright is None or "exclude" not in pyright or pyright.get("include"):
+    current = _pyright_excludes_to_extend(document)
+    if current is None:
         return
-
-    if not isinstance(pyright["exclude"], list):
-        return  # not a list; not ours to interpret
-    # Cast, never copy: this must stay the tomlkit array that belongs to the
-    # document, or appending would mutate a throwaway and write back the original.
-    excludes = cast("list[Any]", pyright["exclude"])
-    current = [str(item) for item in excludes]
 
     missing = [name for name in _ignore_entries(cwd, venv) if not _pyright_covers(name, current)]
     if not missing:
         return
 
+    # The model decided; the edit goes through the document itself. Cast, never copy: this must
+    # stay the tomlkit array that belongs to the document, so the append keeps its comments and is
+    # what gets written back.
+    excludes = cast("list[Any]", document["tool"]["pyright"]["exclude"])
     for name in missing:
         excludes.append(name)
     try:
@@ -622,7 +684,7 @@ def _listing_needs_install(listing: str | None, minor: str) -> bool:
     relevant = [
         entry
         for entry in entries
-        if entry.implementation == "cpython"
+        if entry.implementation is PythonImplementation.CPYTHON
         and entry.is_default_build
         and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
     ]
@@ -954,8 +1016,8 @@ def _python_request(interpreter: _VenvInterpreter | None) -> str | None:
     if interpreter is None:
         return None
     minor = ".".join(interpreter.version.split(".")[:2])
-    if interpreter.implementation == "pypy":
-        return f"pypy@{minor}"
+    if interpreter.implementation is PythonImplementation.PYPY:
+        return f"{PythonImplementation.PYPY.value}@{minor}"
     if interpreter.gil_disabled:
         return f"{minor}t"
     return minor

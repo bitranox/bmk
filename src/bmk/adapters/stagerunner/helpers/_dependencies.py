@@ -1721,6 +1721,18 @@ def _default_cutoff(exclude_newer: object) -> datetime | None:
     ).default
 
 
+class _DeclaredRequirement(NamedTuple):
+    """One requirement the project declares, as the floor walk starts from it.
+
+    Attributes:
+        requirement: The parsed requirement.
+        python: The oldest Python it applies on (``X.Y``), or None when the project states no support.
+    """
+
+    requirement: Requirement
+    python: str | None
+
+
 def _demanded_pins(config: PyprojectConfig, cutoff: datetime | None, packages: dict[str, Any]) -> dict[str, str]:
     """The floor pins the project's declared floors need under its default ``cutoff``.
 
@@ -1737,11 +1749,12 @@ def _demanded_pins(config: PyprojectConfig, cutoff: datetime | None, packages: d
     # needs no pin, and for a project not on PyPI its release list cannot be read, which would
     # leave every pin unjudgeable and frozen. The extras it names are walked as declared anyway.
     own = normalize(config.project.name)
-    declared: list[tuple[Requirement, str | None]] = []
+    declared: list[_DeclaredRequirement] = []
     for dep in _extract_all_dependencies(config):
         requirement = _requirement_or_none(dep.original_spec)
         if requirement is not None and normalize(requirement.name) != own:
-            declared.append((requirement, support.oldest_for(dep.original_spec) if support is not None else None))
+            python = support.oldest_for(dep.original_spec) if support is not None else None
+            declared.append(_DeclaredRequirement(requirement=requirement, python=python))
     return demand.resolve(declared)
 
 
@@ -1802,7 +1815,7 @@ class _FloorDemand:
         self._reached: set[tuple[str, _NeedKey]] = set()
         self.pins: dict[str, str] = {}
 
-    def resolve(self, declared: list[tuple[Requirement, str | None]]) -> dict[str, str]:
+    def resolve(self, declared: list[_DeclaredRequirement]) -> dict[str, str]:
         """The pins ``declared`` needs, walked until they settle.
 
         Raises:
@@ -1812,14 +1825,15 @@ class _FloorDemand:
         for _ in range(self._MAX_PASSES):
             self._walked = set()
             self._reached = set()
-            for requirement, python in declared:
-                self.add(requirement, python=python)
+            for entry in declared:
+                self.add(entry.requirement, python=entry.python)
             pins = {
                 name: pin
                 for name, needs in self._needs.items()
                 if (
                     pin := _package_pin(
-                        [(need, (name, key) in self._reached) for key, need in needs.items()], cutoff=self._cutoff
+                        [_ReachedNeed(need=need, reached=(name, key) in self._reached) for key, need in needs.items()],
+                        cutoff=self._cutoff,
                     )
                 )
                 is not None
@@ -1909,7 +1923,20 @@ class _Need:
         return _cuts_at({v: f for v, f in self.releases.items() if Version(v) >= floor}, moment)
 
 
-def _package_pin(needs: list[tuple[_Need, bool]], *, cutoff: datetime) -> str | None:
+class _ReachedNeed(NamedTuple):
+    """One requirement on a package, and whether the current pass of :class:`_FloorDemand` reached it.
+
+    Attributes:
+        need: The requirement.
+        reached: Whether this pass reached it; one kept from an earlier pass only may hold a pin
+            back, never decide one forward (see :func:`_package_pin`).
+    """
+
+    need: _Need
+    reached: bool
+
+
+def _package_pin(needs: list[_ReachedNeed], *, cutoff: datetime) -> str | None:
     """The pin a package needs under the default ``cutoff``, given every requirement on it; None for none.
 
     uv locks, per requirement, the highest release a file before the cutoff makes visible, with only
@@ -1926,13 +1953,13 @@ def _package_pin(needs: list[tuple[_Need, bool]], *, cutoff: datetime) -> str | 
     Each candidate is one second after a release's newest file, which is how bmk recognises the pin
     as its own.
 
-    ``needs`` pairs each requirement with whether this pass reached it. One not reached is not in
+    ``needs`` carries each requirement with whether this pass reached it. One not reached is not in
     the tree uv resolves; it is kept only so the passes settle (see :class:`_FloorDemand`), so it may
     hold a pin BACK (:meth:`_Need.tolerates`) but never decide one FORWARD: a forward pin admits
     young files, and only a reached requirement may ask for that.
     """
-    reached = [need for need, was_reached in needs if was_reached]
-    unreached = [need for need, was_reached in needs if not was_reached]
+    reached = [entry.need for entry in needs if entry.reached]
+    unreached = [entry.need for entry in needs if not entry.reached]
 
     def settles(moment: datetime) -> bool:
         return all(need.settles(moment) for need in reached)
@@ -1943,7 +1970,7 @@ def _package_pin(needs: list[tuple[_Need, bool]], *, cutoff: datetime) -> str | 
     if safe(cutoff):
         return None
     candidates = sorted(
-        {pin for need, _ in needs for files in need.releases.values() if (pin := floor_pin(files)) is not None}
+        {pin for entry in needs for files in entry.need.releases.values() if (pin := floor_pin(files)) is not None}
     )
     back = [c for c in reversed(candidates) if _as_moment(c) <= cutoff]
     forward = [c for c in candidates if _as_moment(c) > cutoff]

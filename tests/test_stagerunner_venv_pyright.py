@@ -222,3 +222,47 @@ def test_venv_outside_the_repo_adds_only_the_glob(project: Path, tmp_path: Path)
     excluded = _exclude(project)
     assert "elsewhere-venv" not in excluded
     assert ".venv*" in excluded
+
+
+# --- absent is not empty, and shapes pyright does not take ------------------
+
+
+@pytest.mark.os_agnostic
+def test_empty_exclude_list_gains_the_glob(project: Path) -> None:
+    """``exclude = []`` has already replaced pyright's defaults, unlike a missing key."""
+    _write(project, "[tool.pyright]\nexclude = []\n")
+
+    ensure_venv_typecheck_excluded(project, project / ".venv")
+
+    assert _exclude(project) == [".venv*"]
+
+
+@pytest.mark.os_agnostic
+def test_empty_include_list_still_walks_the_project(project: Path) -> None:
+    """``include = []`` narrows nothing, so the venv still needs excluding."""
+    _write(project, '[tool.pyright]\ninclude = []\nexclude = ["scripts/menu.py"]\n')
+
+    ensure_venv_typecheck_excluded(project, project / ".venv")
+
+    assert ".venv*" in _exclude(project)
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "body",
+    [
+        '[tool.pyright]\nexclude = "scripts/menu.py"\n',
+        '[tool.pyright]\ninclude = "src"\nexclude = ["scripts/menu.py"]\n',
+        '[tool]\npyright = "strict"\n',
+        "[tool]\npyright = 1\n",
+        'tool = "x"\n',
+    ],
+    ids=["exclude-not-a-list", "include-a-string", "pyright-a-string", "pyright-a-number", "tool-a-string"],
+)
+def test_a_shape_pyright_does_not_take_is_left_alone(project: Path, body: str) -> None:
+    """Not ours to interpret: the file stays byte-identical and nothing raises."""
+    _write(project, body)
+
+    ensure_venv_typecheck_excluded(project, project / ".venv")
+
+    assert (project / "pyproject.toml").read_text(encoding="utf-8") == body
