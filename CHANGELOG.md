@@ -37,7 +37,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   pydantic's full report (input values, documentation links) cut at 500 characters; it is now
   `invalid [tool.bmk.pipelines.<name>] overlay:` followed by `  <location>: <reason>` lines, and
   an overlay from `bmk_makescripts/stages.toml` names that file and its `[pipelines.<name>]` table.
-  Exit code unchanged (22).
+  Exit code unchanged (22; 87 on Windows).
 - **`bmk_makescripts/stages.toml` wins whenever it names a pipeline.** An empty
   `[pipelines.<name>]` table there fell through to the `pyproject.toml` overlay, and a section that
   is not a table (an `[[pipelines.<name>]]` typo) was ignored silently while also hiding the

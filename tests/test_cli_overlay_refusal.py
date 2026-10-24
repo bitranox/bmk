@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, Any
 
+import lib_cli_exit_tools
 import pytest
 from lib_layered_config import Config
 
@@ -120,7 +121,8 @@ def test_custom_command_reports_a_bad_overlay_without_pydantic_internals(
     exit_code = main(["custom", "deploy"], services_factory=_services())
 
     err = capsys.readouterr().err
-    assert exit_code == 22
+    # A refused overlay is a ValueError; its exit code is the platform's (22 on POSIX, 87 on Windows).
+    assert exit_code == lib_cli_exit_tools.get_system_exit_code(ValueError())
     assert _EXPECTED in err
     assert "pydantic" not in err
     assert "https://errors.pydantic.dev" not in err
