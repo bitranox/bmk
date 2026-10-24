@@ -13,7 +13,8 @@ import sys
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from bmk.domain.errors import RefusalError, RefusalKind
+from bmk.domain.enums import RefusalKind
+from bmk.domain.errors import RefusalError
 from bmk.domain.stages import normalize_returncode
 
 if TYPE_CHECKING:

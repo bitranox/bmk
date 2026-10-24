@@ -20,7 +20,7 @@ from enum import IntEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
-from bmk.domain.errors import RefusalKind
+from bmk.domain.enums import RefusalKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

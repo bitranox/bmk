@@ -37,7 +37,8 @@ from bmk.adapters.stagerunner.venv import (
     venv_python,
     venv_version,
 )
-from bmk.domain.errors import RefusalError, RefusalKind
+from bmk.domain.enums import RefusalKind
+from bmk.domain.errors import RefusalError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

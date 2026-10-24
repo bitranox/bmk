@@ -33,7 +33,8 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     resolve_workers,
 )
 from bmk.adapters.stagerunner.venv import venv_python
-from bmk.domain.errors import RefusalError, RefusalKind
+from bmk.domain.enums import RefusalKind
+from bmk.domain.errors import RefusalError
 
 if TYPE_CHECKING:
     from pathlib import Path

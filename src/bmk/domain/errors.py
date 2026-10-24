@@ -2,26 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
-
-
-class RefusalKind(str, Enum):
-    """Why bmk refused to act, which decides the exit code a refusal ends with.
-
-    The CLI maps each kind to one fixed exit code. Without that, a refusal reached the
-    generic crash handler, whose code is the OS's errno for the exception type and so
-    differs between POSIX and Windows for the same refusal.
-
-    Example:
-        >>> RefusalKind.CONFIG.value
-        'config'
-    """
-
-    CONFIG = "config"
-    INVALID_ARGUMENT = "invalid_argument"
-    NOT_FOUND = "not_found"
-    PERMISSION = "permission"
-    PRECONDITION = "precondition"
+from .enums import RefusalKind
 
 
 class RefusalError(Exception):
@@ -129,5 +110,4 @@ __all__ = [
     "InvalidProjectVersionError",
     "InvalidRecipientError",
     "RefusalError",
-    "RefusalKind",
 ]

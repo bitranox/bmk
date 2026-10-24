@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from bmk.adapters.cli.exit_codes import REFUSAL_EXIT_CODES, ExitCode
-from bmk.domain.errors import ConfigurationError, InvalidProjectVersionError, RefusalError, RefusalKind
+from bmk.domain.enums import RefusalKind
+from bmk.domain.errors import ConfigurationError, InvalidProjectVersionError, RefusalError
 
 
 @pytest.mark.os_agnostic
