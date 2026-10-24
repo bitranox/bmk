@@ -18,7 +18,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
-from ..typed_click import argument, option
+from ..typed_click import argument, get_current_context, option
 from ._shared import resolve_output_format, run_command
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def _run_test_integration(args: tuple[str, ...], *, human: bool = False) -> None
         human: Use human-readable text output instead of JSON.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+        click.exceptions.Exit: With FILE_NOT_FOUND (2) if no pipeline is defined,
             or the pipeline's exit code on failure.
     """
     cwd = Path.cwd()
@@ -44,7 +44,7 @@ def _run_test_integration(args: tuple[str, ...], *, human: bool = False) -> None
     )
 
     if exit_code != 0:
-        raise SystemExit(exit_code)
+        get_current_context().exit(exit_code)
 
 
 @click.command("testintegration", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)

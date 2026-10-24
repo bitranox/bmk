@@ -25,6 +25,7 @@ from bmk.domain.enums import ToolOutputFormat
 from .. import safe_console
 from ..constants import CLICK_CONTEXT_SETTINGS
 from ..exit_codes import ExitCode
+from ..typed_click import get_current_context
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +128,12 @@ def cli_install() -> None:
         bmk install          # fresh install or update
     """
     with lib_log_rich.runtime.bind(job_id="cli-install", extra={"command": "install"}):
-        makefile_error: SystemExit | None = None
+        # Held, not exited on: the prerequisites report below is printed either way.
+        makefile_exit: ExitCode | None = None
 
         if not _BUNDLED_MAKEFILE.is_file():
             safe_console.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
-            makefile_error = SystemExit(ExitCode.FILE_NOT_FOUND)
+            makefile_exit = ExitCode.FILE_NOT_FOUND
         else:
             target = Path.cwd() / "Makefile"
 
@@ -139,7 +141,7 @@ def cli_install() -> None:
                 first_line = target.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
                 if not first_line.startswith(_BMK_MAKEFILE_SENTINEL):
                     safe_console.echo("Makefile exists but is not managed by bmk - skipping", err=True)
-                    makefile_error = SystemExit(ExitCode.GENERAL_ERROR)
+                    makefile_exit = ExitCode.GENERAL_ERROR
                 else:
                     logger.info("Updating existing bmk Makefile")
                     safe_console.echo("Updating existing bmk Makefile")
@@ -158,8 +160,8 @@ def cli_install() -> None:
         safe_console.echo("")
         safe_console.echo(report)
 
-        if makefile_error is not None:
-            raise makefile_error
+        if makefile_exit is not None:
+            get_current_context().exit(makefile_exit)
 
 
 __all__ = ["check_makefile_update", "cli_install"]

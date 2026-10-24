@@ -19,7 +19,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
-from ..typed_click import argument
+from ..typed_click import argument, get_current_context
 from ._shared import run_command
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def _run_run(args: tuple[str, ...]) -> None:
         args: Arguments to forward to the project CLI.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+        click.exceptions.Exit: With FILE_NOT_FOUND (2) if no pipeline is defined,
             or the pipeline's exit code on failure.
     """
 
@@ -42,7 +42,7 @@ def _run_run(args: tuple[str, ...]) -> None:
     exit_code = run_command(cwd, args, command_prefix=command_prefix)
 
     if exit_code != 0:
-        raise SystemExit(exit_code)
+        get_current_context().exit(exit_code)
 
 
 @click.command("run", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)

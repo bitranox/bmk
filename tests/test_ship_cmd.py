@@ -7,10 +7,12 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
+import click
 import pytest
 
 from bmk.adapters.cli.commands import ship_cmd
 from bmk.adapters.cli.commands.ship_cmd import GhRunEvent, _find_run_id
+from bmk.adapters.cli.exit_codes import ExitCode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -160,19 +162,21 @@ def test_git_head_empty_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_gate_on_ci_raises_when_watched_run_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: "77")
     monkeypatch.setattr(ship_cmd, "_watch_run", lambda _run_id: False)
-    with pytest.raises(SystemExit):
+    with click.Context(ship_cmd.cli_ship).scope(), pytest.raises(click.exceptions.Exit) as exited:
         ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
+    assert exited.value.exit_code == ExitCode.GENERAL_ERROR
 
 
 @pytest.mark.os_agnostic
 def test_gate_on_ci_raises_when_no_run_appears_before_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The find-run loop times out to SystemExit; monotonic is stubbed so no real wait happens."""
+    """The find-run loop times out to GENERAL_ERROR; monotonic is stubbed so no real wait happens."""
     monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: None)
     monkeypatch.setattr(ship_cmd.time, "sleep", lambda _s: None)
     clock = iter([0.0, 10_000.0])  # deadline set from 0, next read is already past it
     monkeypatch.setattr(ship_cmd.time, "monotonic", lambda: next(clock))
-    with pytest.raises(SystemExit):
+    with click.Context(ship_cmd.cli_ship).scope(), pytest.raises(click.exceptions.Exit) as exited:
         ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
+    assert exited.value.exit_code == ExitCode.GENERAL_ERROR
 
 
 @pytest.mark.os_agnostic

@@ -17,7 +17,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
-from ..typed_click import option
+from ..typed_click import get_current_context, option
 from ._shared import resolve_output_format, run_command
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def _run_test_all(*, human: bool) -> None:
         output_format=resolve_output_format(human=human),
     )
     if exit_code != 0:
-        raise SystemExit(exit_code)
+        get_current_context().exit(exit_code)
 
 
 @click.command("test-all", context_settings=CLICK_CONTEXT_SETTINGS)

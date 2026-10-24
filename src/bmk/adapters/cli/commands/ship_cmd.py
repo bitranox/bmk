@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..constants import CLICK_CONTEXT_SETTINGS
 from ..exit_codes import ExitCode
-from ..typed_click import argument, option
+from ..typed_click import argument, get_current_context, option
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def _watch_run(run_id: str) -> bool:
 
 
 def _gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label: str) -> None:
-    """Find and watch the workflow run for *head_sha*; raise SystemExit on failure.
+    """Find and watch the workflow run for *head_sha*; exit with GENERAL_ERROR on failure.
 
     Args:
         workflow: GitHub workflow name to match.
@@ -125,7 +125,7 @@ def _gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label
         label: Human label for log messages.
 
     Raises:
-        SystemExit: If the run fails, or no run appears within the timeout.
+        click.exceptions.Exit: If the run fails, or no run appears within the timeout.
     """
     logger.info("Waiting for the %s workflow run to start", label)
     deadline = time.monotonic() + _FIND_RUN_TIMEOUT
@@ -136,11 +136,11 @@ def _gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label
             time.sleep(_POLL_SECONDS)
     if run_id is None:
         logger.error("No %s workflow run appeared within %ds", label, _FIND_RUN_TIMEOUT)
-        raise SystemExit(ExitCode.GENERAL_ERROR)
+        get_current_context().exit(ExitCode.GENERAL_ERROR)
     logger.info("Watching %s workflow run %s", label, run_id)
     if not _watch_run(run_id):
         logger.error("%s workflow run %s failed", label, run_id)
-        raise SystemExit(ExitCode.GENERAL_ERROR)
+        get_current_context().exit(ExitCode.GENERAL_ERROR)
     logger.info("%s workflow run %s succeeded", label, run_id)
 
 
@@ -148,7 +148,7 @@ def _run_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str)
     """Execute push, CI gate, release, release CI gate.
 
     Raises:
-        SystemExit: On any step failure.
+        click.exceptions.Exit: On any step failure.
     """
     # Deferred: pull in the push/release command implementations only when
     # `bmk ship` actually runs, not on command registration.

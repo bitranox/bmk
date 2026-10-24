@@ -17,6 +17,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
+from ..typed_click import get_current_context
 from ._shared import run_command
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 def _run_clean_all() -> None:
     exit_code = run_command(Path.cwd(), (), command_prefix="clean_all")
     if exit_code != 0:
-        raise SystemExit(exit_code)
+        get_current_context().exit(exit_code)
 
 
 @click.command("clean-all", context_settings=CLICK_CONTEXT_SETTINGS)

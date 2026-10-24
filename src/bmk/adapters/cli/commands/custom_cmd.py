@@ -21,7 +21,7 @@ import rich_click as click
 from ..config_load import require_config
 from ..constants import PASSTHROUGH_CONTEXT_SETTINGS
 from ..context import get_cli_context
-from ..typed_click import argument
+from ..typed_click import argument, get_current_context
 from ._shared import run_command
 
 _RE_COMMAND_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -58,13 +58,13 @@ def _run_custom(command_name: str, args: tuple[str, ...]) -> None:
         args: Arguments to forward to the pipeline's stages.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the
+        click.exceptions.Exit: With FILE_NOT_FOUND (2) if no pipeline is defined for the
             name, or the pipeline's exit code on failure.
     """
     exit_code = run_command(Path.cwd(), args, command_prefix=command_name)
 
     if exit_code != 0:
-        raise SystemExit(exit_code)
+        get_current_context().exit(exit_code)
 
 
 @click.command("custom", context_settings=PASSTHROUGH_CONTEXT_SETTINGS)

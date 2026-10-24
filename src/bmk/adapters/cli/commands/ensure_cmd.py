@@ -16,7 +16,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
-from ..typed_click import option
+from ..typed_click import get_current_context, option
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def cli_ensure(*, dry_run: bool, strict: bool) -> None:
 
         exit_code = run_ensure(dry_run=dry_run, strict=strict)
         if exit_code != 0:
-            raise SystemExit(exit_code)
+            get_current_context().exit(exit_code)
 
 
 __all__ = ["cli_ensure"]

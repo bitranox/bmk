@@ -171,6 +171,7 @@ def test_a_successful_command_exits_0(capsys: pytest.CaptureFixture[str]) -> Non
 # runs end to end and nothing inside bmk is patched.
 _STAGE_COMMANDS: list[tuple[list[str], str]] = [
     (["build"], "bld"),
+    (["bump", "patch"], "bump_patch"),
     (["clean"], "clean"),
     (["clean-all"], "clean_all"),
     (["commit", "msg"], "commit"),
@@ -236,6 +237,23 @@ def test_a_custom_pipeline_nobody_defined_exits_file_not_found_without_printing_
 
 
 @pytest.mark.os_agnostic
+def test_install_beside_an_unmanaged_makefile_exits_1_without_printing_systemexit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "Makefile").write_text("all:\n\techo mine\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["install"], services_factory=_services({}))
+
+    err = capsys.readouterr().err
+    assert exit_code == ExitCode.GENERAL_ERROR
+    assert "not managed by bmk" in err
+    assert "SystemExit" not in err
+
+
+@pytest.mark.os_agnostic
 def test_no_cli_module_raises_a_bare_systemexit() -> None:
     """Close the shape, not the instances: a new command copying the old pattern goes red here.
 
@@ -245,15 +263,14 @@ def test_no_cli_module_raises_a_bare_systemexit() -> None:
     """
     cli_root = Path(bmk.adapters.cli.__file__).parent
     modules = sorted(cli_root.rglob("*.py"))
+    # Any construction counts, not only `raise SystemExit(...)`: a SystemExit built into a variable
+    # and raised later (`raise error`) reaches main() the same way.
     offenders = [
         f"{module.relative_to(cli_root)}:{node.lineno}"
         for module in modules
         for node in ast.walk(ast.parse(module.read_text(encoding="utf-8")))
-        if isinstance(node, ast.Raise)
-        and node.exc is not None
-        and isinstance(call := node.exc, ast.Call)
-        and isinstance(call.func, ast.Name)
-        and call.func.id == "SystemExit"
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SystemExit")
+        or (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Name) and node.exc.id == "SystemExit")
     ]
 
     assert len(modules) > 20, f"scanned only {len(modules)} modules under {cli_root}"

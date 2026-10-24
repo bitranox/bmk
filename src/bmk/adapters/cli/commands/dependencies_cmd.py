@@ -21,7 +21,7 @@ import lib_log_rich.runtime
 import rich_click as click
 
 from ..constants import CLICK_CONTEXT_SETTINGS
-from ..typed_click import option
+from ..typed_click import get_current_context, option
 from ._shared import run_command
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def _run_dependencies(*, update: bool) -> None:
         update: True runs the ``deps_update`` pipeline, False the ``deps`` check.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined,
+        click.exceptions.Exit: With FILE_NOT_FOUND (2) if no pipeline is defined,
             or the pipeline's exit code on failure.
     """
 
@@ -44,7 +44,7 @@ def _run_dependencies(*, update: bool) -> None:
     exit_code = run_command(cwd, (), command_prefix=command_prefix)
 
     if exit_code != 0:
-        raise SystemExit(exit_code)
+        get_current_context().exit(exit_code)
 
 
 # =============================================================================

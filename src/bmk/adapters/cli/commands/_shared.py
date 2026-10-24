@@ -19,6 +19,7 @@ from bmk.domain.enums import ToolOutputFormat, VenvProvisioning
 from .. import safe_console
 from ..context import CLIContext
 from ..exit_codes import ExitCode
+from ..typed_click import get_current_context
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,11 +49,13 @@ def run_command(
             ``None``, resolved from ``BMK_OUTPUT_FORMAT`` (default JSON).
 
     Returns:
-        Exit code from the pipeline.
+        Exit code from the pipeline, or FILE_NOT_FOUND (2) when no pipeline is defined for the
+        prefix. Returned rather than raised: the command decides how to exit, and only a click
+        context exit keeps main() from printing "SystemExit: N" after the error.
 
     Raises:
-        SystemExit: With FILE_NOT_FOUND (2) if no pipeline is defined for the prefix, or
-            CONFIG_ERROR (78) when the ``[bmk]`` section holds a value bmk refuses.
+        click.exceptions.Exit: With CONFIG_ERROR (78) when the ``[bmk]`` section holds a value
+            bmk refuses.
     """
     # Deferred: the stagerunner subsystem (pipeline engine, registry, venv provisioning)
     # is expensive to import and only every command that actually RUNS a pipeline needs
@@ -74,7 +77,7 @@ def run_command(
             "Define one under [tool.bmk.pipelines] in pyproject.toml or in bmk_makescripts/stages.toml.",
             err=True,
         )
-        raise SystemExit(ExitCode.FILE_NOT_FOUND)
+        return ExitCode.FILE_NOT_FOUND
 
     # Provision before build_context: it pins VIRTUAL_ENV / PIPAPI_PYTHON_LOCATION
     # once and StageContext is frozen, so a venv created later could not repair the
@@ -131,7 +134,7 @@ def _configured_bmk_settings() -> BmkSettings:
     except BmkSettingsError as exc:
         for problem in exc.problems:
             safe_console.echo(f"Error: {problem}", err=True)
-        raise SystemExit(ExitCode.CONFIG_ERROR) from exc
+        get_current_context().exit(ExitCode.CONFIG_ERROR)
 
 
 def resolve_output_format(*, human: bool) -> ToolOutputFormat:
