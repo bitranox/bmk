@@ -17,6 +17,7 @@ from ...context import get_cli_context
 from ...typed_click import option
 from ._common import (
     EmailConfigOverrides,
+    MessageKind,
     execute_with_email_error_handling,
     load_and_validate_email_config,
     smtp_config_options,
@@ -88,7 +89,7 @@ def cli_send_notification(
                 from_address=from_address,
             ),
             recipients=resolved_recipients,
-            message_type="Notification",
+            message_kind=MessageKind.NOTIFICATION,
         )
 
 

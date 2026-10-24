@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+from enum import Enum
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from btx_lib_mail import AttachmentSecurityError, SecretSafeModel
@@ -30,6 +31,26 @@ if TYPE_CHECKING:
     from bmk.application.ports import LoadEmailConfigFromDict
 
 logger = logging.getLogger(__name__)
+
+
+class MessageKind(str, Enum):
+    """What a send command delivers, as its output names it.
+
+    The value is the capitalised label that opens a sentence ("Email sent successfully!");
+    :attr:`noun` is the same word mid-sentence ("Invalid email parameters").
+
+    Example:
+        >>> MessageKind.NOTIFICATION.noun
+        'notification'
+    """
+
+    EMAIL = "Email"
+    NOTIFICATION = "Notification"
+
+    @property
+    def noun(self) -> str:
+        """The kind in lower case, for use inside a sentence."""
+        return self.value.lower()
 
 
 class EmailConfigOverrides(SecretSafeModel):
@@ -191,7 +212,7 @@ def execute_with_email_error_handling(
     *,
     operation: Callable[[], bool],
     recipients: list[str] | None,
-    message_type: str,
+    message_kind: MessageKind,
     catches_file_not_found: bool = False,
 ) -> None:
     """Execute an email operation with unified error handling.
@@ -199,7 +220,7 @@ def execute_with_email_error_handling(
     Args:
         operation: Zero-arg callable returning True on success.
         recipients: Recipients for logging context.
-        message_type: "Email" or "Notification" for display messages.
+        message_kind: What is being sent; names it in the output.
         catches_file_not_found: When True, catches FileNotFoundError
             (needed for send-email with attachments).
 
@@ -231,15 +252,15 @@ def execute_with_email_error_handling(
     except ConfigurationError as exc:
         _handle_send_error(
             exc,
-            f"{message_type} configuration error",
+            f"{message_kind.value} configuration error",
             "Configuration error",
             exit_code=ExitCode.CONFIG_ERROR,
         )
     except ValueError as exc:
         _handle_send_error(
             exc,
-            f"Invalid {message_type.lower()} parameters",
-            f"Invalid {message_type.lower()} parameters",
+            f"Invalid {message_kind.noun} parameters",
+            f"Invalid {message_kind.noun} parameters",
             exit_code=ExitCode.INVALID_ARGUMENT,
         )
     except FileNotFoundError as exc:
@@ -266,7 +287,7 @@ def execute_with_email_error_handling(
             raise
         _handle_send_error(
             exc,
-            f"Unexpected error sending {message_type.lower()}",
+            f"Unexpected error sending {message_kind.noun}",
             "Unexpected error",
             exit_code=ExitCode.GENERAL_ERROR,
             log_traceback=True,
@@ -275,7 +296,7 @@ def execute_with_email_error_handling(
         # Outside the try on purpose: a failed send exits through click's Exit, which is a
         # RuntimeError, so inside the try the DeliveryError/RuntimeError branch would catch it
         # and report the same failure a second time as "SMTP delivery failed".
-        _handle_send_result(result, recipients, message_type)
+        _handle_send_result(result, recipients, message_kind)
 
 
 def handle_validation_error(exc: ValidationError) -> NoReturn:
@@ -333,22 +354,22 @@ def _refuse_attachment(exc: AttachmentSecurityError) -> NoReturn:
     get_current_context().exit(ExitCode.ATTACHMENT_REFUSED)
 
 
-def _handle_send_result(result: bool, recipients: list[str] | None, message_type: str) -> None:
+def _handle_send_result(result: bool, recipients: list[str] | None, message_kind: MessageKind) -> None:
     """Handle the result of a send operation.
 
     Args:
         result: True if send succeeded.
         recipients: Email recipients, or None when config defaults were used.
-        message_type: "Email" or "Notification" for display.
+        message_kind: What was sent; names it in the output.
 
     Raises:
         click.exceptions.Exit: If the send failed.
     """
     if result:
-        safe_console.echo(f"\n{message_type} sent successfully!")
-        logger.info("%s sent via CLI", message_type, extra={"recipients": recipients})
+        safe_console.echo(f"\n{message_kind.value} sent successfully!")
+        logger.info("%s sent via CLI", message_kind.value, extra={"recipients": recipients})
     else:
-        safe_console.echo(f"\n{message_type} sending failed.", err=True)
+        safe_console.echo(f"\n{message_kind.value} sending failed.", err=True)
         get_current_context().exit(ExitCode.SMTP_FAILURE)
 
 
@@ -385,6 +406,7 @@ def _handle_send_error(
 
 __all__ = [
     "EmailConfigOverrides",
+    "MessageKind",
     "apply_validated_overrides",
     "execute_with_email_error_handling",
     "handle_validation_error",
