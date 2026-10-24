@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.25.1] 2026-10-24 18:27:49
+
+### Changed
+
+- The `devops-bmk` skill and `docs/pyproject-reference.md` describe the venv's Python as the patch
+  uv builds it on: its latest patch only under uv's default `python-preference`. They said "latest
+  patch" unconditionally, which is wrong under `UV_PYTHON_PREFERENCE=system`.
+
 ## [3.25.0] 2026-10-24 15:21:52
 
 ### Fixed

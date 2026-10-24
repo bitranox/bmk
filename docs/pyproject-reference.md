@@ -66,8 +66,8 @@ pre-release: write one into `pyproject.toml` yourself, then bump to finalize it.
 |----------------------------------------------|------|------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
 | `[project].classifiers` (`:: Python :: X.Y`) | list | Picks the **highest** `X.Y` you declare, keeps it installed and on its latest patch, and builds `.venv` with it. | uv chooses the interpreter, as it always did |
 
-bmk builds your `.venv` on the **newest Python your project says it supports**, at that
-version's **latest patch**:
+bmk builds your `.venv` on the **newest Python your project says it supports**, on the patch uv
+builds it on (its **latest patch** under uv's default `python-preference`, see below):
 
 ```toml
 [project]
@@ -75,7 +75,7 @@ requires-python = ">=3.10"
 classifiers = [
   "Programming Language :: Python :: 3",       # ignored: no minor
   "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.14",    # <- bmk builds .venv on 3.14, latest patch
+  "Programming Language :: Python :: 3.14",    # <- bmk builds .venv on 3.14 (latest patch under uv's default python-preference)
 ]
 ```
 
