@@ -16,6 +16,19 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   already-committed tree, and says to gate the bumped commit, not the tree before the bump, since
   nothing in bmk raises a SKILL.md's `uvx` floors.
 
+### Fixed
+
+- In JSON mode, `deps --update`'s notices now appear in the stage's own report instead of
+  printing past it: another bmk holding the project's `uv lock`, uv refusing `--refresh-package`,
+  `[tool.uv] left as it is`, `floor pins left as they are`, a pin kept that no floor demands, and
+  a rewritten spec refused as invalid.
+- A failing stage command (`build`, `test`, `push`, `bump`, `release`, ...) and `install` beside
+  a Makefile bmk does not manage no longer end with `SystemExit: N` on stderr after the real
+  error. Exit codes are unchanged.
+- `docs/email.md`: a list of SMTP hosts in an environment variable is a JSON array (a
+  comma-separated string is refused), a `.env` line takes `EMAIL__...` without the `BMK___`
+  prefix, and the Python example uses the `EmailConfig` fields `smtphosts` and `smtp_timeout`.
+
 ## [3.25.1] 2026-10-24 18:27:49
 
 ### Changed
@@ -137,10 +150,6 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   main config (and Windows/macOS arms over `src` only) got 159 errors `make test` reported and CI
   never showed. A pinned main config now runs once, under its pin, as CI runs it, and each
   declared platform's `pyrightconfig.<platform>.json` arm runs through `--project`.
-- In JSON mode, `deps --update`'s notices now appear in the stage's own report instead of
-  printing past it: another bmk holding the project's `uv lock`, uv refusing `--refresh-package`,
-  `[tool.uv] left as it is`, `floor pins left as they are`, a pin kept that no floor demands, and
-  a rewritten spec refused as invalid.
 
 ### Security
 
