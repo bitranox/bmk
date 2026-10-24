@@ -116,6 +116,13 @@ the cost is one full re-resolve. If uv cannot say what it would provide (offline
 absent, uv not installed), your existing venv is left exactly as it is: bmk never rebuilds on a
 guess.
 
+**Which interpreter counts is uv's choice, not bmk's.** bmk rebuilds only when the venv is on a
+different patch from the interpreter `uv venv --python X.Y` would use, which it asks uv for
+(`uv python find --system --show-version X.Y`). With uv's default `python-preference` that is uv's
+own newest patch. With `UV_PYTHON_PREFERENCE=system` (or `python-preference` in `uv.toml` /
+`[tool.uv]`) a distro Python wins, and bmk keeps the venv on it rather than rebuilding it on every
+run.
+
 **Declaring nothing is a valid choice.** With no `:: Python :: X.Y` classifier, bmk picks no
 version and uv's own default stands - bmk will not invent a version you never claimed to support.
 
@@ -277,11 +284,20 @@ replace = [{ name = "ruff", order = 40, argv = ["ruff", "check", "--fix", "."] }
 the built-in ones: nothing is handed to a shell to re-parse. Stages run in `order`; stages
 sharing an order run in parallel.
 
-A `bmk_makescripts/stages.toml` with `[pipelines.<prefix>]` wins over `pyproject.toml`.
+A `bmk_makescripts/stages.toml` that names `[pipelines.<prefix>]` wins over `pyproject.toml`,
+even with an empty table: an empty table there means "no overlay for this pipeline".
 
-This is the one section that fails loudly: an invalid overlay raises
-`invalid [tool.bmk.pipelines.<prefix>] overlay: ...` rather than being ignored, because it
-is pipeline logic you wrote on purpose.
+This is the one section that fails loudly: an invalid overlay is refused rather than ignored,
+because it is pipeline logic you wrote on purpose. The refusal names the file's own table and
+one problem per line:
+
+```text
+invalid [tool.bmk.pipelines.deploy] overlay:
+  add.0.order: Input should be a valid integer, unable to parse string as an integer
+```
+
+(`invalid bmk_makescripts/stages.toml [pipelines.deploy] overlay:` for that file). A section or a
+`pipelines` key that is not a table is refused the same way, with `must be a table`.
 
 ## Dependency tables scanned by `deps`
 
@@ -295,7 +311,11 @@ de-duplication** - a package listed twice appears twice, under each source label
 `[tool.uv].dev-dependencies`.
 
 Poetry version syntax is approximated: `^1.2` and `~1.2` both become `>=1.2`. The
-caret/tilde upper bound is **not** reproduced.
+caret/tilde upper bound is **not** reproduced. A Poetry dependency keeps its conditions:
+`markers`, `python` (`python = "<3.11"` becomes `python_version < "3.11"`) and `platform`
+(`linux || darwin`, `!=win32`) become an environment marker, so it is only checked or installed
+where it applies. A `git`, `path` or `url` dependency, or one from a named `source` other than
+PyPI, is not looked up on PyPI at all.
 
 ## Missing or malformed file
 

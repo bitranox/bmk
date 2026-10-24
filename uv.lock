@@ -73,7 +73,7 @@ wheels = [
 
 [[package]]
 name = "bmk"
-version = "3.24.1"
+version = "3.25.0"
 source = { editable = "." }
 dependencies = [
     { name = "bandit" },
@@ -114,7 +114,7 @@ dependencies = [
 requires-dist = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "bashate", specifier = ">=2.1.1" },
-    { name = "btx-lib-mail", specifier = ">=4.5.0" },
+    { name = "btx-lib-mail", specifier = ">=4.6.0" },
     { name = "build", specifier = ">=1.6.1" },
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "click", specifier = ">=8.5.0" },
@@ -156,16 +156,16 @@ wheels = [
 
 [[package]]
 name = "btx-lib-mail"
-version = "4.5.0"
+version = "4.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
     { name = "pydantic" },
     { name = "rich-click" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/3d/eb482125bbe6c048b85d1800571d604b8e5592320c90d286862277eb4c9a/btx_lib_mail-4.5.0.tar.gz", hash = "sha256:e6f1723a620ab09ac758070417c6e936442cac3d1f31b0709f8155f9c6fc7e9e", size = 308087, upload-time = "2026-10-16T14:03:46.698Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/ee/b154514730aad491acf9b3df30548573f4855c131a3f8fa8e704e29a6416/btx_lib_mail-4.6.0.tar.gz", hash = "sha256:42ceb3041541855d141e5a4b144cee8341d052c2cfbbcf5054f84363aa835f7c", size = 310414, upload-time = "2026-10-24T13:07:32.067Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/bd/4e14ff4cc119ab7f957d1deb60944386186241cfeb47ff5bf3aa97e70ba3/btx_lib_mail-4.5.0-py3-none-any.whl", hash = "sha256:a563ee730b72ea09d0424a52262f5579e538415f218d95a7b6b5965dd85b4722", size = 119600, upload-time = "2026-10-16T14:03:45.346Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/55/74067275caea34be7f974a0cc45276f08caf33f7c5bfb9e1a8f11cc241a0/btx_lib_mail-4.6.0-py3-none-any.whl", hash = "sha256:1d752fa94b1d4009e53eaa75bd52a1a473c89d949e5a275bf1f433cb66df3aad", size = 120489, upload-time = "2026-10-24T13:07:30.479Z" },
 ]
 
 [[package]]

@@ -160,6 +160,9 @@ rebuild a venv uv has already migrated.)
 A **minor** change is the one that cannot be done in place: move `3.14` to `3.15` in your
 classifiers and the venv is **rebuilt**. The path never changes, so nothing pointing at it breaks.
 If uv cannot say what it would provide, your venv is left alone; bmk never rebuilds on a guess.
+Which interpreter counts is uv's choice: bmk rebuilds only when the venv differs from what
+`uv venv --python X.Y` would use (it asks `uv python find --system --show-version X.Y`), so under
+`UV_PYTHON_PREFERENCE=system` the venv stays on the distro Python instead of rebuilding every run.
 Declare no `:: Python :: X.Y` classifier and bmk picks no version at all - uv's default stands.
 
 The same classifiers drive `make test-all`: it provisions one `.venv-<minor>` per declared version

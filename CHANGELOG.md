@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.25.0] 2026-10-24 15:21:52
+
 ### Fixed
 
 - **The project venv is no longer rebuilt on every run when uv builds it on a different
@@ -48,6 +50,9 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `{text,json}` in its help and "invalid choice" text (was `{json,text}`); both values work as
   before.
 - `bmk.adapters.stagerunner.venv.latest_installed_patch` is replaced by `patch_uv_builds_on`.
+- `btx_lib_mail` floor raised to 4.6.0.
+- `docs/pyproject-reference.md` and the `devops-bmk` skill describe the venv interpreter choice,
+  overlay precedence and refusals, and the Poetry conditions above.
 
 ## [3.24.1] 2026-10-24 13:41:02
 
