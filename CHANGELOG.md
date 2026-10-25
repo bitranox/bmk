@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.27.0] 2026-10-25 21:18:58
+
 ### Changed
 
 - A refusal now exits with the same code on every OS. A malformed `[tool.bmk.pipelines]` overlay,
