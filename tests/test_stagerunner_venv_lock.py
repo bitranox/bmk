@@ -91,7 +91,7 @@ def _venv_on_an_older_patch(venv: Path) -> Path:
     """A venv whose interpreter answers 3.12.1, with a marker file that only a rebuild removes.
 
     The interpreter is a script, since bmk asks the venv's OWN python for its version: a rebuild is
-    then decided by the real ``_discard_venv_on_wrong_python``, and its effect is visible on disk.
+    then decided by the real ``discard_venv_on_wrong_python``, and its effect is visible on disk.
     It answers in the probe's shape, ``<implementation> <X.Y.Z> <free-threaded 0|1>``.
     """
     python = venv / "bin" / "python"
@@ -196,7 +196,7 @@ def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
 
     Guarding only the ``uv pip install`` would leave a concurrent gate's entire
     interpreter deleted underneath it. Mutation-testing found this unasserted: moving
-    ``_discard_venv_on_wrong_python`` back outside the lock kept every other test green.
+    ``discard_venv_on_wrong_python`` back outside the lock kept every other test green.
     """
     project = _project(tmp_path)
     venv = project / ".venv"
@@ -237,7 +237,7 @@ def test_the_rebuild_does_run_when_the_lock_is_free(
 # is a POSIX shell script, which Windows cannot launch as ``uv``, and Windows file locking is a
 # different primitive from POSIX's - so the lock guarantee needs proof there too. Each one
 # decides its assertion BEFORE provisioning would reach uv, and runs with no uv on PATH at all.
-# A missing uv is silent (``_run`` maps it to exit 1), so "uv was not called" cannot be the
+# A missing uv is silent (``run_uv`` maps it to exit 1), so "uv was not called" cannot be the
 # observation here; instead each test watches a side effect bmk itself performs under the lock,
 # in pure Python, before its first uv call, and each refusal test has a control proving that
 # side effect does fire once the lock is free.

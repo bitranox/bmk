@@ -1,7 +1,5 @@
 """Tests for ship command helpers: the gh workflow-run lookup (orjson parsing)."""
 
-# pyright: reportPrivateUsage=false, reportUnknownLambdaType=false, reportUnknownArgumentType=false
-
 from __future__ import annotations
 
 import subprocess
@@ -11,7 +9,7 @@ import click
 import pytest
 
 from bmk.adapters.cli.commands import ship_cmd
-from bmk.adapters.cli.commands.ship_cmd import GhRunEvent, _find_run_id
+from bmk.adapters.cli.commands.ship_cmd import GhRunEvent, find_run_id
 from bmk.adapters.cli.exit_codes import ExitCode
 
 if TYPE_CHECKING:
@@ -30,40 +28,80 @@ def _fake_gh(stdout: str, returncode: int = 0) -> Callable[..., subprocess.Compl
     return _run
 
 
+def _found(run_id: str | None) -> Callable[..., str | None]:
+    """A find_run_id stand-in that always answers ``run_id``."""
+
+    def _find(*_args: object, **_kwargs: object) -> str | None:
+        return run_id
+
+    return _find
+
+
+def _watched(succeeded: bool) -> Callable[[str], bool]:
+    """A watch_run stand-in whose watched run ends with ``succeeded``."""
+
+    def _watch(_run_id: str) -> bool:
+        return succeeded
+
+    return _watch
+
+
+def _which(found: str | None) -> Callable[[str], str | None]:
+    """A shutil.which stand-in that answers ``found`` for every name."""
+
+    def _lookup(_name: str) -> str | None:
+        return found
+
+    return _lookup
+
+
+def _record(order: list[str], label: str) -> Callable[[object], None]:
+    """A one-argument stand-in that appends ``label`` to ``order`` when called."""
+
+    def _call(_arg: object) -> None:
+        order.append(label)
+
+    return _call
+
+
+def _no_sleep(_seconds: float) -> None:
+    return None
+
+
 @pytest.mark.os_agnostic
 def test_find_run_id_matches_workflow_event_and_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "123"
+    assert find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "123"
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_filters_by_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("Release", event=GhRunEvent.RELEASE, head_sha="def") == "456"
+    assert find_run_id("Release", event=GhRunEvent.RELEASE, head_sha="def") == "456"
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_none_on_sha_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="different") is None
+    assert find_run_id("CI", event=GhRunEvent.PUSH, head_sha="different") is None
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_ignores_sha_and_event_filters_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_JSON))
-    assert _find_run_id("CI", event=None, head_sha="") == "123"
+    assert find_run_id("CI", event=None, head_sha="") == "123"
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_none_when_gh_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh("", returncode=1))
-    assert _find_run_id("CI", event=None, head_sha="") is None
+    assert find_run_id("CI", event=None, head_sha="") is None
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_none_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh("not json at all"))
-    assert _find_run_id("CI", event=None, head_sha="") is None
+    assert find_run_id("CI", event=None, head_sha="") is None
 
 
 @pytest.mark.os_agnostic
@@ -74,7 +112,7 @@ def test_find_run_id_skips_malformed_entry(monkeypatch: pytest.MonkeyPatch) -> N
         ' {"databaseId": 99, "workflowName": "CI", "event": "push", "headSha": "abc"}]'
     )
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(mixed))
-    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "99"
+    assert find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "99"
 
 
 # gh reports every trigger event, not only the two ship gates on.
@@ -90,7 +128,7 @@ _RUNS_WITH_OTHER_EVENTS_JSON = (
 
 @pytest.mark.os_agnostic
 def test_workflow_run_parses_an_event_outside_the_gated_set() -> None:
-    run = ship_cmd._WorkflowRun.model_validate(
+    run = ship_cmd.WorkflowRun.model_validate(
         {"databaseId": 1, "workflowName": "CI", "event": "schedule", "headSha": "abc", "status": "queued"}
     )
     assert run.event == "schedule"
@@ -101,21 +139,21 @@ def test_workflow_run_parses_an_event_outside_the_gated_set() -> None:
 def test_find_run_id_skips_runs_of_other_events(monkeypatch: pytest.MonkeyPatch) -> None:
     """Runs triggered by pull_request / workflow_dispatch parse, but never match a push gate."""
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_WITH_OTHER_EVENTS_JSON))
-    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "303"
+    assert find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") == "303"
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_none_when_only_other_events_ran(monkeypatch: pytest.MonkeyPatch) -> None:
     only_others = _RUNS_WITH_OTHER_EVENTS_JSON.replace('"event": "push"', '"event": "schedule"')
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(only_others))
-    assert _find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") is None
-    assert _find_run_id("CI", event=GhRunEvent.RELEASE, head_sha="abc") is None
+    assert find_run_id("CI", event=GhRunEvent.PUSH, head_sha="abc") is None
+    assert find_run_id("CI", event=GhRunEvent.RELEASE, head_sha="abc") is None
 
 
 @pytest.mark.os_agnostic
 def test_find_run_id_with_no_event_filter_takes_any_event(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh(_RUNS_WITH_OTHER_EVENTS_JSON))
-    assert _find_run_id("CI", event=None, head_sha="abc") == "301"
+    assert find_run_id("CI", event=None, head_sha="abc") == "301"
 
 
 @pytest.mark.os_agnostic
@@ -125,69 +163,69 @@ def test_gh_run_event_values_are_the_strings_gh_reports() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _watch_run / _git_head
+# watch_run / git_head
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_watch_run_true_on_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh("", returncode=0))
-    assert ship_cmd._watch_run("1") is True
+    assert ship_cmd.watch_run("1") is True
 
 
 @pytest.mark.os_agnostic
 def test_watch_run_false_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh("", returncode=1))
-    assert ship_cmd._watch_run("1") is False
+    assert ship_cmd.watch_run("1") is False
 
 
 @pytest.mark.os_agnostic
 def test_git_head_returns_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh("abc123\n", returncode=0))
-    assert ship_cmd._git_head() == "abc123"
+    assert ship_cmd.git_head() == "abc123"
 
 
 @pytest.mark.os_agnostic
 def test_git_head_empty_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ship_cmd.subprocess, "run", _fake_gh("nope", returncode=128))
-    assert ship_cmd._git_head() == ""
+    assert ship_cmd.git_head() == ""
 
 
 # ---------------------------------------------------------------------------
-# _gate_on_ci
+# gate_on_ci
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_gate_on_ci_raises_when_watched_run_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: "77")
-    monkeypatch.setattr(ship_cmd, "_watch_run", lambda _run_id: False)
+    monkeypatch.setattr(ship_cmd, "find_run_id", _found("77"))
+    monkeypatch.setattr(ship_cmd, "watch_run", _watched(False))
     with click.Context(ship_cmd.cli_ship).scope(), pytest.raises(click.exceptions.Exit) as exited:
-        ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
+        ship_cmd.gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
     assert exited.value.exit_code == ExitCode.GENERAL_ERROR
 
 
 @pytest.mark.os_agnostic
 def test_gate_on_ci_raises_when_no_run_appears_before_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     """The find-run loop times out to GENERAL_ERROR; monotonic is stubbed so no real wait happens."""
-    monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: None)
-    monkeypatch.setattr(ship_cmd.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(ship_cmd, "find_run_id", _found(None))
+    monkeypatch.setattr(ship_cmd.time, "sleep", _no_sleep)
     clock = iter([0.0, 10_000.0])  # deadline set from 0, next read is already past it
     monkeypatch.setattr(ship_cmd.time, "monotonic", lambda: next(clock))
     with click.Context(ship_cmd.cli_ship).scope(), pytest.raises(click.exceptions.Exit) as exited:
-        ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
+        ship_cmd.gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")
     assert exited.value.exit_code == ExitCode.GENERAL_ERROR
 
 
 @pytest.mark.os_agnostic
 def test_gate_on_ci_passes_when_run_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ship_cmd, "_find_run_id", lambda *_a, **_k: "5")
-    monkeypatch.setattr(ship_cmd, "_watch_run", lambda _run_id: True)
-    ship_cmd._gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")  # must not raise
+    monkeypatch.setattr(ship_cmd, "find_run_id", _found("5"))
+    monkeypatch.setattr(ship_cmd, "watch_run", _watched(True))
+    ship_cmd.gate_on_ci("CI", event=GhRunEvent.PUSH, head_sha="abc", label="CI")  # must not raise
 
 
 # ---------------------------------------------------------------------------
-# _run_ship orchestration
+# run_ship orchestration
 # ---------------------------------------------------------------------------
 
 
@@ -195,10 +233,10 @@ def test_gate_on_ci_passes_when_run_succeeds(monkeypatch: pytest.MonkeyPatch) ->
 def test_run_ship_gh_missing_runs_push_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """No gh -> push only, and release is never reached (the manual-CI degrade path)."""
     order: list[str] = []
-    monkeypatch.setattr(ship_cmd.shutil, "which", lambda _name: None)
-    monkeypatch.setattr("bmk.adapters.cli.commands.push_cmd.run_push", lambda _msg: order.append("push"))
-    monkeypatch.setattr("bmk.adapters.cli.commands.release_cmd.run_release", lambda _args: order.append("release"))
-    ship_cmd._run_ship(("msg",), "CI", "Release")
+    monkeypatch.setattr(ship_cmd.shutil, "which", _which(None))
+    monkeypatch.setattr("bmk.adapters.cli.commands.push_cmd.run_push", _record(order, "push"))
+    monkeypatch.setattr("bmk.adapters.cli.commands.release_cmd.run_release", _record(order, "release"))
+    ship_cmd.run_ship(("msg",), "CI", "Release")
     assert order == ["push"]
 
 
@@ -206,12 +244,16 @@ def test_run_ship_gh_missing_runs_push_only(monkeypatch: pytest.MonkeyPatch) -> 
 def test_run_ship_full_sequence_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """gh present -> push, gate CI, release, gate release, in that exact order."""
     order: list[str] = []
-    monkeypatch.setattr(ship_cmd.shutil, "which", lambda _name: "/usr/bin/gh")
-    monkeypatch.setattr("bmk.adapters.cli.commands.push_cmd.run_push", lambda _msg: order.append("push"))
-    monkeypatch.setattr("bmk.adapters.cli.commands.release_cmd.run_release", lambda _args: order.append("release"))
-    monkeypatch.setattr(ship_cmd, "_git_head", lambda: "abc")
-    monkeypatch.setattr(ship_cmd, "_gate_on_ci", lambda _wf, *, event, head_sha, label: order.append(f"gate:{label}"))
-    ship_cmd._run_ship((), "CI", "Release")
+    monkeypatch.setattr(ship_cmd.shutil, "which", _which("/usr/bin/gh"))
+    monkeypatch.setattr("bmk.adapters.cli.commands.push_cmd.run_push", _record(order, "push"))
+    monkeypatch.setattr("bmk.adapters.cli.commands.release_cmd.run_release", _record(order, "release"))
+    monkeypatch.setattr(ship_cmd, "git_head", lambda: "abc")
+
+    def _gate(_workflow: str, *, label: str, **_kwargs: object) -> None:
+        order.append(f"gate:{label}")
+
+    monkeypatch.setattr(ship_cmd, "gate_on_ci", _gate)
+    ship_cmd.run_ship((), "CI", "Release")
     assert order == ["push", "gate:CI", "release", "gate:release"]
 
 

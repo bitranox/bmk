@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 # Reported before giving up on listing. The caller reinstalls on ANY miss, so the
 # full list is noise; a few names are enough to explain why the repair happened.
-_MAX_REPORTED = 5
+MAX_REPORTED = 5
 
 
 def _site_packages() -> Path | None:
@@ -109,10 +109,10 @@ def main() -> int:
 
     # sys.stderr directly, not print: this module is stdlib-only by design and cannot reach
     # for the project's usual output adapters, and the repo bans bare print in src.
-    for relative in missing[:_MAX_REPORTED]:
+    for relative in missing[:MAX_REPORTED]:
         sys.stderr.write(f"bmk: missing from its environment: {relative}\n")
-    if len(missing) > _MAX_REPORTED:
-        sys.stderr.write(f"bmk: ... and {len(missing) - _MAX_REPORTED} more\n")
+    if len(missing) > MAX_REPORTED:
+        sys.stderr.write(f"bmk: ... and {len(missing) - MAX_REPORTED} more\n")
     return 1
 
 

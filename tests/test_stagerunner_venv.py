@@ -1,7 +1,5 @@
 """Tests for project venv resolution and provisioning."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import io
@@ -28,14 +26,14 @@ from uv_stub import (
 from bmk.adapters.stagerunner.helpers import _matrix
 from bmk.adapters.stagerunner.helpers._matrix import CellStatus
 from bmk.adapters.stagerunner.venv import (
-    _lock_argv,
-    _refresh_refused,
     ensure_project_venv,
     ensure_project_venv_at,
     ensure_venv_ignored,
     is_venv,
+    lock_argv,
     lock_project,
     lock_project_reporting,
+    refresh_refused,
     resolve_project_venv,
     venv_python,
 )
@@ -624,11 +622,11 @@ def test_uv_env_drops_virtual_env(monkeypatch: pytest.MonkeyPatch) -> None:
     a "does not match the project environment path ... will be ignored" warning on every
     call. Everything else in the environment is preserved.
     """
-    from bmk.adapters.stagerunner.venv import _uv_env
+    from bmk.adapters.stagerunner.venv import uv_env
 
     monkeypatch.setenv("VIRTUAL_ENV", "/home/user/ide-venv")
     monkeypatch.setenv("BMK_PROBE_MARKER", "keep-me")
-    env = _uv_env()
+    env = uv_env()
     assert "VIRTUAL_ENV" not in env
     assert env["BMK_PROBE_MARKER"] == "keep-me"
 
@@ -637,14 +635,14 @@ def test_uv_env_drops_virtual_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_run_passes_uv_env_without_virtual_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_uv: StubUv
 ) -> None:
-    """_run hands uv an explicit environment with VIRTUAL_ENV stripped."""
+    """run_uv hands uv an explicit environment with VIRTUAL_ENV stripped."""
     from bmk.adapters.stagerunner import venv as venv_mod
 
     monkeypatch.setenv("VIRTUAL_ENV", "/home/user/ide-venv")
-    venv_mod._run(["uv", "venv", str(tmp_path / ".venv")], tmp_path, quiet=True)
+    venv_mod.run_uv(["uv", "venv", str(tmp_path / ".venv")], tmp_path, quiet=True)
     # The control: an explicit env that keeps VIRTUAL_ENV must show up as set, or the stub
-    # could not see the variable at all and the assertion below would hold for any _run.
-    venv_mod._run(["uv", "venv", str(tmp_path / ".venv-control")], tmp_path, quiet=True, env=dict(os.environ))
+    # could not see the variable at all and the assertion below would hold for any run_uv call.
+    venv_mod.run_uv(["uv", "venv", str(tmp_path / ".venv-control")], tmp_path, quiet=True, env=dict(os.environ))
 
     stripped, control = stub_uv.calls()
     assert not stripped.virtual_env_set
@@ -984,7 +982,7 @@ def _project_with_exemptions(tmp_path: Path) -> None:
 def test_an_upgrade_lock_refreshes_every_exempt_own_package(tmp_path: Path) -> None:
     _project_with_exemptions(tmp_path)
 
-    argv = _lock_argv(tmp_path, upgrade=True)
+    argv = lock_argv(tmp_path, upgrade=True)
 
     refreshed = [argv[i + 1] for i, a in enumerate(argv) if a == "--refresh-package"]
     assert sorted(refreshed) == ["lib-cli-exit-tools", "lib-log-rich"]
@@ -995,7 +993,7 @@ def test_an_upgrade_lock_refreshes_every_exempt_own_package(tmp_path: Path) -> N
 def test_a_plain_lock_refreshes_nothing(tmp_path: Path) -> None:
     _project_with_exemptions(tmp_path)
 
-    assert _lock_argv(tmp_path, upgrade=False) == ["uv", "lock"]
+    assert lock_argv(tmp_path, upgrade=False) == ["uv", "lock"]
 
 
 # uv 0.13.0's own words when it rejects the refresh flag itself, measured 2026-10-13: offline from the
@@ -1011,7 +1009,7 @@ _REFRESH_REFUSALS = [
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("stderr", _REFRESH_REFUSALS)
 def test_uv_refusing_the_refresh_flag_itself_earns_the_plain_retry(stderr: str) -> None:
-    assert _refresh_refused(2, stderr)
+    assert refresh_refused(2, stderr)
 
 
 @pytest.mark.os_agnostic
@@ -1024,8 +1022,8 @@ def test_a_coloured_refusal_is_still_a_refused_refresh() -> None:
         "error: the argument `UV_OFFLINE` (environment variable) cannot be used with \x1b[32m`--refresh`\x1b[39m\n"
     )
     bad_name = "\x1b[1m\x1b[31merror:\x1b[0m invalid value '\x1b[33mbad!\x1b[0m' for '\x1b[1m\x1b[36m--refresh-package\x1b[0m'\n"
-    assert _refresh_refused(2, offline)
-    assert _refresh_refused(2, bad_name)
+    assert refresh_refused(2, offline)
+    assert refresh_refused(2, bad_name)
 
 
 @pytest.mark.os_agnostic
@@ -1042,12 +1040,12 @@ def test_a_real_lock_failure_on_exit_2_is_not_read_as_a_refused_refresh() -> Non
         "  cause: tcp connect error\n"
         "  cause: Connection refused (os error 111)\n"
     )
-    assert not _refresh_refused(2, unreachable)
+    assert not refresh_refused(2, unreachable)
 
 
 @pytest.mark.os_agnostic
 def test_a_refusal_text_under_any_other_exit_code_is_not_a_refused_refresh() -> None:
-    assert not _refresh_refused(1, _REFRESH_REFUSALS[0])
+    assert not refresh_refused(1, _REFRESH_REFUSALS[0])
 
 
 def _project_behind_a_dead_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

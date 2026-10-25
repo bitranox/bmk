@@ -1,7 +1,5 @@
 """Behaviour tests for CLI entry point, context helpers, and edge cases."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

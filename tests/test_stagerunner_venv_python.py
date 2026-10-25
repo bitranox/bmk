@@ -7,8 +7,6 @@ local venv and the CI matrix agreeing about "the newest supported Python" instea
 apart, which is the same class of defect as a gate resolving the wrong interpreter.
 """
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import json
@@ -201,7 +199,7 @@ def test_a_venv_on_the_interpreter_uv_chooses_is_kept_though_a_newer_patch_is_in
     marker = _venv_reporting(venv, "cpython 3.14.4 0")
     stub_uv.install(found_version="3.14.4")
 
-    venv_mod._discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+    venv_mod.discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
 
     assert marker.exists(), "the venv is on the interpreter uv would rebuild it on"
 
@@ -213,7 +211,7 @@ def test_a_venv_behind_the_interpreter_uv_chooses_is_rebuilt(tmp_path: Path, stu
     marker = _venv_reporting(venv, "cpython 3.14.4 0")
     stub_uv.install(found_version="3.14.8")
 
-    venv_mod._discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+    venv_mod.discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
 
     assert not venv.exists()
     assert not marker.exists()
@@ -226,7 +224,7 @@ def test_a_venv_is_kept_when_uv_finds_no_interpreter_for_the_minor(tmp_path: Pat
     marker = _venv_reporting(venv, "cpython 3.14.4 0")
     stub_uv.install(found_version=None)
 
-    venv_mod._discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+    venv_mod.discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
 
     assert venv_mod.patch_uv_builds_on("3.14", tmp_path) is None
     assert marker.exists()
@@ -259,10 +257,10 @@ def test_patch_uv_builds_on_asks_uv_which_interpreter_it_would_use(tmp_path: Pat
 def test_uvs_answer_is_in_the_form_the_venv_reports(minor: str, found: str | None, expected: str | None) -> None:
     """A beta is ``X.Y.Z`` as ``sys.version_info[:3]`` gives it; an answer for no patch of ``minor`` is none.
 
-    ``_discard_venv_on_wrong_python`` compares the target with the venv's ``X.Y.Z`` for equality, so
+    ``discard_venv_on_wrong_python`` compares the target with the venv's ``X.Y.Z`` for equality, so
     uv's ``3.16.0b1`` would never match and a venv on a pre-release would be rebuilt on every run.
     """
-    assert venv_mod._release_of(found, minor) == expected
+    assert venv_mod.release_of(found, minor) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +336,7 @@ def test_venv_version_none_when_absent(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _python_request: with no classifier, the uv sync request names the venv's kind of interpreter.
+# python_request: with no classifier, the uv sync request names the venv's kind of interpreter.
 # A bare X.Y lets a recreate fall back to uv's default CPython (measured, uv 0.13.0: a PyPy venv
 # came back as CPython), so PyPy is asked for as pypy@X.Y and a free-threaded build as X.Yt.
 # ---------------------------------------------------------------------------
@@ -356,14 +354,14 @@ def test_venv_version_none_when_absent(tmp_path: Path) -> None:
     ids=["cpython", "pypy", "free-threaded", "unknown-implementation"],
 )
 def test_the_request_names_the_venvs_kind_of_interpreter(probe: str, uv_request: str) -> None:
-    assert venv_mod._python_request(venv_mod._parse_interpreter_probe(probe)) == uv_request
+    assert venv_mod.python_request(venv_mod.parse_interpreter_probe(probe)) == uv_request
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("probe", [None, "", "3.10.19", "cpython 3.10.19", "cpython 3.10.19 yes"])
 def test_no_request_when_the_probe_could_not_answer(probe: str | None) -> None:
-    assert venv_mod._parse_interpreter_probe(probe) is None
-    assert venv_mod._python_request(None) is None
+    assert venv_mod.parse_interpreter_probe(probe) is None
+    assert venv_mod.python_request(None) is None
 
 
 @pytest.mark.os_agnostic
@@ -376,7 +374,7 @@ def test_the_probe_on_the_running_interpreter_gives_its_own_request(tmp_path: Pa
         "cpython": f"{minor}t" if sysconfig.get_config_var("Py_GIL_DISABLED") else minor,
     }.get(sys.implementation.name, minor)
 
-    assert venv_mod._python_request(venv_mod._probe_interpreter(v)) == expected
+    assert venv_mod.python_request(venv_mod.probe_interpreter(v)) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +387,7 @@ def test_the_probe_on_the_running_interpreter_gives_its_own_request(tmp_path: Pa
 # every venv on the machine: test-all's 3.10 cell, syncing while a later cell ran its
 # install, failed "No interpreter found at path .venv-3.10/bin/python" (bmk OPEN-WORK [102]).
 #
-# The decision is the pure _listing_needs_install; the stub uv covers only what reaches uv.
+# The decision is the pure listing_needs_install; the stub uv covers only what reaches uv.
 
 
 def _entry(version: str, *, installed: bool, implementation: str = "cpython") -> dict[str, object]:
@@ -409,34 +407,34 @@ _LIST_OFFERED = ["uv", "python", "list", "--allow-python-downloads", "--output-f
 def test_a_current_minor_needs_no_install() -> None:
     listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.12", installed=True)])
 
-    assert venv_mod._listing_needs_install(listing, "3.12") is False
+    assert venv_mod.listing_needs_install(listing, "3.12") is False
 
 
 @pytest.mark.os_agnostic
 def test_a_newer_patch_on_offer_needs_an_install() -> None:
     listing = json.dumps([_entry("3.12.16", installed=False), _entry("3.12.15", installed=True)])
 
-    assert venv_mod._listing_needs_install(listing, "3.12") is True
+    assert venv_mod.listing_needs_install(listing, "3.12") is True
 
 
 @pytest.mark.os_agnostic
 def test_an_absent_minor_needs_an_install() -> None:
     listing = json.dumps([_entry("3.15.0", installed=False), _entry("3.14.8", installed=True)])
 
-    assert venv_mod._listing_needs_install(listing, "3.15") is True
+    assert venv_mod.listing_needs_install(listing, "3.15") is True
 
 
 @pytest.mark.os_agnostic
 def test_no_listing_still_needs_an_install() -> None:
     """No answer is not 'current': fall back to the old always-run behaviour."""
-    assert venv_mod._listing_needs_install(None, "3.12") is True
+    assert venv_mod.listing_needs_install(None, "3.12") is True
 
 
 @pytest.mark.os_agnostic
 def test_a_newer_pypy_download_does_not_make_a_cpython_minor_need_an_install() -> None:
     listing = json.dumps([_entry("3.12.15", installed=True), _entry("3.12.99", installed=False, implementation="pypy")])
 
-    assert venv_mod._listing_needs_install(listing, "3.12") is False
+    assert venv_mod.listing_needs_install(listing, "3.12") is False
 
 
 @pytest.mark.os_agnostic
@@ -446,7 +444,7 @@ def test_an_unknown_implementation_never_counts_as_cpython() -> None:
         [_entry("3.12.15", installed=True), _entry("3.12.99", installed=False, implementation="graalpy")]
     )
 
-    assert venv_mod._listing_needs_install(listing, "3.12") is False
+    assert venv_mod.listing_needs_install(listing, "3.12") is False
 
 
 @pytest.mark.os_agnostic
@@ -455,20 +453,20 @@ def test_a_freethreaded_download_without_a_variant_field_is_still_not_the_defaul
     freethreaded = {**_entry("3.14.8", installed=False), "key": "cpython-3.14.8+freethreaded-linux-x86_64-gnu"}
     current = {**_entry("3.14.8", installed=True), "key": "cpython-3.14.8-linux-x86_64-gnu"}
 
-    assert venv_mod._listing_needs_install(json.dumps([current, freethreaded]), "3.14") is False
+    assert venv_mod.listing_needs_install(json.dumps([current, freethreaded]), "3.14") is False
 
 
 @pytest.mark.os_agnostic
 def test_an_unknown_variant_is_read_and_never_taken_for_the_default_build() -> None:
     """A variant spelling bmk has no member for keeps its entry valid, and is not the default build."""
     debug = {**_entry("3.14.9", installed=False), "variant": "freethreaded+debug"}
-    entry = venv_mod._valid_uv_python_entry(debug)
+    entry = venv_mod.valid_uv_python_entry(debug)
 
     assert entry is not None, "an unknown variant must not drop the entry"
     assert entry.variant is PythonVariant.OTHER
     assert not entry.is_default_build
     listing = json.dumps([{**_entry("3.14.8", installed=True), "variant": "default"}, debug])
-    assert venv_mod._listing_needs_install(listing, "3.14") is False
+    assert venv_mod.listing_needs_install(listing, "3.14") is False
 
 
 @pytest.mark.os_agnostic
@@ -481,7 +479,7 @@ def test_a_freethreaded_download_does_not_make_a_current_minor_look_stale() -> N
     freethreaded = {**_entry("3.14.8", installed=False), "variant": "freethreaded"}
     listing = json.dumps([{**_entry("3.14.8", installed=True), "variant": "default"}, freethreaded])
 
-    assert venv_mod._listing_needs_install(listing, "3.14") is False
+    assert venv_mod.listing_needs_install(listing, "3.14") is False
 
 
 @pytest.mark.os_posix

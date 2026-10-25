@@ -1,7 +1,5 @@
 """Pre-command Makefile version check: prompt when local Makefile is outdated."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import os
@@ -14,7 +12,7 @@ import pytest
 
 from bmk import __init__conf__
 from bmk.adapters import cli as cli_mod
-from bmk.adapters.cli.commands.install_cmd import _extract_version
+from bmk.adapters.cli.commands.install_cmd import extract_version
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -76,32 +74,32 @@ def _run_bmk_info(project: Path, *, stdin: int) -> tuple[int, str, str]:
 
 
 # =============================================================================
-# _extract_version unit tests
+# extract_version unit tests
 # =============================================================================
 
 
 @pytest.mark.os_agnostic
 def test_extract_version_parses_sentinel() -> None:
     """Extracts version string from a valid sentinel line."""
-    assert _extract_version("# BMK MAKEFILE 1.0.0") == "1.0.0"
+    assert extract_version("# BMK MAKEFILE 1.0.0") == "1.0.0"
 
 
 @pytest.mark.os_agnostic
 def test_extract_version_parses_multipart_version() -> None:
     """Extracts version with extra whitespace."""
-    assert _extract_version("# BMK MAKEFILE 2.3.4") == "2.3.4"
+    assert extract_version("# BMK MAKEFILE 2.3.4") == "2.3.4"
 
 
 @pytest.mark.os_agnostic
 def test_extract_version_returns_none_for_custom() -> None:
     """Returns None for a non-sentinel line."""
-    assert _extract_version("# My custom Makefile") is None
+    assert extract_version("# My custom Makefile") is None
 
 
 @pytest.mark.os_agnostic
 def test_extract_version_returns_none_for_sentinel_without_version() -> None:
     """Returns None when sentinel exists but no version follows."""
-    assert _extract_version("# BMK MAKEFILE") is None
+    assert extract_version("# BMK MAKEFILE") is None
 
 
 # =============================================================================
@@ -150,9 +148,9 @@ def test_up_to_date_skips_check(
 ) -> None:
     """Local version matches bundled - subcommand runs normally."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    from bmk.adapters.cli.commands.install_cmd import _BUNDLED_MAKEFILE
+    from bmk.adapters.cli.commands.install_cmd import BUNDLED_MAKEFILE
 
-    bundled_first = _BUNDLED_MAKEFILE.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
+    bundled_first = BUNDLED_MAKEFILE.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
     (tmp_path / "Makefile").write_text(f"{bundled_first}\nlocal content\n", encoding="utf-8")
 
     result: Result = cli_runner.invoke(cli_mod.cli, ["info"], obj=production_factory)

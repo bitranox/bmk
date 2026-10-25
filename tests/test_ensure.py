@@ -1,7 +1,5 @@
 """Tests for the ``bmk ensure`` backend (install missing external tools per-OS)."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import subprocess
@@ -14,15 +12,15 @@ from bmk.adapters import cli as cli_mod
 from bmk.adapters.cli.commands import _ensure
 from bmk.adapters.cli.commands._ensure import (
     EnsureResult,
+    InstallKind,
     InstallOutcome,
-    _action_for,
-    _InstallKind,
-    _pip_install_argv,
-    _PkgManager,
-    _run_install,
+    PkgManager,
+    action_for,
     ensure_tools,
     format_ensure_report,
+    pip_install_argv,
     run_ensure,
+    run_install,
 )
 from bmk.adapters.cli.commands._prerequisites import ToolCheck, ToolName
 
@@ -54,14 +52,14 @@ def _missing(name: ToolName, hint: str = "hint") -> ToolCheck:
     return ToolCheck(name=name, found=False, install_hint=hint)
 
 
-# --- _action_for: pip tools -------------------------------------------------
+# --- action_for: pip tools -------------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_action_for_pip_tool_builds_pip_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_ensure, "_externally_managed", lambda: False)
-    action = _action_for(_missing(ToolName.SHELLCHECK))
-    assert action.kind is _InstallKind.ARGV
+    action = action_for(_missing(ToolName.SHELLCHECK))
+    assert action.kind is InstallKind.ARGV
     assert action.argv == (sys.executable, "-m", "pip", "install", "shellcheck-py")
 
 
@@ -69,7 +67,7 @@ def test_action_for_pip_tool_builds_pip_argv(monkeypatch: pytest.MonkeyPatch) ->
 def test_pip_install_argv_adds_break_system_packages_when_managed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(_ensure, "_externally_managed", lambda: True)
-    argv = _pip_install_argv("bashate")
+    argv = pip_install_argv("bashate")
     assert argv[-1] == "--break-system-packages"
 
 
@@ -77,28 +75,28 @@ def test_pip_install_argv_adds_break_system_packages_when_managed(monkeypatch: p
 def test_pip_install_argv_no_flag_when_not_managed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(_ensure, "_externally_managed", lambda: False)
-    assert "--break-system-packages" not in _pip_install_argv("bashate")
+    assert "--break-system-packages" not in pip_install_argv("bashate")
 
 
-# --- _action_for: git across OSes ------------------------------------------
+# --- action_for: git across OSes ------------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_action_for_git_linux_uses_pkg_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: _PkgManager("apt-get", ("install", "-y")))
+    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: PkgManager("apt-get", ("install", "-y")))
     monkeypatch.setattr(_ensure, "_privilege_prefix", lambda: ("sudo",))
-    action = _action_for(_missing(ToolName.GIT))
-    assert action.kind is _InstallKind.ARGV
+    action = action_for(_missing(ToolName.GIT))
+    assert action.kind is InstallKind.ARGV
     assert action.argv == ("sudo", "apt-get", "install", "-y", "git")
 
 
 @pytest.mark.os_agnostic
 def test_action_for_git_linux_root_has_no_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: _PkgManager("dnf", ("install", "-y")))
+    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: PkgManager("dnf", ("install", "-y")))
     monkeypatch.setattr(_ensure, "_privilege_prefix", lambda: ())
-    action = _action_for(_missing(ToolName.GIT))
+    action = action_for(_missing(ToolName.GIT))
     assert action.argv == ("dnf", "install", "-y", "git")
 
 
@@ -106,71 +104,71 @@ def test_action_for_git_linux_root_has_no_sudo(monkeypatch: pytest.MonkeyPatch) 
 def test_action_for_git_linux_no_pkg_manager_skips(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: None)
-    action = _action_for(_missing(ToolName.GIT))
-    assert action.kind is _InstallKind.NONE
+    action = action_for(_missing(ToolName.GIT))
+    assert action.kind is InstallKind.NONE
 
 
 @pytest.mark.os_agnostic
 def test_action_for_git_linux_no_privilege_skips(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: _PkgManager("apt-get", ("install", "-y")))
+    monkeypatch.setattr(_ensure, "_detect_linux_pkg_manager", lambda: PkgManager("apt-get", ("install", "-y")))
     monkeypatch.setattr(_ensure, "_privilege_prefix", lambda: None)
-    action = _action_for(_missing(ToolName.GIT))
-    assert action.kind is _InstallKind.NONE
+    action = action_for(_missing(ToolName.GIT))
+    assert action.kind is InstallKind.NONE
     assert "sudo" in action.reason
 
 
 @pytest.mark.os_agnostic
 def test_action_for_git_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
-    assert _action_for(_missing(ToolName.GIT)).argv == ("brew", "install", "git")
+    assert action_for(_missing(ToolName.GIT)).argv == ("brew", "install", "git")
 
 
 @pytest.mark.os_agnostic
 def test_action_for_git_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
-    action = _action_for(_missing(ToolName.GIT))
+    action = action_for(_missing(ToolName.GIT))
     assert action.argv == ("winget", "install", "--id", "Git.Git", "-e", "--source", "winget")
 
 
-# --- _action_for: pwsh / winget / psscriptanalyzer -------------------------
+# --- action_for: pwsh / winget / psscriptanalyzer -------------------------
 
 
 @pytest.mark.os_agnostic
 def test_action_for_pwsh_linux_skips(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    action = _action_for(_missing(ToolName.PWSH, "see docs"))
-    assert action.kind is _InstallKind.NONE
+    action = action_for(_missing(ToolName.PWSH, "see docs"))
+    assert action.kind is InstallKind.NONE
     assert action.reason == "see docs"
 
 
 @pytest.mark.os_agnostic
 def test_action_for_pwsh_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
-    action = _action_for(_missing(ToolName.PWSH))
+    action = action_for(_missing(ToolName.PWSH))
     assert action.argv == ("winget", "install", "--id", "Microsoft.PowerShell", "-e", "--source", "winget")
 
 
 @pytest.mark.os_agnostic
 def test_action_for_winget_has_no_installer() -> None:
-    action = _action_for(_missing(ToolName.WINGET, "install App Installer"))
-    assert action.kind is _InstallKind.NONE
+    action = action_for(_missing(ToolName.WINGET, "install App Installer"))
+    assert action.kind is InstallKind.NONE
     assert action.reason == "install App Installer"
 
 
 @pytest.mark.os_agnostic
 def test_action_for_psscriptanalyzer_is_module() -> None:
-    assert _action_for(_missing(ToolName.PSSCRIPTANALYZER)).kind is _InstallKind.MODULE
+    assert action_for(_missing(ToolName.PSSCRIPTANALYZER)).kind is InstallKind.MODULE
 
 
-# --- _run_install: execution outcomes --------------------------------------
+# --- run_install: execution outcomes --------------------------------------
 
 
 @pytest.mark.os_agnostic
 def test_run_install_argv_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_ensure.subprocess, "run", _fake_run(0))
-    action = _ensure._InstallAction(_InstallKind.ARGV, ("brew", "install", "git"))
-    result = _run_install(_missing(ToolName.GIT), action, dry_run=False)
+    action = _ensure.InstallAction(InstallKind.ARGV, ("brew", "install", "git"))
+    result = run_install(_missing(ToolName.GIT), action, dry_run=False)
     assert result.outcome is InstallOutcome.INSTALLED
     assert result.detail == "brew install git"
 
@@ -178,8 +176,8 @@ def test_run_install_argv_success(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.os_agnostic
 def test_run_install_argv_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_ensure.subprocess, "run", _fake_run(2))
-    action = _ensure._InstallAction(_InstallKind.ARGV, ("brew", "install", "git"))
-    result = _run_install(_missing(ToolName.GIT), action, dry_run=False)
+    action = _ensure.InstallAction(InstallKind.ARGV, ("brew", "install", "git"))
+    result = run_install(_missing(ToolName.GIT), action, dry_run=False)
     assert result.outcome is InstallOutcome.FAILED
     assert "exit 2" in result.detail
 
@@ -190,8 +188,8 @@ def test_run_install_argv_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("no such file")
 
     monkeypatch.setattr(_ensure.subprocess, "run", _boom)
-    action = _ensure._InstallAction(_InstallKind.ARGV, ("winget", "install"))
-    result = _run_install(_missing(ToolName.GIT), action, dry_run=False)
+    action = _ensure.InstallAction(InstallKind.ARGV, ("winget", "install"))
+    result = run_install(_missing(ToolName.GIT), action, dry_run=False)
     assert result.outcome is InstallOutcome.FAILED
 
 
@@ -205,8 +203,8 @@ def test_run_install_dry_run_runs_nothing(monkeypatch: pytest.MonkeyPatch) -> No
         return _completed(0)
 
     monkeypatch.setattr(_ensure.subprocess, "run", _guard)
-    action = _ensure._InstallAction(_InstallKind.ARGV, ("brew", "install", "git"))
-    result = _run_install(_missing(ToolName.GIT), action, dry_run=True)
+    action = _ensure.InstallAction(InstallKind.ARGV, ("brew", "install", "git"))
+    result = run_install(_missing(ToolName.GIT), action, dry_run=True)
     assert result.outcome is InstallOutcome.WOULD_INSTALL
     assert result.detail == "brew install git"
     assert called is False
@@ -214,8 +212,8 @@ def test_run_install_dry_run_runs_nothing(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.os_agnostic
 def test_run_install_none_skips() -> None:
-    action = _ensure._InstallAction(_InstallKind.NONE, reason="no installer")
-    result = _run_install(_missing(ToolName.WINGET), action, dry_run=False)
+    action = _ensure.InstallAction(InstallKind.NONE, reason="no installer")
+    result = run_install(_missing(ToolName.WINGET), action, dry_run=False)
     assert result.outcome is InstallOutcome.SKIPPED
     assert result.detail == "no installer"
 
@@ -226,8 +224,8 @@ def test_run_install_none_skips() -> None:
 @pytest.mark.os_agnostic
 def test_install_module_skips_without_pwsh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", lambda: None)
-    action = _ensure._InstallAction(_InstallKind.MODULE)
-    result = _run_install(_missing(ToolName.PSSCRIPTANALYZER), action, dry_run=False)
+    action = _ensure.InstallAction(InstallKind.MODULE)
+    result = run_install(_missing(ToolName.PSSCRIPTANALYZER), action, dry_run=False)
     assert result.outcome is InstallOutcome.SKIPPED
 
 
@@ -235,8 +233,8 @@ def test_install_module_skips_without_pwsh(monkeypatch: pytest.MonkeyPatch) -> N
 def test_install_module_installs_with_pwsh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", lambda: "/usr/bin/pwsh")
     monkeypatch.setattr("bmk.adapters.stagerunner.helpers._psscriptanalyzer.ensure_psscriptanalyzer", _noop_install)
-    action = _ensure._InstallAction(_InstallKind.MODULE)
-    result = _run_install(_missing(ToolName.PSSCRIPTANALYZER), action, dry_run=False)
+    action = _ensure.InstallAction(InstallKind.MODULE)
+    result = run_install(_missing(ToolName.PSSCRIPTANALYZER), action, dry_run=False)
     assert result.outcome is InstallOutcome.INSTALLED
 
 
@@ -247,9 +245,7 @@ def test_install_module_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("bmk.adapters.stagerunner.helpers._psscriptanalyzer.check_pwsh", lambda: "/usr/bin/pwsh")
     monkeypatch.setattr("bmk.adapters.stagerunner.helpers._psscriptanalyzer.ensure_psscriptanalyzer", _raise)
-    result = _run_install(
-        _missing(ToolName.PSSCRIPTANALYZER), _ensure._InstallAction(_InstallKind.MODULE), dry_run=False
-    )
+    result = run_install(_missing(ToolName.PSSCRIPTANALYZER), _ensure.InstallAction(InstallKind.MODULE), dry_run=False)
     assert result.outcome is InstallOutcome.FAILED
 
 

@@ -42,18 +42,29 @@ if TYPE_CHECKING:
 __all__ = [
     "all_python_minors",
     "desired_python_minor",
+    "discard_venv_on_wrong_python",
     "ensure_minors_installed",
     "ensure_project_venv",
     "ensure_project_venv_at",
     "ensure_venv_ignored",
     "ensure_venv_typecheck_excluded",
     "is_venv",
+    "listing_needs_install",
+    "lock_argv",
     "lock_project",
     "lock_project_reporting",
+    "parse_interpreter_probe",
     "patch_uv_builds_on",
+    "probe_interpreter",
+    "python_request",
+    "refresh_refused",
+    "release_of",
     "resolve_project_venv",
+    "run_uv",
     "sync_lock_path",
+    "uv_env",
     "uv_lock_guard_path",
+    "valid_uv_python_entry",
     "venv_python",
     "venv_sync_disabled",
     "venv_version",
@@ -179,7 +190,7 @@ def patch_uv_builds_on(minor: str, cwd: Path) -> str | None:
     (measured: a cwd ``.venv`` on 3.14.4 changed ``find``'s answer, never ``uv venv``'s).
     """
     found = _run_capture(["uv", "python", "find", "--system", "--no-python-downloads", "--show-version", minor], cwd)
-    return _release_of(found, minor)
+    return release_of(found, minor)
 
 
 # What `uv python find --show-version` prints: the interpreter's version, a pre-release keeping its
@@ -187,7 +198,7 @@ def patch_uv_builds_on(minor: str, cwd: Path) -> str | None:
 _FOUND_VERSION = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:(?:a|b|rc)[0-9]+)?")
 
 
-def _release_of(found: str | None, minor: str) -> str | None:
+def release_of(found: str | None, minor: str) -> str | None:
     """``X.Y.Z`` of a ``--show-version`` answer for ``minor``; None for no answer or one for another minor."""
     match = _FOUND_VERSION.fullmatch(found.strip()) if found else None
     if match is None or f"{match[1]}.{match[2]}" != minor:
@@ -210,11 +221,11 @@ def _uv_python_entries(listing: str | None) -> list[_UvPythonEntry] | None:
         return None
     if not isinstance(raw_entries, list):
         return None
-    validated = (_valid_uv_python_entry(raw_entry) for raw_entry in cast("list[Any]", raw_entries))
+    validated = (valid_uv_python_entry(raw_entry) for raw_entry in cast("list[Any]", raw_entries))
     return [entry for entry in validated if entry is not None]
 
 
-def _valid_uv_python_entry(raw_entry: object) -> _UvPythonEntry | None:
+def valid_uv_python_entry(raw_entry: object) -> _UvPythonEntry | None:
     """One listing entry as a model, or None when it lacks a field or types one oddly."""
     try:
         return _UvPythonEntry.model_validate(raw_entry)
@@ -250,7 +261,7 @@ class _VenvInterpreter:
     gil_disabled: bool
 
 
-def _parse_interpreter_probe(raw: str | None) -> _VenvInterpreter | None:
+def parse_interpreter_probe(raw: str | None) -> _VenvInterpreter | None:
     """The probe's one line as a :class:`_VenvInterpreter`; None for no answer or one of another shape."""
     fields = raw.split() if raw else []
     if len(fields) != _PROBE_FIELDS or fields[2] not in ("0", "1"):
@@ -260,12 +271,12 @@ def _parse_interpreter_probe(raw: str | None) -> _VenvInterpreter | None:
     )
 
 
-def _probe_interpreter(venv: Path) -> _VenvInterpreter | None:
+def probe_interpreter(venv: Path) -> _VenvInterpreter | None:
     """Ask the venv's own interpreter what it is; None when it is absent or will not answer."""
     python = venv_python(venv)
     if not python.is_file():
         return None
-    return _parse_interpreter_probe(_run_capture([str(python), "-c", _INTERPRETER_PROBE], venv.parent))
+    return parse_interpreter_probe(_run_capture([str(python), "-c", _INTERPRETER_PROBE], venv.parent))
 
 
 def venv_version(venv: Path) -> str | None:
@@ -287,7 +298,7 @@ def venv_version(venv: Path) -> str | None:
     and only a MINOR change does. Asking the interpreter costs one subprocess and is true in
     both directions.
     """
-    interpreter = _probe_interpreter(venv)
+    interpreter = probe_interpreter(venv)
     return interpreter.version if interpreter else None
 
 
@@ -300,7 +311,7 @@ def is_venv(venv: Path) -> bool:
     return venv.is_dir() and (venv / "pyvenv.cfg").is_file()
 
 
-def _uv_env() -> dict[str, str]:
+def uv_env() -> dict[str, str]:
     """The ambient environment minus ``VIRTUAL_ENV`` for a provisioning uv call.
 
     Provisioning runs BEFORE :func:`context.build_context` pins ``VIRTUAL_ENV`` at the
@@ -315,14 +326,14 @@ def _uv_env() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
 
 
-def _run(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None) -> int:
-    """Run ``argv`` in ``cwd``, silencing output when quiet; ``env`` defaults to :func:`_uv_env`."""
+def run_uv(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None) -> int:
+    """Run ``argv`` in ``cwd``, silencing output when quiet; ``env`` defaults to :func:`uv_env`."""
     output = subprocess.DEVNULL if quiet else None
     try:
         # argv is built from literals and a resolved path, never from user
         # input, and runs without a shell.
         return subprocess.run(
-            argv, cwd=cwd, stdout=output, stderr=output, env=dict(env) if env is not None else _uv_env(), check=False
+            argv, cwd=cwd, stdout=output, stderr=output, env=dict(env) if env is not None else uv_env(), check=False
         ).returncode
     except OSError:
         # uv missing from PATH. Degrade to the caller's fallback rather than
@@ -355,7 +366,7 @@ def _run_live(argv: list[str], cwd: Path, *, env: Mapping[str, str] | None = Non
     """Run ``argv`` in ``cwd`` with uv's output going straight to the terminal."""
     try:
         # argv is built from literals and a resolved path, never from user input, and runs without a shell.
-        done = subprocess.run(argv, cwd=cwd, env=dict(env) if env is not None else _uv_env(), check=False)
+        done = subprocess.run(argv, cwd=cwd, env=dict(env) if env is not None else uv_env(), check=False)
     except OSError as exc:
         return _spawn_failure(argv, exc)
     return _UvRun(done.returncode, shown_live=True)
@@ -365,7 +376,7 @@ def _run_capture(argv: list[str], cwd: Path) -> str | None:
     """Run ``argv`` in ``cwd`` and return stdout, or None if it could not run."""
     try:
         # argv is built from literals; no shell, no user input.
-        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=_uv_env(), check=False)
+        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=uv_env(), check=False)
     except OSError:
         return None
     return result.stdout if result.returncode == 0 else None
@@ -668,10 +679,10 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
     config file) uv hides every download entry, and "nothing listed" would read as "current".
     """
     listing = _run_capture(["uv", "python", "list", "--allow-python-downloads", "--output-format", "json"], cwd)
-    return _listing_needs_install(listing, minor)
+    return listing_needs_install(listing, minor)
 
 
-def _listing_needs_install(listing: str | None, minor: str) -> bool:
+def listing_needs_install(listing: str | None, minor: str) -> bool:
     """Whether a ``uv python list --allow-python-downloads`` listing has work for ``minor``.
 
     True when the default CPython build of ``minor`` is absent or a download of it is on offer
@@ -722,11 +733,11 @@ def _ensure_minor_installed(minor: str, cwd: Path, *, quiet: bool) -> None:
     """
     if not _minor_needs_install(minor, cwd):
         return
-    _run(["uv", "python", "install", minor], cwd, quiet=quiet)
-    _run(["uv", "python", "upgrade", minor], cwd, quiet=quiet)
+    run_uv(["uv", "python", "install", minor], cwd, quiet=quiet)
+    run_uv(["uv", "python", "upgrade", minor], cwd, quiet=quiet)
 
 
-def _discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, quiet: bool) -> None:
+def discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, quiet: bool) -> None:
     """Remove an existing venv built on the wrong Python, so it gets recreated.
 
     A venv's interpreter cannot be upgraded in place, so matching the declared version means
@@ -767,7 +778,7 @@ def ensure_project_venv(cwd: Path, env: Mapping[str, str], *, quiet: bool = True
     derived from it - stay stable across the run. The one exception is the Python
     version: an interpreter cannot be upgraded in place, so a venv built on a
     version other than the one the project's classifiers declare is rebuilt at the
-    same path (see ``_discard_venv_on_wrong_python``). That happens here, before
+    same path (see ``discard_venv_on_wrong_python``). That happens here, before
     ``build_context`` freezes the pins, so nothing downstream sees a stale path.
 
     The lock is the source (``uv sync --locked``): the venv then holds exactly what
@@ -819,7 +830,7 @@ def sync_lock_path(venv: Path) -> Path:
     Deliberately OUTSIDE the project, keyed by a digest of the venv's absolute path.
     A lock is machine state, not project content, and the two repo-local options both
     fail: inside the venv is destroyed by the rebuild this very lock has to guard
-    (``_discard_venv_on_wrong_python`` ``rmtree``s it), and beside the venv leaves an
+    (``discard_venv_on_wrong_python`` ``rmtree``s it), and beside the venv leaves an
     untracked file in the user's ``git status`` - ``_append_to_gitignore`` writes every
     entry with a trailing slash, so the existing ``.venv*`` rules match DIRECTORIES
     only and cannot cover a lock file however it is named.
@@ -978,7 +989,7 @@ def _provision_locked(
     The rebuild belongs in here as much as the sync does: an interpreter change
     ``rmtree``s the whole venv, which is the widest window of all.
     """
-    _discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
+    discard_venv_on_wrong_python(venv, minor, cwd, quiet=quiet)
 
     if not is_venv(venv) and not _create_venv(cwd, venv, minor, quiet=quiet, stream=stream):
         return None
@@ -999,15 +1010,15 @@ def _sync_python_request(venv: Path, minor: str | None) -> str:
     ``sys._base_executable``, which on CPython <= 3.10 is the venv's own ``bin/python`` - deleted by
     then, so uv failed and left an empty directory (bmk OPEN-WORK [19]). So the request is the
     declared minor, or with none declared, what the venv's interpreter reports
-    (:func:`_python_request`). Only when that interpreter cannot answer is its path the request: uv
+    (:func:`python_request`). Only when that interpreter cannot answer is its path the request: uv
     could not build from it either.
     """
     if minor:
         return minor
-    return _python_request(_probe_interpreter(venv)) or str(venv_python(venv))
+    return python_request(probe_interpreter(venv)) or str(venv_python(venv))
 
 
-def _python_request(interpreter: _VenvInterpreter | None) -> str | None:
+def python_request(interpreter: _VenvInterpreter | None) -> str | None:
     """The uv request that rebuilds ``interpreter``'s kind: ``pypy@X.Y``, ``X.Yt`` or ``X.Y``; None without one.
 
     A bare ``X.Y`` is enough for uv to accept an existing venv of any implementation, but when uv
@@ -1087,7 +1098,7 @@ def _sync_from_lock(cwd: Path, venv: Path, python: str, *, quiet: bool, stream: 
         )
         return None
     argv = ["uv", "sync", "--locked", "--python", python, "--no-default-groups", *_sync_extras(cwd)]
-    run = _run_for_report(argv, cwd, quiet=quiet, env={**_uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)})
+    run = _run_for_report(argv, cwd, quiet=quiet, env={**uv_env(), "UV_PROJECT_ENVIRONMENT": str(venv)})
     if run.rc == 0:
         return True
     _report_failed_uv("uv sync from uv.lock", venv, run, stream=stream)
@@ -1236,7 +1247,7 @@ def _lock(cwd: Path, *, quiet: bool, upgrade: bool, stream: SupportsWrite | None
     has already said so on ``stream`` (None: the process's stderr, looked up now).
     """
     argv = ["uv", "lock", *(["--upgrade"] if upgrade else [])]
-    refresh = _lock_argv(cwd, upgrade=upgrade)[len(argv) :]
+    refresh = lock_argv(cwd, upgrade=upgrade)[len(argv) :]
     path = uv_lock_guard_path(cwd)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1250,7 +1261,7 @@ def _lock(cwd: Path, *, quiet: bool, upgrade: bool, stream: SupportsWrite | None
         return _lock_with_refresh(argv, refresh, cwd, quiet=quiet, stream=stream)
 
 
-def _lock_argv(cwd: Path, *, upgrade: bool) -> list[str]:
+def lock_argv(cwd: Path, *, upgrade: bool) -> list[str]:
     """``uv lock``; an upgrade adds ``--upgrade`` and a ``--refresh-package`` per exempt own package."""
     if not upgrade:
         return ["uv", "lock"]
@@ -1271,14 +1282,14 @@ _REFRESH_REFUSALS = ("cannot be used with `--refresh`", "for '--refresh-package"
 _ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def _refresh_refused(rc: int, stderr: str) -> bool:
+def refresh_refused(rc: int, stderr: str) -> bool:
     """True only when uv refused ``--refresh-package`` itself, so the plain lock may stand in."""
     plain = _ANSI_SGR.sub("", stderr)
     return rc == _UV_ERROR_EXIT and any(marker in plain for marker in _REFRESH_REFUSALS)
 
 
 def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping[str, str] | None = None) -> _UvRun:
-    """Like :func:`_run`, but hands back stderr (still shown when not quiet) to be classified or reported."""
+    """Like :func:`run_uv`, but hands back stderr (still shown when not quiet) to be classified or reported."""
     try:
         # argv is built from literals and package names from the project's own manifest; no shell.
         done = subprocess.run(
@@ -1289,7 +1300,7 @@ def _run_keeping_stderr(argv: list[str], cwd: Path, *, quiet: bool, env: Mapping
             text=True,
             encoding="utf-8",
             errors="replace",
-            env=dict(env) if env is not None else _uv_env(),
+            env=dict(env) if env is not None else uv_env(),
             check=False,
         )
     except OSError as exc:
@@ -1313,7 +1324,7 @@ def _lock_with_refresh(
     if not refresh:
         return _run_for_report(argv, cwd, quiet=quiet)
     run = _run_keeping_stderr([*argv, *refresh], cwd, quiet=quiet)
-    if not _refresh_refused(run.rc, run.stderr):
+    if not refresh_refused(run.rc, run.stderr):
         return run
     _emit(
         "[venv] uv refused --refresh-package (offline is configured, or a package name it rejects); "

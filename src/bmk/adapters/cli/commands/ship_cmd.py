@@ -57,13 +57,13 @@ class GhRunEvent(str, Enum):
     RELEASE = "release"
 
 
-def _git_head() -> str:
+def git_head() -> str:
     """Return the current HEAD commit sha, or empty string on failure."""
     result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False)  # noqa: S607
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-class _WorkflowRun(BaseModel):
+class WorkflowRun(BaseModel):
     """One run from ``gh run list --json``; only the fields this module matches on.
 
     ``extra="ignore"`` drops the requested-but-unused ``status``/``conclusion``.
@@ -79,7 +79,7 @@ class _WorkflowRun(BaseModel):
     head_sha: str = Field(alias="headSha")
 
 
-def _find_run_id(workflow: str, *, event: GhRunEvent | None, head_sha: str) -> str | None:
+def find_run_id(workflow: str, *, event: GhRunEvent | None, head_sha: str) -> str | None:
     """Find the most recent workflow run id matching workflow/event/head_sha."""
     fields = "databaseId,workflowName,event,headSha,status,conclusion"
     result = subprocess.run(  # noqa: S603
@@ -96,7 +96,7 @@ def _find_run_id(workflow: str, *, event: GhRunEvent | None, head_sha: str) -> s
         return None
     for raw_run in raw_runs:
         try:
-            run = _WorkflowRun.model_validate(raw_run)
+            run = WorkflowRun.model_validate(raw_run)
         except ValidationError:
             continue
         if run.workflow_name != workflow:
@@ -109,13 +109,13 @@ def _find_run_id(workflow: str, *, event: GhRunEvent | None, head_sha: str) -> s
     return None
 
 
-def _watch_run(run_id: str) -> bool:
+def watch_run(run_id: str) -> bool:
     """Block until the run finishes; return True on success."""
     result = subprocess.run(["gh", "run", "watch", run_id, "--exit-status"], check=False)  # noqa: S603, S607
     return result.returncode == 0
 
 
-def _gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label: str) -> None:
+def gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label: str) -> None:
     """Find and watch the workflow run for *head_sha*; exit with GENERAL_ERROR on failure.
 
     Args:
@@ -131,20 +131,20 @@ def _gate_on_ci(workflow: str, *, event: GhRunEvent | None, head_sha: str, label
     deadline = time.monotonic() + _FIND_RUN_TIMEOUT
     run_id: str | None = None
     while run_id is None and time.monotonic() < deadline:
-        run_id = _find_run_id(workflow, event=event, head_sha=head_sha)
+        run_id = find_run_id(workflow, event=event, head_sha=head_sha)
         if run_id is None:
             time.sleep(_POLL_SECONDS)
     if run_id is None:
         logger.error("No %s workflow run appeared within %ds", label, _FIND_RUN_TIMEOUT)
         get_current_context().exit(ExitCode.GENERAL_ERROR)
     logger.info("Watching %s workflow run %s", label, run_id)
-    if not _watch_run(run_id):
+    if not watch_run(run_id):
         logger.error("%s workflow run %s failed", label, run_id)
         get_current_context().exit(ExitCode.GENERAL_ERROR)
     logger.info("%s workflow run %s succeeded", label, run_id)
 
 
-def _run_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str) -> None:
+def run_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str) -> None:
     """Execute push, CI gate, release, release CI gate.
 
     Raises:
@@ -161,11 +161,11 @@ def _run_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str)
         return
 
     run_push(message)
-    head_sha = _git_head()
-    _gate_on_ci(ci_workflow, event=GhRunEvent.PUSH, head_sha=head_sha, label="CI")
+    head_sha = git_head()
+    gate_on_ci(ci_workflow, event=GhRunEvent.PUSH, head_sha=head_sha, label="CI")
     run_release(())
     # The release tag points at the same commit; match the release workflow by sha.
-    _gate_on_ci(release_workflow, event=None, head_sha=head_sha, label="release")
+    gate_on_ci(release_workflow, event=None, head_sha=head_sha, label="release")
 
 
 @click.command("ship", context_settings=CLICK_CONTEXT_SETTINGS)
@@ -193,7 +193,7 @@ def cli_ship(message: tuple[str, ...], ci_workflow: str, release_workflow: str) 
     """
     with lib_log_rich.runtime.bind(job_id="cli-ship"):
         logger.info("Running ship pipeline (push, CI gate, release, release CI gate)")
-        _run_ship(message, ci_workflow, release_workflow)
+        run_ship(message, ci_workflow, release_workflow)
 
 
 @click.command("sh", context_settings=CLICK_CONTEXT_SETTINGS)
@@ -212,7 +212,17 @@ def cli_sh(message: tuple[str, ...], ci_workflow: str, release_workflow: str) ->
     """
     with lib_log_rich.runtime.bind(job_id="cli-ship"):
         logger.info("Running ship pipeline (push, CI gate, release, release CI gate)")
-        _run_ship(message, ci_workflow, release_workflow)
+        run_ship(message, ci_workflow, release_workflow)
 
 
-__all__ = ["GhRunEvent", "cli_sh", "cli_ship"]
+__all__ = [
+    "GhRunEvent",
+    "WorkflowRun",
+    "cli_sh",
+    "cli_ship",
+    "find_run_id",
+    "gate_on_ci",
+    "git_head",
+    "run_ship",
+    "watch_run",
+]

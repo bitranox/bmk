@@ -49,7 +49,7 @@ class InstallOutcome(str, Enum):
     FAILED = "failed"
 
 
-class _InstallKind(str, Enum):
+class InstallKind(str, Enum):
     """How a missing tool should be installed."""
 
     ARGV = "argv"  # run a system command (pip / pkg-mgr / winget / brew)
@@ -58,10 +58,10 @@ class _InstallKind(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class _InstallAction:
+class InstallAction:
     """A resolved plan for installing one missing tool."""
 
-    kind: _InstallKind
+    kind: InstallKind
     argv: tuple[str, ...] = ()
     reason: str = ""
 
@@ -90,7 +90,7 @@ _PIP_PACKAGES: dict[ToolName, str] = {
 }
 
 
-class _PkgManager(NamedTuple):
+class PkgManager(NamedTuple):
     """A Linux package manager and the arguments that install a package with it.
 
     Attributes:
@@ -103,11 +103,11 @@ class _PkgManager(NamedTuple):
 
 
 # Ordered by preference; the first whose executable is on PATH wins.
-_LINUX_PKG_MANAGERS: tuple[_PkgManager, ...] = (
-    _PkgManager("apt-get", ("install", "-y")),
-    _PkgManager("dnf", ("install", "-y")),
-    _PkgManager("pacman", ("-S", "--noconfirm")),
-    _PkgManager("zypper", ("install", "-y")),
+_LINUX_PKG_MANAGERS: tuple[PkgManager, ...] = (
+    PkgManager("apt-get", ("install", "-y")),
+    PkgManager("dnf", ("install", "-y")),
+    PkgManager("pacman", ("-S", "--noconfirm")),
+    PkgManager("zypper", ("install", "-y")),
 )
 
 
@@ -120,7 +120,7 @@ def _externally_managed() -> bool:
     return versioned.exists()
 
 
-def _pip_install_argv(package: str) -> tuple[str, ...]:
+def pip_install_argv(package: str) -> tuple[str, ...]:
     """Build the pip-install argv, guarding PEP 668 on Linux like _dependencies."""
     argv = [sys.executable, "-m", "pip", "install", package]
     if sys.platform.startswith("linux") and _externally_managed():
@@ -128,7 +128,7 @@ def _pip_install_argv(package: str) -> tuple[str, ...]:
     return tuple(argv)
 
 
-def _detect_linux_pkg_manager() -> _PkgManager | None:
+def _detect_linux_pkg_manager() -> PkgManager | None:
     """Return the first Linux package manager whose executable is on PATH, or None."""
     for manager in _LINUX_PKG_MANAGERS:
         if shutil.which(manager.exe) is not None:
@@ -159,34 +159,34 @@ def _system_action(
     mac_argv: tuple[str, ...],
     win_argv: tuple[str, ...],
     skip_reason: str,
-) -> _InstallAction:
+) -> InstallAction:
     """Resolve a system-package install for the current OS.
 
     ``linux_pkg=None`` means the tool has no reliable default-repo package on
     Linux (e.g. pwsh), so it is skipped with ``skip_reason``.
     """
     if is_windows():
-        return _InstallAction(_InstallKind.ARGV, win_argv)
+        return InstallAction(InstallKind.ARGV, win_argv)
     if is_macos():
-        return _InstallAction(_InstallKind.ARGV, mac_argv)
+        return InstallAction(InstallKind.ARGV, mac_argv)
     if linux_pkg is None:
-        return _InstallAction(_InstallKind.NONE, reason=skip_reason)
+        return InstallAction(InstallKind.NONE, reason=skip_reason)
     manager = _detect_linux_pkg_manager()
     if manager is None:
-        return _InstallAction(_InstallKind.NONE, reason=f"no supported package manager found ({skip_reason})")
+        return InstallAction(InstallKind.NONE, reason=f"no supported package manager found ({skip_reason})")
     prefix = _privilege_prefix()
     if prefix is None:
-        return _InstallAction(_InstallKind.NONE, reason=f"root or sudo required to install {linux_pkg}")
-    return _InstallAction(_InstallKind.ARGV, (*prefix, manager.exe, *manager.install_args, linux_pkg))
+        return InstallAction(InstallKind.NONE, reason=f"root or sudo required to install {linux_pkg}")
+    return InstallAction(InstallKind.ARGV, (*prefix, manager.exe, *manager.install_args, linux_pkg))
 
 
-def _action_for(check: ToolCheck) -> _InstallAction:
+def action_for(check: ToolCheck) -> InstallAction:
     """Resolve how to install a single missing tool on this OS."""
     name = check.name
     if name in _PIP_PACKAGES:
-        return _InstallAction(_InstallKind.ARGV, _pip_install_argv(_PIP_PACKAGES[name]))
+        return InstallAction(InstallKind.ARGV, pip_install_argv(_PIP_PACKAGES[name]))
     if name is ToolName.PSSCRIPTANALYZER:
-        return _InstallAction(_InstallKind.MODULE)
+        return InstallAction(InstallKind.MODULE)
     if name is ToolName.GIT:
         return _system_action(
             linux_pkg="git",
@@ -202,7 +202,7 @@ def _action_for(check: ToolCheck) -> _InstallAction:
             skip_reason=check.install_hint,
         )
     # winget itself and anything unrecognised: no installer -> skip with the hint.
-    return _InstallAction(_InstallKind.NONE, reason=check.install_hint)
+    return InstallAction(InstallKind.NONE, reason=check.install_hint)
 
 
 # --- execution -------------------------------------------------------------
@@ -229,11 +229,11 @@ def _install_module(check: ToolCheck, *, dry_run: bool) -> EnsureResult:
     return EnsureResult(check.name, InstallOutcome.INSTALLED, "Install-Module PSScriptAnalyzer")
 
 
-def _run_install(check: ToolCheck, action: _InstallAction, *, dry_run: bool) -> EnsureResult:
+def run_install(check: ToolCheck, action: InstallAction, *, dry_run: bool) -> EnsureResult:
     """Execute one resolved install action and classify the outcome."""
-    if action.kind is _InstallKind.NONE:
+    if action.kind is InstallKind.NONE:
         return EnsureResult(check.name, InstallOutcome.SKIPPED, action.reason)
-    if action.kind is _InstallKind.MODULE:
+    if action.kind is InstallKind.MODULE:
         return _install_module(check, dry_run=dry_run)
     command = " ".join(action.argv)
     if dry_run:
@@ -293,7 +293,7 @@ def ensure_tools(*, dry_run: bool = False) -> list[EnsureResult]:
         if check.found:
             results.append(EnsureResult(check.name, InstallOutcome.ALREADY_PRESENT))
             continue
-        results.append(_run_install(check, _action_for(check), dry_run=dry_run))
+        results.append(run_install(check, action_for(check), dry_run=dry_run))
     return results
 
 
@@ -307,8 +307,14 @@ def run_ensure(*, dry_run: bool = False, strict: bool = False, quiet: bool = Fal
 
 __all__ = [
     "EnsureResult",
+    "InstallAction",
+    "InstallKind",
     "InstallOutcome",
+    "PkgManager",
+    "action_for",
     "ensure_tools",
     "format_ensure_report",
+    "pip_install_argv",
     "run_ensure",
+    "run_install",
 ]

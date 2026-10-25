@@ -136,7 +136,7 @@ def test_cli_install_errors_when_bundled_missing(
     """Graceful error when bundled Makefile is missing."""
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.setattr(
-        "bmk.adapters.cli.commands.install_cmd._BUNDLED_MAKEFILE",
+        "bmk.adapters.cli.commands.install_cmd.BUNDLED_MAKEFILE",
         tmp_path / "nonexistent" / "Makefile",
     )
 

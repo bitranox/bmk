@@ -12,8 +12,7 @@ a healthy ~300MB environment on every single make.
 """
 
 # The Makefile contract is an exit code, but the useful assertions are on the internals it
-# is built from, so this file reaches for _site_packages and _MAX_REPORTED deliberately.
-# pyright: reportPrivateUsage=false
+# is built from, so this file reaches for _site_packages and MAX_REPORTED deliberately.
 from __future__ import annotations
 
 import csv
@@ -150,5 +149,5 @@ def test_a_flood_of_missing_files_is_summarised(
 
     assert bmk_selfcheck.main() == 1
     stderr = capsys.readouterr().err
-    assert stderr.count("missing from its environment") == bmk_selfcheck._MAX_REPORTED
-    assert f"and {40 - bmk_selfcheck._MAX_REPORTED} more" in stderr
+    assert stderr.count("missing from its environment") == bmk_selfcheck.MAX_REPORTED
+    assert f"and {40 - bmk_selfcheck.MAX_REPORTED} more" in stderr

@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 
 _BMK_MAKEFILE_SENTINEL = "# BMK MAKEFILE"
 
-_BUNDLED_MAKEFILE = Path(__file__).resolve().parent.parent.parent.parent / "makefile" / "Makefile"
+BUNDLED_MAKEFILE = Path(__file__).resolve().parent.parent.parent.parent / "makefile" / "Makefile"
 # bmk's own supply-chain cooldown for its tool env, regenerated from bmk's [tool.uv] on every
 # release. The deployed Makefile's _ensure_bmk hands it to uv from beside itself.
-_BUNDLED_COOLDOWN = _BUNDLED_MAKEFILE.with_name("cooldown.mk")
+_BUNDLED_COOLDOWN = BUNDLED_MAKEFILE.with_name("cooldown.mk")
 _DEPLOYED_COOLDOWN = ".bmk-cooldown.mk"
 
 
@@ -44,7 +44,7 @@ def _deploy_makefile(target: Path) -> None:
     The Makefile sentinel is the pair's only version, so a Makefile refreshed alone would run the
     new recipe under the previous release's cooldown.
     """
-    shutil.copy2(_BUNDLED_MAKEFILE, target)
+    shutil.copy2(BUNDLED_MAKEFILE, target)
     if _BUNDLED_COOLDOWN.is_file():
         shutil.copy2(_BUNDLED_COOLDOWN, target.with_name(_DEPLOYED_COOLDOWN))
 
@@ -60,7 +60,7 @@ def _first_line(path: Path) -> str | None:
         return None
 
 
-def _extract_version(first_line: str) -> str | None:
+def extract_version(first_line: str) -> str | None:
     """Extract version from a sentinel line like '# BMK MAKEFILE 1.0.0'.
 
     Returns the version string ('1.0.0') or None if not a managed Makefile.
@@ -94,16 +94,16 @@ def check_makefile_update() -> bool:
     as best-effort.
     """
     target = Path.cwd() / "Makefile"
-    if not target.is_file() or not _BUNDLED_MAKEFILE.is_file():
+    if not target.is_file() or not BUNDLED_MAKEFILE.is_file():
         return False
 
     # A Makefile that is not UTF-8 reads as "", which carries no sentinel: bmk did not write it.
-    local_ver = _extract_version(_first_line(target) or "")
+    local_ver = extract_version(_first_line(target) or "")
     if local_ver is None:
         return False
 
-    bundled_first = _BUNDLED_MAKEFILE.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
-    bundled_ver = _extract_version(bundled_first)
+    bundled_first = BUNDLED_MAKEFILE.read_text(encoding="utf-8").split("\n", maxsplit=1)[0]
+    bundled_ver = extract_version(bundled_first)
     if bundled_ver is None or local_ver == bundled_ver:
         return False
 
@@ -170,8 +170,8 @@ def cli_install() -> None:
         # Held, not exited on: the prerequisites report below is printed either way.
         makefile_exit: ExitCode | None = None
 
-        if not _BUNDLED_MAKEFILE.is_file():
-            safe_console.echo(f"Error: Bundled Makefile not found at {_BUNDLED_MAKEFILE}", err=True)
+        if not BUNDLED_MAKEFILE.is_file():
+            safe_console.echo(f"Error: Bundled Makefile not found at {BUNDLED_MAKEFILE}", err=True)
             makefile_exit = ExitCode.FILE_NOT_FOUND
         else:
             makefile_exit = _install_into(Path.cwd() / "Makefile")
@@ -189,4 +189,9 @@ def cli_install() -> None:
             get_current_context().exit(makefile_exit)
 
 
-__all__ = ["check_makefile_update", "cli_install"]
+__all__ = [
+    "BUNDLED_MAKEFILE",
+    "check_makefile_update",
+    "cli_install",
+    "extract_version",
+]

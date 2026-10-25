@@ -2,7 +2,7 @@
 
 ``stagerunner/venv.py`` calls ``uv`` by bare name through PATH, so a script named ``uv`` placed
 first on PATH receives every provisioning call through the REAL module and the REAL subprocess
-plumbing (``_run``, ``_run_keeping_stderr``, ``_run_capture``). Tests then assert on what the stub
+plumbing (``run_uv``, ``_run_keeping_stderr``, ``_run_capture``). Tests then assert on what the stub
 recorded and on real stdout/stderr, instead of patching bmk's own runners: a patched runner
 proves only that bmk called its own function, never what reached the process boundary (argv, cwd,
 environment), and it silently stops covering a runner a refactor routes around it.
