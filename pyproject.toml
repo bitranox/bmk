@@ -25,10 +25,10 @@ dependencies = [
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
     "rtoml>=0.14.0",               # TOML read (stdlib tomllib does not exist on our 3.10 floor)
     "tomlkit>=0.15.2",             # TOML round-trip EDIT: preserves comments when bmk writes back
-    "httpx2>=2.13.1",               # PyPI version lookups
+    "httpx2>=2.14.0",               # PyPI version lookups
     "python-dotenv>=1.2.4",        # reads CODECOV_TOKEN from .env, and the LOG_* lines of a .env
                                    # in adapters/logging/setup.py
-    "filelock>=4.2.1; python_version >= \"3.11\"",              # the cross-process lock serialising venv provisioning
+    "filelock>=4.2.2; python_version >= \"3.11\"",              # the cross-process lock serialising venv provisioning
                                    # (adapters/stagerunner/venv.py). It already arrived here
                                    # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
                                    # far too fragile a provenance for something bmk imports: drop
