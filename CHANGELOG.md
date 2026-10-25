@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.27.1] 2026-10-25 22:24:01
+
+### Changed
+
+- Internal only, no change in behaviour: `src` and `tests` carry no inline `type: ignore` or
+  `pyright: ignore` left. Each one is replaced by a real annotation or a typed test fake.
+
 ## [3.27.0] 2026-10-25 21:18:58
 
 ### Changed
