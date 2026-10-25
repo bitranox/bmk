@@ -175,7 +175,7 @@ def test_email_config_is_immutable() -> None:
     config = EmailConfig()
 
     with pytest.raises(PydanticValidationError):
-        config.smtphosts = ["new.smtp.com"]  # type: ignore[misc]
+        config.smtphosts = ["new.smtp.com"]
 
 
 # ======================== EmailConfig Validation ========================

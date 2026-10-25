@@ -19,12 +19,24 @@ from bmk.adapters.email.config import EmailConfig, load_email_config_from_dict
 # Generate syntactically valid email addresses: local@domain.tld
 _email_local_part = st.from_regex(r"[a-z][a-z0-9_.]{0,20}", fullmatch=True)
 _email_domain = st.from_regex(r"[a-z][a-z0-9]{0,10}\.[a-z]{2,4}", fullmatch=True)
-_valid_email = st.builds(lambda local, domain: f"{local}@{domain}", _email_local_part, _email_domain)  # type: ignore[arg-type]
+
+
+def _email_address(local: str, domain: str) -> str:
+    return f"{local}@{domain}"
+
+
+_valid_email = st.builds(_email_address, _email_local_part, _email_domain)
 
 # Generate valid SMTP host strings: hostname:port or hostname
 _hostname = st.from_regex(r"[a-z][a-z0-9]{0,15}\.[a-z]{2,6}", fullmatch=True)
 _port = st.integers(min_value=1, max_value=65535)
-_smtp_host = st.builds(lambda h, p: f"{h}:{p}", _hostname, _port)  # type: ignore[arg-type]
+
+
+def _host_with_port(host: str, port: int) -> str:
+    return f"{host}:{port}"
+
+
+_smtp_host = st.builds(_host_with_port, _hostname, _port)
 
 
 # ======================== Valid email address tests ========================
@@ -268,7 +280,8 @@ def test_attachment_directories_list_coerces_to_frozenset() -> None:
     from pathlib import Path
 
     paths = ["/tmp", "/home/user"]
-    config = EmailConfig(attachment_allowed_directories=paths)  # type: ignore[arg-type]
+    # Raw input, as a config file delivers it: model_validate is the path that coerces it.
+    config = EmailConfig.model_validate({"attachment_allowed_directories": paths})
 
     assert config.attachment_allowed_directories == frozenset([Path("/tmp"), Path("/home/user")])
 

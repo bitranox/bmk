@@ -6,7 +6,9 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from fakes import fake_of
 
+from bmk.adapters.stagerunner.helpers import _release
 from bmk.adapters.stagerunner.helpers._release import cmd_exists, get_default_remote
 from bmk.adapters.stagerunner.helpers._toml_config import PyprojectConfig
 
@@ -168,23 +170,16 @@ def test_cmd_exists_returns_false_for_nonexistent_command() -> None:
 class TestEnsureClean:
     """Tests for ensure_clean function."""
 
-    @pytest.fixture
-    def release_module(self) -> Any:
-        """Import release module."""
-        from bmk.adapters.stagerunner.helpers import _release
-
-        return _release
-
     @pytest.mark.os_agnostic
-    def test_passes_on_clean_tree(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_passes_on_clean_tree(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No error when both diff commands return 0."""
         clean: subprocess.CompletedProcess[str] = subprocess.CompletedProcess([], 0)
-        monkeypatch.setattr(release_module, "run", lambda _args, **_kw: clean)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(_release, "run", fake_of(_release.run).returning(clean))
 
-        release_module.ensure_clean()  # Should not raise
+        _release.ensure_clean()  # Should not raise
 
     @pytest.mark.os_agnostic
-    def test_raises_on_unstaged_changes(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_raises_on_unstaged_changes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """SystemExit when unstaged changes are detected."""
         results: Iterator[subprocess.CompletedProcess[str]] = iter(
             [
@@ -192,13 +187,19 @@ class TestEnsureClean:
                 subprocess.CompletedProcess[str]([], 0),  # staged = clean
             ]
         )
-        monkeypatch.setattr(release_module, "run", lambda _args, **_kw: next(results))  # type: ignore[reportUnknownLambdaType]
+
+        def run_next(
+            _args: list[str], *, check: bool = True, capture: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            return next(results)
+
+        monkeypatch.setattr(_release, "run", run_next)
 
         with pytest.raises(SystemExit):
-            release_module.ensure_clean()
+            _release.ensure_clean()
 
     @pytest.mark.os_agnostic
-    def test_raises_on_staged_changes(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_raises_on_staged_changes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """SystemExit when staged changes are detected."""
         results: Iterator[subprocess.CompletedProcess[str]] = iter(
             [
@@ -206,10 +207,16 @@ class TestEnsureClean:
                 subprocess.CompletedProcess[str]([], 1),  # staged = dirty
             ]
         )
-        monkeypatch.setattr(release_module, "run", lambda _args, **_kw: next(results))  # type: ignore[reportUnknownLambdaType]
+
+        def run_next(
+            _args: list[str], *, check: bool = True, capture: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            return next(results)
+
+        monkeypatch.setattr(_release, "run", run_next)
 
         with pytest.raises(SystemExit):
-            release_module.ensure_clean()
+            _release.ensure_clean()
 
 
 # ---------------------------------------------------------------------------
@@ -221,61 +228,59 @@ class TestReleaseOrchestrator:
     """Tests for release() orchestrator function."""
 
     @pytest.fixture
-    def release_module(self) -> Any:
-        """Import release module."""
-        from bmk.adapters.stagerunner.helpers import _release
-
-        return _release
-
-    @pytest.fixture
-    def mock_release_deps(self, release_module: Any, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+    def mock_release_deps(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         """Patch all external dependencies of release() and return call tracker."""
         calls: dict[str, list[Any]] = {"push": [], "tag_create": [], "gh_create": [], "gh_edit": []}
 
         config = _make_config({"project": {"name": "test", "version": "1.2.3"}})
 
-        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(release_module, "ensure_clean", lambda: None)
-        monkeypatch.setattr(release_module, "git_branch", lambda: "main")
-        monkeypatch.setattr(release_module, "git_push", lambda remote, ref: calls["push"].append((remote, ref)))  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(release_module, "git_tag_exists", lambda _tag: False)  # type: ignore[reportUnknownLambdaType]
         monkeypatch.setattr(
-            release_module,
-            "git_create_annotated_tag",
-            lambda tag, _msg: calls["tag_create"].append(tag),  # type: ignore[reportUnknownLambdaType]
+            _release, "load_pyproject_config", fake_of(_release.load_pyproject_config).returning(config)
         )
-        monkeypatch.setattr(release_module, "gh_available", lambda: True)
-        monkeypatch.setattr(release_module, "gh_release_exists", lambda _tag: False)  # type: ignore[reportUnknownLambdaType]
-        monkeypatch.setattr(
-            release_module,
-            "gh_release_create",
-            lambda tag, _title, _body: calls["gh_create"].append(tag),  # type: ignore[reportUnknownLambdaType]
-        )
-        monkeypatch.setattr(release_module, "gh_release_edit", lambda tag, _title, _body: calls["gh_edit"].append(tag))  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(_release, "ensure_clean", fake_of(_release.ensure_clean).returning(None))
+        monkeypatch.setattr(_release, "git_branch", fake_of(_release.git_branch).returning("main"))
+
+        def git_push(remote: str, ref: str) -> None:
+            calls["push"].append((remote, ref))
+
+        def git_create_annotated_tag(name: str, _message: str) -> None:
+            calls["tag_create"].append(name)
+
+        def gh_release_create(tag: str, _title: str, _body: str) -> None:
+            calls["gh_create"].append(tag)
+
+        def gh_release_edit(tag: str, _title: str, _body: str) -> None:
+            calls["gh_edit"].append(tag)
+
+        monkeypatch.setattr(_release, "git_push", git_push)
+        monkeypatch.setattr(_release, "git_tag_exists", fake_of(_release.git_tag_exists).returning(False))
+        monkeypatch.setattr(_release, "git_create_annotated_tag", git_create_annotated_tag)
+        monkeypatch.setattr(_release, "gh_available", fake_of(_release.gh_available).returning(True))
+        monkeypatch.setattr(_release, "gh_release_exists", fake_of(_release.gh_release_exists).returning(False))
+        monkeypatch.setattr(_release, "gh_release_create", gh_release_create)
+        monkeypatch.setattr(_release, "gh_release_edit", gh_release_edit)
 
         return calls
 
     @pytest.mark.os_agnostic
-    def test_returns_one_for_invalid_version(
-        self, release_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_returns_one_for_invalid_version(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Returns 1 when the version is not a version at all.
 
         Not "1.0": that is a legal PEP 440 version and is now released normally.
         """
         config = _make_config({"project": {"name": "test", "version": "not-a-version"}})
-        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(
+            _release, "load_pyproject_config", fake_of(_release.load_pyproject_config).returning(config)
+        )
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 1
 
     @pytest.mark.os_agnostic
-    def test_happy_path_pushes_and_tags(
-        self, release_module: Any, mock_release_deps: dict[str, list[Any]], tmp_path: Path
-    ) -> None:
+    def test_happy_path_pushes_and_tags(self, mock_release_deps: dict[str, list[Any]], tmp_path: Path) -> None:
         """Happy path: pushes branch, creates tag, pushes tag."""
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert ("origin", "main") in mock_release_deps["push"]
@@ -285,7 +290,6 @@ class TestReleaseOrchestrator:
     @pytest.mark.os_agnostic
     def test_uses_configured_remote(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -297,19 +301,19 @@ class TestReleaseOrchestrator:
                 "tool": {"git": {"default-remote": "upstream"}},
             }
         )
-        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config_upstream)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(
+            _release, "load_pyproject_config", fake_of(_release.load_pyproject_config).returning(config_upstream)
+        )
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert ("upstream", "main") in mock_release_deps["push"]
 
     @pytest.mark.os_agnostic
-    def test_explicit_remote_overrides_config(
-        self, release_module: Any, mock_release_deps: dict[str, list[Any]], tmp_path: Path
-    ) -> None:
+    def test_explicit_remote_overrides_config(self, mock_release_deps: dict[str, list[Any]], tmp_path: Path) -> None:
         """Explicit remote= parameter overrides config."""
-        result = release_module.release(project_dir=tmp_path, remote="custom")
+        result = _release.release(project_dir=tmp_path, remote="custom")
 
         assert result == 0
         assert ("custom", "main") in mock_release_deps["push"]
@@ -317,25 +321,22 @@ class TestReleaseOrchestrator:
     @pytest.mark.os_agnostic
     def test_skips_tag_creation_when_exists(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         """Skips tag creation when tag already exists locally."""
-        monkeypatch.setattr(release_module, "git_tag_exists", lambda _tag: True)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(_release, "git_tag_exists", fake_of(_release.git_tag_exists).returning(True))
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert mock_release_deps["tag_create"] == []
 
     @pytest.mark.os_agnostic
-    def test_creates_github_release(
-        self, release_module: Any, mock_release_deps: dict[str, list[Any]], tmp_path: Path
-    ) -> None:
+    def test_creates_github_release(self, mock_release_deps: dict[str, list[Any]], tmp_path: Path) -> None:
         """Creates GitHub release when gh is available and no existing release."""
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert "v1.2.3" in mock_release_deps["gh_create"]
@@ -343,15 +344,14 @@ class TestReleaseOrchestrator:
     @pytest.mark.os_agnostic
     def test_edits_existing_github_release(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         """Edits existing GitHub release instead of creating new one."""
-        monkeypatch.setattr(release_module, "gh_release_exists", lambda _tag: True)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(_release, "gh_release_exists", fake_of(_release.gh_release_exists).returning(True))
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert "v1.2.3" in mock_release_deps["gh_edit"]
@@ -360,16 +360,15 @@ class TestReleaseOrchestrator:
     @pytest.mark.os_agnostic
     def test_skips_github_when_unavailable(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
         capsys: CaptureFixture[str],
     ) -> None:
         """Prints message and continues when gh CLI is unavailable."""
-        monkeypatch.setattr(release_module, "gh_available", lambda: False)
+        monkeypatch.setattr(_release, "gh_available", fake_of(_release.gh_available).returning(False))
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert "gh CLI not found" in capsys.readouterr().out
@@ -380,7 +379,6 @@ class TestReleaseOrchestrator:
     @pytest.mark.parametrize("version", ["0.1.0rc1", "1.0.0a1", "1.3.0b2", "1.2.3.dev4", "1.2.3.post1", "1!2.0.0"])
     def test_a_canonical_pep440_version_is_released_and_tagged(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -388,9 +386,11 @@ class TestReleaseOrchestrator:
     ) -> None:
         """hatchling builds these and PyPI accepts them, so bmk must not be the one to refuse."""
         config = _make_config({"project": {"name": "test", "version": version}})
-        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(
+            _release, "load_pyproject_config", fake_of(_release.load_pyproject_config).returning(config)
+        )
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 0
         assert f"v{version}" in mock_release_deps["tag_create"]
@@ -399,7 +399,6 @@ class TestReleaseOrchestrator:
     @pytest.mark.os_agnostic
     def test_a_v_prefixed_version_is_refused_before_it_can_tag_vv(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -407,9 +406,11 @@ class TestReleaseOrchestrator:
     ) -> None:
         """packaging PARSES "v1.0.0"; accepting it would tag "vv1.0.0" (tag = f"v{version}")."""
         config = _make_config({"project": {"name": "test", "version": "v1.0.0"}})
-        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(
+            _release, "load_pyproject_config", fake_of(_release.load_pyproject_config).returning(config)
+        )
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 1
         assert mock_release_deps["tag_create"] == []
@@ -418,16 +419,17 @@ class TestReleaseOrchestrator:
     @pytest.mark.os_agnostic
     def test_a_local_version_is_refused_because_pypi_would_reject_the_upload(
         self,
-        release_module: Any,
         mock_release_deps: dict[str, list[Any]],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         """A local version tags fine and then dies in CI at publish; refuse it here instead."""
         config = _make_config({"project": {"name": "test", "version": "1.2.3+local"}})
-        monkeypatch.setattr(release_module, "load_pyproject_config", lambda _path: config)  # type: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(
+            _release, "load_pyproject_config", fake_of(_release.load_pyproject_config).returning(config)
+        )
 
-        result = release_module.release(project_dir=tmp_path)
+        result = _release.release(project_dir=tmp_path)
 
         assert result == 1
         assert mock_release_deps["tag_create"] == []

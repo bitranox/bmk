@@ -27,7 +27,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -38,6 +38,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 _SRC = str(Path(__file__).resolve().parent.parent / "src")
+
+
+class _Holder(Protocol):
+    """The ``holder`` fixture: hold the tool lock at ``path`` from another process."""
+
+    def __call__(self, path: Path, *, mode: str) -> None: ...
+
 
 #: Long enough that a loaded machine does not fail the control, short enough that a
 #: genuinely blocked case does not stall the suite.
@@ -53,7 +60,7 @@ def _child_env(lock_path: Path, **extra: str) -> dict[str, str]:
 
 
 @pytest.fixture
-def holder() -> Iterator[object]:
+def holder() -> Iterator[_Holder]:
     """Hold the tool lock from a genuinely separate process, shared or exclusive.
 
     A separate process, not a thread: the guarantee under test is cross-PROCESS. On POSIX
@@ -136,24 +143,24 @@ def test_the_lock_lives_in_the_tools_root_not_the_env_being_replaced(tmp_path: P
 
 
 @pytest.mark.os_agnostic
-def test_two_shared_holders_do_not_exclude_each_other(tmp_path: Path, holder: object) -> None:
+def test_two_shared_holders_do_not_exclude_each_other(tmp_path: Path, holder: _Holder) -> None:
     """Concurrent bmk processes must never serialise against each other.
 
     This is the whole point of a shared mode: two gates in two repos run at once. If they
     excluded each other the guard would be the machine-wide stall it exists to remove.
     """
     lock = tmp_path / "t.lock"
-    holder(lock, mode="shared")  # type: ignore[operator]
+    holder(lock, mode="shared")
 
     assert bmk_toollock.acquire(lock, exclusive=False, timeout=5), "a second reader must get in"
 
 
 @pytest.mark.os_agnostic
-def test_a_running_bmk_blocks_the_upgrade(tmp_path: Path, holder: object) -> None:
+def test_a_running_bmk_blocks_the_upgrade(tmp_path: Path, holder: _Holder) -> None:
     """THE guarantee: an upgrade may not proceed while any bmk is running out of the env."""
     lock = tmp_path / "t.lock"
     marker = tmp_path / "upgraded"
-    holder(lock, mode="shared")  # type: ignore[operator]
+    holder(lock, mode="shared")
 
     result = _guard(lock, "--exclusive", "--timeout", _SHORT_WAIT, "--on-timeout", "skip", marker=marker)
 
@@ -162,23 +169,23 @@ def test_a_running_bmk_blocks_the_upgrade(tmp_path: Path, holder: object) -> Non
 
 
 @pytest.mark.os_agnostic
-def test_the_upgrade_excludes_a_starting_bmk(tmp_path: Path, holder: object) -> None:
+def test_the_upgrade_excludes_a_starting_bmk(tmp_path: Path, holder: _Holder) -> None:
     """The other direction: a bmk must not start reading an env mid-rebuild."""
     lock = tmp_path / "t.lock"
-    holder(lock, mode="exclusive")  # type: ignore[operator]
+    holder(lock, mode="exclusive")
 
     assert not bmk_toollock.acquire(lock, exclusive=False, timeout=1), "a reader got in during a rebuild"
 
 
 @pytest.mark.os_agnostic
-def test_a_skipped_upgrade_does_not_run_the_command(tmp_path: Path, holder: object) -> None:
+def test_a_skipped_upgrade_does_not_run_the_command(tmp_path: Path, holder: _Holder) -> None:
     """`--on-timeout skip` must exit 0 AND leave the command unrun.
 
     Exiting 0 having silently RUN the upgrade would defeat the guard while looking healthy.
     """
     lock = tmp_path / "t.lock"
     marker = tmp_path / "ran"
-    holder(lock, mode="exclusive")  # type: ignore[operator]
+    holder(lock, mode="exclusive")
 
     result = _guard(lock, "--exclusive", "--timeout", _SHORT_WAIT, "--on-timeout", "skip", marker=marker)
 
@@ -187,14 +194,14 @@ def test_a_skipped_upgrade_does_not_run_the_command(tmp_path: Path, holder: obje
 
 
 @pytest.mark.os_agnostic
-def test_a_repair_that_cannot_get_the_lock_fails_rather_than_skipping(tmp_path: Path, holder: object) -> None:
+def test_a_repair_that_cannot_get_the_lock_fails_rather_than_skipping(tmp_path: Path, holder: _Holder) -> None:
     """The REPAIR may not skip: skipping would leave a damaged env in place.
 
     It fails instead, and the Makefile falls through to its deliberately unguarded retry.
     """
     lock = tmp_path / "t.lock"
     marker = tmp_path / "ran"
-    holder(lock, mode="exclusive")  # type: ignore[operator]
+    holder(lock, mode="exclusive")
 
     result = _guard(lock, "--exclusive", "--timeout", _SHORT_WAIT, "--on-timeout", "fail", marker=marker)
 
@@ -314,10 +321,10 @@ def test_holding_shared_publishes_the_token_for_children(tmp_path: Path) -> None
 
 
 @pytest.mark.os_agnostic
-def test_a_waiting_guard_says_so_rather_than_stalling_silently(tmp_path: Path, holder: object) -> None:
+def test_a_waiting_guard_says_so_rather_than_stalling_silently(tmp_path: Path, holder: _Holder) -> None:
     """An invisible multi-minute wait and a hang are indistinguishable to a person."""
     lock = tmp_path / "t.lock"
-    holder(lock, mode="shared")  # type: ignore[operator]
+    holder(lock, mode="shared")
 
     result = _guard(lock, "--exclusive", "--timeout", "2", "--on-timeout", "skip")
 
@@ -462,7 +469,7 @@ def _fake_tool_env(root: Path) -> Path:
 
 @pytest.mark.os_posix
 @pytest.mark.skipif(sys.platform == "win32", reason="drives GNU make through a POSIX shell")
-def test_the_generated_recipe_really_defers_to_a_running_bmk(tmp_path: Path, holder: object) -> None:
+def test_the_generated_recipe_really_defers_to_a_running_bmk(tmp_path: Path, holder: _Holder) -> None:
     """Run the SHIPPED `_ensure_bmk` against a stub `uv` and see whether it mutates."""
     if shutil.which("make") is None:
         pytest.skip("make is not installed")
@@ -503,6 +510,6 @@ def test_the_generated_recipe_really_defers_to_a_running_bmk(tmp_path: Path, hol
     assert mutations.exists(), "the uncontended upgrade never ran, so this test proves nothing"
     mutations.unlink()
 
-    holder(bmk_toollock.lock_path(tools), mode="shared")  # type: ignore[operator]
+    holder(bmk_toollock.lock_path(tools), mode="shared")
     make()
     assert not mutations.exists(), "the upgrade rebuilt the environment while a bmk was using it"

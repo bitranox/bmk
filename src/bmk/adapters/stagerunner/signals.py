@@ -14,11 +14,17 @@ from __future__ import annotations
 import contextlib
 import signal
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Callable, Generator
+    from types import FrameType
+    from typing import TypeAlias
+
+    #: What ``signal.getsignal`` returns and ``signal.signal`` accepts, so a saved handler can be
+    #: put back exactly as it was found.
+    _SavedHandler: TypeAlias = Callable[[int, FrameType | None], Any] | int | signal.Handlers | None
 
 _LIVE: set[subprocess.Popen[str]] = set()
 _LOCK = threading.Lock()
@@ -60,7 +66,7 @@ def terminate_all() -> None:
 def _install_one(
     sig: signal.Signals,
     handler: Callable[[int, object], None],
-    previous: dict[signal.Signals, object],
+    previous: dict[signal.Signals, _SavedHandler],
 ) -> None:
     try:
         previous[sig] = signal.getsignal(sig)
@@ -83,7 +89,7 @@ def install_signal_handlers() -> Generator[None]:
         terminate_all()
         raise SystemExit(128 + signum)
 
-    previous: dict[signal.Signals, object] = {}
+    previous: dict[signal.Signals, _SavedHandler] = {}
     for sig in _HANDLED_SIGNALS:
         _install_one(sig, handler, previous)
     try:
@@ -91,4 +97,4 @@ def install_signal_handlers() -> Generator[None]:
     finally:
         for sig, prev in previous.items():
             with contextlib.suppress(ValueError, OSError, TypeError):
-                signal.signal(sig, prev)  # type: ignore[arg-type]
+                signal.signal(sig, prev)

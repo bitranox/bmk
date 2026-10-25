@@ -94,14 +94,19 @@ __all__ = [
     "fetch_latest_version_within",
     "fetch_pypi_data",
     "find_packages_needing_install",
+    "get_status_icon",
     "installs_on",
+    "normalize_name",
     "one_fetch_per_package",
     "parse_version_constraint",
+    "parse_version_tuple",
+    "print_install_report",
     "print_report",
     "read_installed_versions",
     "run_pip_install",
     "sync_installed_packages",
     "update_dependencies",
+    "version_gte",
 ]
 
 
@@ -189,7 +194,7 @@ class DependencyInfo:
         return self.latest_version or ""
 
 
-def _normalize_name(name: str) -> str:
+def normalize_name(name: str) -> str:
     """Normalize package name for comparison (PEP 503)."""
     return _RE_NAME_SEPARATOR.sub("-", name).lower()
 
@@ -301,7 +306,7 @@ def fetch_pypi_data(package_name: str, version: str | None = None) -> PypiDocume
     A failed download is remembered as well, so the dependency reports one error rather than
     a mix of answers from different requests.
     """
-    path = _normalize_name(package_name) if version is None else f"{_normalize_name(package_name)}/{version}"
+    path = normalize_name(package_name) if version is None else f"{normalize_name(package_name)}/{version}"
     documents = _PYPI_DOCUMENTS.get()
     if documents is not None and path in documents:
         return documents[path]
@@ -406,7 +411,7 @@ def _judge_against_ceiling(name: str, *, min_version: str, ceiling: SpecifierSet
     raised past them is a requirement nothing satisfies.
     """
     in_range = fetch_latest_version_within(name, ceiling)
-    if in_range is None or _version_gte(min_version, in_range):
+    if in_range is None or version_gte(min_version, in_range):
         return _CeilingVerdict(status=DependencyStatus.PINNED, proposed=latest, note=f"pinned {ceiling}")
     return _CeilingVerdict(
         status=DependencyStatus.OUTDATED, proposed=in_range, note=f"max {ceiling}, absolute: {latest}"
@@ -421,7 +426,7 @@ def _version_or_none(text: str) -> Version | None:
         return None
 
 
-def _parse_version_tuple(v: str) -> tuple[int, ...]:
+def parse_version_tuple(v: str) -> tuple[int, ...]:
     """The leading release digits of ``v``: the order of last resort for a string that is not PEP 440."""
     match = _RE_VERSION_NUMERIC.match(v)
     if not match:
@@ -430,7 +435,7 @@ def _parse_version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(p) for p in numeric.split(".") if p.isdigit())
 
 
-def _version_gte(version_a: str, version_b: str) -> bool:
+def version_gte(version_a: str, version_b: str) -> bool:
     """Whether ``version_a >= version_b`` in PEP 440 order.
 
     PEP 440 is what an installer orders by, so a post, pre or dev part and an epoch all count. The
@@ -439,7 +444,7 @@ def _version_gte(version_a: str, version_b: str) -> bool:
     a, b = _version_or_none(version_a), _version_or_none(version_b)
     if a is not None and b is not None:
         return a >= b
-    a_parts, b_parts = _parse_version_tuple(version_a), _parse_version_tuple(version_b)
+    a_parts, b_parts = parse_version_tuple(version_a), parse_version_tuple(version_b)
     width = max(len(a_parts), len(b_parts))
     return a_parts + (0,) * (width - len(a_parts)) >= b_parts + (0,) * (width - len(b_parts))
 
@@ -455,7 +460,7 @@ def compare_versions(current: str, latest: str) -> DependencyStatus:
     """
     if not current or not latest:
         return DependencyStatus.UNKNOWN
-    return DependencyStatus.UP_TO_DATE if _version_gte(current, latest) else DependencyStatus.OUTDATED
+    return DependencyStatus.UP_TO_DATE if version_gte(current, latest) else DependencyStatus.OUTDATED
 
 
 def extract_dependencies_from_list(
@@ -989,7 +994,7 @@ class _LockJudge:
     def locks(
         self, name: str, version: str, seen: frozenset[_ReleaseKey], *, extras: frozenset[str] = frozenset()
     ) -> bool:
-        key = (_normalize_name(name), version, extras)
+        key = (normalize_name(name), version, extras)
         if key in seen:
             return True  # a cycle among own packages adds no requirement of its own
         if key not in self._judged:
@@ -1082,8 +1087,8 @@ def _marker_holds(text: str, pythons: tuple[str, ...], extras: tuple[str, ...], 
     wrong yes costs a wasted pin, False where it would pick too old a Python.
     """
     literals = _literals(text)
-    named = {_normalize_name(e) for e in literals.get("extra", set())}
-    requested = [e for e in extras if _normalize_name(e) in named]
+    named = {normalize_name(e) for e in literals.get("extra", set())}
+    requested = [e for e in extras if normalize_name(e) in named]
     axes: list[list[dict[str, str]]] = [[{"extra": e} for e in ("", *requested)]]
     if literals.keys() & _PYTHON_VARIABLES:
         axes.append([{"python_version": v.rsplit(".", 1)[0], "python_full_version": v} for v in pythons])
@@ -1335,7 +1340,7 @@ def _hold_suggestion(
     proposed = dep.proposed
     if dep.status is not DependencyStatus.OUTDATED or installable == proposed:
         return dep
-    if _version_gte(dep.current_min, installable):
+    if version_gte(dep.current_min, installable):
         if held_back is not None:
             return replace(dep, status=DependencyStatus.UP_TO_DATE, latest_version=held_back, notes=(limit,))
         reason = (
@@ -1431,7 +1436,7 @@ def _render_source_block(source: str, source_deps: list[DependencyInfo], *, verb
     latest_width = max(len(d.latest_display) for d in display_deps)
 
     for dep in sorted(display_deps, key=lambda d: d.name.lower()):
-        status_icon = _get_status_icon(dep.status)
+        status_icon = get_status_icon(dep.status)
         constraint_display = dep.constraint if dep.constraint else "(any)"
         print(
             f"  {status_icon} {dep.name:<{name_width}}"
@@ -1484,7 +1489,7 @@ def _check_fails(deps: list[DependencyInfo]) -> bool:
     return any(d.status == DependencyStatus.OUTDATED or d.blocks_lock for d in deps)
 
 
-def _get_status_icon(status: DependencyStatus) -> str:
+def get_status_icon(status: DependencyStatus) -> str:
     """Get a status icon character (ASCII-safe for Windows compatibility)."""
     icons = {
         DependencyStatus.UP_TO_DATE: "[ok]",
@@ -1637,7 +1642,7 @@ def read_installed_versions(python: str) -> dict[str, str]:
             package = _UvPipListEntry.model_validate(entry)
         except ValidationError:
             continue
-        versions[_normalize_name(package.name)] = package.version
+        versions[normalize_name(package.name)] = package.version
     return versions
 
 
@@ -1707,7 +1712,7 @@ def find_packages_needing_install(
         if not dep.current_min:
             continue
 
-        installed = installed_versions.get(_normalize_name(dep.name))
+        installed = installed_versions.get(normalize_name(dep.name))
         name_with_extras = f"{dep.name}{_extras_of(dep.original_spec)}"
         marker = _marker_of(dep.original_spec)
 
@@ -1717,7 +1722,7 @@ def find_packages_needing_install(
     return needs_install
 
 
-def _print_install_report(needs_install: list[PendingInstall], *, dry_run: bool) -> None:
+def print_install_report(needs_install: list[PendingInstall], *, dry_run: bool) -> None:
     """Print report of packages needing installation."""
     print(f"\n{'[DRY RUN] ' if dry_run else ''}Packages needing installation/update:\n")
 
@@ -2307,7 +2312,7 @@ def sync_installed_packages(
         return SyncOutcome(pending=0, exit_code=0)
 
     if not quiet:
-        _print_install_report(needs_install, dry_run=dry_run)
+        print_install_report(needs_install, dry_run=dry_run)
 
     if dry_run:
         if not quiet:

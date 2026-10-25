@@ -36,7 +36,7 @@ def _write(project: Path, body: str) -> None:
 
 def _exclude(project: Path) -> list[str]:
     doc = tomlkit.parse((project / "pyproject.toml").read_text(encoding="utf-8"))
-    return list(doc["tool"]["pyright"]["exclude"])  # type: ignore[index]
+    return list(doc["tool"]["pyright"]["exclude"])
 
 
 @pytest.fixture
@@ -109,7 +109,7 @@ def test_no_exclude_key_is_left_alone(project: Path) -> None:
     ensure_venv_typecheck_excluded(project, project / ".venv")
 
     doc = tomlkit.parse((project / "pyproject.toml").read_text(encoding="utf-8"))
-    assert "exclude" not in doc["tool"]["pyright"]  # type: ignore[operator]
+    assert "exclude" not in doc["tool"]["pyright"]
 
 
 @pytest.mark.os_agnostic

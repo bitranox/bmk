@@ -34,7 +34,7 @@ from bmk.adapters.stagerunner.venv import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from uv_stub import StubUv
@@ -50,7 +50,7 @@ def _project(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def lock_holder() -> Iterator[object]:
+def lock_holder() -> Iterator[Callable[[Path], None]]:
     """Hold a bmk venv lock from a genuinely separate process.
 
     A separate process, not a thread: the guarantee under test is cross-PROCESS, and a
@@ -108,7 +108,7 @@ def _venv_on_an_older_patch(venv: Path) -> Path:
 def test_a_sync_refuses_loudly_rather_than_running_under_another_bmk(
     tmp_path: Path,
     stub_uv: StubUv,
-    lock_holder: object,
+    lock_holder: Callable[[Path], None],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -116,7 +116,7 @@ def test_a_sync_refuses_loudly_rather_than_running_under_another_bmk(
     project = _project(tmp_path)
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
-    lock_holder(sync_lock_path(venv))  # type: ignore[operator]
+    lock_holder(sync_lock_path(venv))
 
     result = ensure_project_venv_at(project, venv, None, quiet=False)
 
@@ -130,7 +130,7 @@ def test_a_sync_refuses_loudly_rather_than_running_under_another_bmk(
 def test_a_timed_out_uv_lock_reports_no_exit_code_and_no_reason_because_uv_never_ran(
     tmp_path: Path,
     stub_uv: StubUv,
-    lock_holder: object,
+    lock_holder: Callable[[Path], None],
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
@@ -138,7 +138,7 @@ def test_a_timed_out_uv_lock_reports_no_exit_code_and_no_reason_because_uv_never
     project = _project(tmp_path)
     venv = project / ".venv"
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
-    lock_holder(uv_lock_guard_path(project))  # type: ignore[operator]
+    lock_holder(uv_lock_guard_path(project))
 
     assert ensure_project_venv_at(project, venv, None, quiet=True) == venv, "the manifest fallback still provisions"
 
@@ -153,14 +153,14 @@ def test_a_timed_out_uv_lock_reports_no_exit_code_and_no_reason_because_uv_never
 def test_the_lock_contention_notice_reaches_the_stream_it_is_given(
     tmp_path: Path,
     stub_uv: StubUv,
-    lock_holder: object,
+    lock_holder: Callable[[Path], None],
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The deps_update stage passes its sink: in JSON mode a line on stderr goes past its report."""
     project = _project(tmp_path)
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
-    lock_holder(uv_lock_guard_path(project))  # type: ignore[operator]
+    lock_holder(uv_lock_guard_path(project))
     out = io.StringIO()
 
     assert not lock_project_reporting(project, quiet=True, upgrade=True, stream=out)
@@ -190,7 +190,7 @@ def test_a_sync_proceeds_when_nobody_holds_the_lock(
 
 @pytest.mark.os_posix
 def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
-    tmp_path: Path, stub_uv: StubUv, lock_holder: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, stub_uv: StubUv, lock_holder: Callable[[Path], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An interpreter change ``rmtree``s the whole venv - the widest window there is.
 
@@ -203,7 +203,7 @@ def test_the_venv_rebuild_is_guarded_too_not_just_the_install(
     monkeypatch.setenv("BMK_VENV_LOCK_TIMEOUT", _SHORT_WAIT)
     marker = _venv_on_an_older_patch(venv)
     stub_uv.install(found_version=_UV_BUILDS_ON_3_12)
-    lock_holder(sync_lock_path(venv))  # type: ignore[operator]
+    lock_holder(sync_lock_path(venv))
 
     ensure_project_venv_at(project, venv, "3.12", quiet=True, install_python=False)
 
@@ -299,14 +299,14 @@ def _real_venv_that_records_each_start(tmp_path: Path) -> tuple[Path, Path, Path
 @pytest.mark.os_agnostic
 def test_without_uv_a_held_lock_still_refuses_before_touching_the_project(
     tmp_path: Path,
-    lock_holder: object,
+    lock_holder: Callable[[Path], None],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Cross-platform: under another process's lock, provisioning edits nothing and says why."""
     _without_uv(tmp_path, monkeypatch)
     project, venv = _project_with_an_existing_venv(tmp_path)
-    lock_holder(sync_lock_path(venv))  # type: ignore[operator]
+    lock_holder(sync_lock_path(venv))
 
     result = ensure_project_venv_at(project, venv, None, quiet=False)
 
@@ -336,7 +336,7 @@ def test_without_uv_a_free_lock_lets_provisioning_edit_the_project(
 
 @pytest.mark.os_agnostic
 def test_without_uv_a_held_lock_still_guards_the_rebuild_check(
-    tmp_path: Path, lock_holder: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, lock_holder: Callable[[Path], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cross-platform: the rebuild check, which can ``rmtree`` the venv, waits for the lock too.
 
@@ -347,7 +347,7 @@ def test_without_uv_a_held_lock_still_guards_the_rebuild_check(
     """
     _without_uv(tmp_path, monkeypatch)
     project, venv, record = _real_venv_that_records_each_start(tmp_path)
-    lock_holder(sync_lock_path(venv))  # type: ignore[operator]
+    lock_holder(sync_lock_path(venv))
 
     ensure_project_venv_at(project, venv, "3.12", quiet=True, install_python=False)
 

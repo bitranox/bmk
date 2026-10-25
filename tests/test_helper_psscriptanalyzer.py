@@ -475,9 +475,9 @@ def test_main_returns_nonzero_when_lint_fails(tmp_path: Path, capsys: pytest.Cap
 # ---------------------------------------------------------------------------
 
 
-def _pwsh_command(mock_run: object) -> str:
+def _pwsh_command(mock_run: MagicMock) -> str:
     """The -Command string handed to pwsh by the last subprocess.run call."""
-    return mock_run.call_args[0][0][3]  # type: ignore[attr-defined]
+    return str(mock_run.call_args[0][0][3])
 
 
 @pytest.mark.os_agnostic

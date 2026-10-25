@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol
 
 from lib_layered_config import (
     DEFAULT_MAX_PROFILE_LENGTH,
@@ -179,12 +179,24 @@ def _cache_clear() -> None:
     _get_config_impl.cache_clear()
 
 
-# Attach cache_clear method to satisfy ConfigLoaderProtocol.
-# Required because lru_cache's cache_clear isn't visible to static type checkers
-# when the decorated function is later cast to a Protocol type. The type: ignore
-# is necessary since we're dynamically adding an attribute to a function object.
-_get_config.cache_clear = _cache_clear  # type: ignore[attr-defined]
-get_config: ConfigLoaderProtocol = cast("ConfigLoaderProtocol", _get_config)
+class _CachedConfigLoader:
+    """``get_config`` as an object, so ``cache_clear`` is a member the type checker can see.
+
+    A plain function cannot declare an extra attribute: attaching ``cache_clear`` to one needed a
+    suppression, and casting the function to :class:`ConfigLoaderProtocol` hid the gap from every
+    caller. A class states both members outright.
+    """
+
+    def __call__(
+        self, *, profile: str | None = None, start_dir: str | None = None, dotenv_path: str | None = None
+    ) -> Config:
+        return _get_config(profile=profile, start_dir=start_dir, dotenv_path=dotenv_path)
+
+    def cache_clear(self) -> None:
+        _cache_clear()
+
+
+get_config: ConfigLoaderProtocol = _CachedConfigLoader()
 
 
 __all__ = [

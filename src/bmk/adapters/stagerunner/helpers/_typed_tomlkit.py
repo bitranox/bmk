@@ -7,8 +7,7 @@ reports ``reportUnknownMemberType`` at every call site.
 
 Wrapping the two functions bmk needs behind explicit, fully-known signatures
 keeps the rest of the code strict-clean without disabling the rule anywhere. This
-module is the single boundary that touches tomlkit's untyped surface, so the only
-``# pyright: ignore`` for this gap lives here - mirroring
+module is the single boundary that touches tomlkit's loosely typed surface - mirroring
 ``adapters/cli/typed_click.py``, which does the same for rich_click.
 
 Why the return types are ``...[str, Any]`` and not something tighter: a TOML
@@ -41,12 +40,12 @@ def parse(text: str) -> MutableMapping[str, Any]:
     Raises:
         TOMLKitError: If ``text`` is not valid TOML.
     """
-    return tomlkit.parse(text)  # pyright: ignore[reportUnknownMemberType]
+    return tomlkit.parse(text)
 
 
 def dumps(document: Mapping[str, Any]) -> str:
     """Serialize a parsed document back to TOML, byte-identical but for edits."""
-    return tomlkit.dumps(document)  # pyright: ignore[reportUnknownMemberType]
+    return tomlkit.dumps(document)
 
 
 def table(*, super_table: bool = False) -> MutableMapping[str, Any]:

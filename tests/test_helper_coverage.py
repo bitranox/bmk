@@ -34,7 +34,7 @@ from bmk.adapters.stagerunner.helpers._coverage import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -1445,10 +1445,12 @@ def test_upload_coverage_report_injects_token_into_env(tmp_path: Path, monkeypat
 
     captured_env: dict[str, str] = {}
 
-    def _side_effect(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _side_effect(
+        cmd: list[str], *, env: Mapping[str, str] | None = None, **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "git":
             return _make_completed(128)
-        captured_env.update(kwargs.get("env", {}))  # type: ignore[arg-type]
+        captured_env.update(env or {})
         return _make_completed(0)
 
     with (
@@ -1669,10 +1671,12 @@ def test_upload_coverage_report_without_explicit_token(tmp_path: Path, monkeypat
 
     captured_env: dict[str, str] = {}
 
-    def _side_effect(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _side_effect(
+        cmd: list[str], *, env: Mapping[str, str] | None = None, **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "git":
             return _make_completed(128)
-        captured_env.update(kwargs.get("env", {}))  # type: ignore[arg-type]
+        captured_env.update(env or {})
         return _make_completed(0)
 
     with (
