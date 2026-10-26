@@ -206,12 +206,14 @@ dev = ["pytest", "pytest-cov", "pytest-xdist"]
   another, while the rest of the suite stays parallel. Use one group per test database, fixed
   port or shared file. A conftest can apply the mark to every test that uses such a fixture.
 - **The floor is checked once, by the report.** The parallel run passes
-  `--cov-fail-under=0` so pytest-cov does not enforce `fail_under` itself; the coverage report
-  step that follows does, and prints the missing lines as in a serial run.
+  `--cov-fail-under=0` so pytest-cov does not enforce `fail_under` itself; the `coverage report`
+  step that follows does, exactly as after a serial run. In JSON mode a floor failure shows only
+  its exit line; `--human` prints the report table with the missing lines.
 - **pytest decides, not an import check.** bmk runs pytest's own configuration in the
-  project's venv and directory to see which plugins load. With plugin autoload off
-  (`PYTEST_DISABLE_PLUGIN_AUTOLOAD`) or `-p no:xdist` in `addopts`, xdist is installed but not
-  loaded, so the suite runs serially and no hint is printed. A `-n` the project already passes
+  project's venv and directory to see which plugins it LOADS. A plugin that is installed but not
+  loaded (`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, `-p no:xdist` in `addopts`) gives a serial run with no
+  hint; with autoload off, `-p xdist -p pytest_cov` in `addopts` loads them again. The hint is
+  printed only for a package that is not installed. A `-n` the project already passes
   in `addopts` is left to the project (bmk adds neither `-n` nor `--dist`), and a `--dist` mode
   it chose is kept (bmk adds only `-n`).
 - **Turning it off.** `workers = 1` under `[tool.scripts.test]` stops bmk adding `-n`, so a

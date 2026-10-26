@@ -17,8 +17,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   keep running one at a time when they carry the same `@pytest.mark.xdist_group("<name>")`.
   bmk asks pytest itself whether the plugins load, so a run with plugin autoload off or
   `-p no:xdist` in `addopts` stays serial without a hint, and a `-n` or `--dist` the project
-  already passes in `addopts` is left alone. The floor is still checked by the coverage report
-  step, which prints the missing lines, never by pytest-cov.
+  already passes in `addopts` is left alone. The floor is still checked once, by the
+  `coverage report` step, never by pytest-cov.
 - `[tool.scripts.test] workers` (`"auto"` by default, or a count; `1` is serial) and the
   `BMK_TEST_WORKERS` override for one run. A bad value is refused with one line and exit 2.
 - `make test-all` passes the same setting to each version cell, split between the cells running
@@ -34,7 +34,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - shellcheck (with shfmt and bashate) joins the other read-only checks in the parallel batch of
   `make test` instead of running alone after it.
 - bmk's own dependencies include `pytest-xdist`, so its suite runs in parallel.
-- bmk requires `lib_log_rich>=8.0.0` and `setuptools>=84.2.0`; the setuptools release is now older
+- bmk requires `lib_log_rich>=8.0.1` and `setuptools>=84.2.0`; the setuptools release is now older
   than the cooldown, so its dated `[tool.uv]` pin is gone.
 
 ## [3.28.1] 2026-10-26 20:58:34
