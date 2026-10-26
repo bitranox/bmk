@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.28.0] 2026-10-26 17:59:59
+
 ### Added
 
 - `make test-all` tests free-threaded builds the way CI does. Each minor in
