@@ -98,6 +98,27 @@ error that shows only on one OS under one older Python is caught here too.
 Plain `make test` stays on the newest version only. With no classifier, `test-all` tests the
 default interpreter once and warns.
 
+**Free-threaded builds.** Each minor listed in `[tool.ci] free-threaded` gets a second
+`test-all` cell on its free-threaded build, right after the regular one: `free-threaded =
+["3.15"]` adds a `3.15t` cell with its own `.venv-3.15t`. The CI workflow adds the same `3.15t`
+job from the same key. Entries are refused before anything is installed, as CI refuses them:
+an entry must be an `"X.Y"` string (not `"3.15t"`), and that version must also be a declared
+`Programming Language :: Python :: X.Y` classifier. A free-threaded build cannot be a classifier
+of its own: `3.15t` is no trove classifier and hatchling refuses to build with an unknown one.
+PyPI's marker for it is the version-less `Programming Language :: Python :: Free Threading ::
+<level>`, and `test-all` warns when that classifier is missing.
+
+```toml
+[project]
+classifiers = [
+  "Programming Language :: Python :: 3.15",
+  "Programming Language :: Python :: Free Threading :: 2 - Beta",
+]
+
+[tool.ci]
+free-threaded = ["3.15"]
+```
+
 **What this costs, and when.** Before a command that touches the environment, bmk runs
 `uv python install <X.Y>` and `uv python upgrade <X.Y>`. Both are needed: `install` fetches a
 version you have just added to the classifiers, and `upgrade` is what moves an already-installed
@@ -156,6 +177,7 @@ narrows what bandit scans and what coverage measures, and still reports success.
 | `[tool.clean].patterns`                    | list   | 19 built-in globs | What `bmk clean` removes                                                                                                                                            |
 | `[tool.git].default-remote`                | string | `"origin"`        | Remote that `release` pushes to                                                                                                                                     |
 | `[tool.scripts.test-all].workers`          | int    | parallel          | Caps how many `test-all` version cells run at once. See "test-all: capping the matrix" below                                                                        |
+| `[tool.ci].free-threaded`                  | list   | `[]`              | Adds a free-threaded `X.Yt` cell to `make test-all` for each listed `"X.Y"`, as CI does. See "Free-threaded builds" above                                           |
 
 `ignore-vulns` and `skips` are **different vocabularies and neither tool reads the other's
 table**. `[tool.pip-audit].ignore-vulns` takes PYSEC / GHSA / CVE ids. `[tool.bandit].skips`

@@ -21,7 +21,9 @@ import rtoml
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 
 from bmk.adapters.stagerunner.helpers._toml_config import coerce_str_tuple, coerce_table
-from bmk.domain.enums import PyrightPlatform
+from bmk.domain.enums import PyrightPlatform, PythonVariant, RefusalKind
+from bmk.domain.errors import RefusalError
+from bmk.domain.python_target import PythonTarget
 
 # ---------------------------------------------------------------------------
 # Lenient coercions for the boundary models below
@@ -69,6 +71,17 @@ def _runner_platforms(v: Any) -> tuple[PyrightPlatform, ...]:
     """The platforms a ``[tool.ci].os`` runner list declares, once each, in first-seen order."""
     found = (_runner_platform(label) for label in _strings_only(v))
     return tuple(dict.fromkeys(platform for platform in found if platform is not None))
+
+
+def _entries_as_written(v: Any) -> tuple[object, ...] | None:
+    """A TOML array's entries unchanged, or None for a value that is not an array.
+
+    Unlike the readers above, ``[tool.ci] free-threaded`` is not degraded: the CI template refuses
+    a bad entry, so a bad entry must reach :func:`free_threaded_targets` to be refused here too.
+    """
+    if isinstance(v, (list, tuple)):
+        return tuple(cast("tuple[object, ...]", v))
+    return None
 
 
 def _named_platform(v: Any) -> PyrightPlatform | None:
@@ -141,11 +154,15 @@ class _PipAudit(BaseModel):
 
 
 class _Ci(BaseModel):
-    """``[tool.ci]`` - the CI runner OS list, read as the pyright platforms it covers."""
+    """``[tool.ci]`` - the CI runner OS list, read as the pyright platforms it covers, and the
+    minors CI also tests on their free-threaded build."""
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     os: Annotated[tuple[PyrightPlatform, ...], BeforeValidator(_runner_platforms)] = ()
+    free_threaded: Annotated[tuple[object, ...] | None, BeforeValidator(_entries_as_written)] = Field(
+        default=(), validation_alias="free-threaded"
+    )
 
 
 class _Tool(BaseModel):
@@ -275,4 +292,51 @@ def pyright_runs(project_dir: Path) -> tuple[tuple[str, ...], ...]:
     return (*main, *(("--project", arm) for arm in arms if (project_dir / arm).is_file()))
 
 
-__all__ = ["derive_package_name", "pip_audit_ignore_flags", "pyright_platforms", "pyright_runs"]
+def _free_threaded_entry(entry: object, declared: tuple[str, ...]) -> PythonTarget:
+    """The free-threaded target one ``[tool.ci] free-threaded`` entry names, refused as CI refuses it.
+
+    Raises:
+        RefusalError: ``entry`` is not an ``"X.Y"`` string, or ``X.Y`` is no declared classifier.
+    """
+    target = PythonTarget.from_request(entry) if isinstance(entry, str) else None
+    if target is None or target.variant is not PythonVariant.DEFAULT:
+        msg = f'[tool.ci] free-threaded: {entry!r} is not an "X.Y" version string'
+        raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT)
+    if target.minor not in declared:
+        msg = (
+            f"[tool.ci] free-threaded: {target.minor} is not declared as a "
+            f'"Programming Language :: Python :: {target.minor}" classifier'
+        )
+        raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT)
+    return PythonTarget(target.minor, PythonVariant.FREETHREADED)
+
+
+def free_threaded_targets(pyproject: Path, declared: tuple[str, ...]) -> tuple[PythonTarget, ...]:
+    """The free-threaded builds ``[tool.ci] free-threaded`` asks CI to test, once each.
+
+    The CI template (``default_cicd_public``) adds an ``X.Yt`` job for each entry and refuses any
+    entry that is not an ``"X.Y"`` string naming a declared ``Programming Language :: Python :: X.Y``
+    classifier. The same entries are refused here, so ``test-all`` and CI cannot disagree about
+    which cells exist. ``declared`` is the project's classifier minors.
+
+    Raises:
+        RefusalError: The value is not an array, or an entry is one the CI template refuses.
+
+    Example:
+        >>> free_threaded_targets(Path("does-not-exist/pyproject.toml"), ("3.15",))
+        ()
+    """
+    entries = _load(pyproject).tool.ci.free_threaded
+    if entries is None:
+        msg = '[tool.ci] free-threaded must be an array of "X.Y" version strings'
+        raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT)
+    return tuple(dict.fromkeys(_free_threaded_entry(entry, declared) for entry in entries))
+
+
+__all__ = [
+    "derive_package_name",
+    "free_threaded_targets",
+    "pip_audit_ignore_flags",
+    "pyright_platforms",
+    "pyright_runs",
+]

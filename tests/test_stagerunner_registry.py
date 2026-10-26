@@ -58,14 +58,14 @@ def test_test_all_and_clean_all_are_not_venv_pipelines() -> None:
 def test_clean_all_removes_venvs_and_artifacts_but_not_source(tmp_path: Path) -> None:
     """`clean-all` purges every .venv* (which plain `clean` deliberately keeps) plus caches."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
-    for name in (".venv", ".venv-3.10", ".venv-3.14", ".ruff_cache"):
+    for name in (".venv", ".venv-3.10", ".venv-3.14", ".venv-3.15t", ".ruff_cache"):
         (tmp_path / name).mkdir()
     (tmp_path / "keep.py").write_text("x = 1\n", encoding="utf-8")
 
     rc = PIPELINES["clean_all"][0].action(_ctx(tmp_path), CapturingSink())
 
     assert rc == 0
-    for name in (".venv", ".venv-3.10", ".venv-3.14", ".ruff_cache"):
+    for name in (".venv", ".venv-3.10", ".venv-3.14", ".venv-3.15t", ".ruff_cache"):
         assert not (tmp_path / name).exists(), f"clean-all must remove {name}"
     assert (tmp_path / "keep.py").exists(), "source is never touched"
 

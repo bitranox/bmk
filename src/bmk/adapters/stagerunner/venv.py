@@ -33,6 +33,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationEr
 from bmk.adapters.stagerunner.helpers import _typed_tomlkit
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
 from bmk.domain.enums import PythonImplementation, PythonVariant
+from bmk.domain.python_target import PythonTarget
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -174,6 +175,17 @@ class _UvPythonEntry(BaseModel):
         """The build ``uv python install X.Y`` installs; older uv lists no ``variant``, only the key."""
         return self.variant is PythonVariant.DEFAULT and "+freethreaded" not in self.key
 
+    def is_build(self, variant: PythonVariant) -> bool:
+        """Whether this is the ``variant`` build: the one ``uv python install`` installs for its request.
+
+        Older uv lists no ``variant`` field (it defaults to DEFAULT here) and names the free-threaded
+        build only in the key, ``cpython-3.15.0+freethreaded-<platform>``.
+        """
+        if variant is PythonVariant.DEFAULT:
+            return self.is_default_build
+        old_uv_key = self.variant is PythonVariant.DEFAULT and "+freethreaded-" in self.key
+        return variant is PythonVariant.FREETHREADED and (self.variant is variant or old_uv_key)
+
 
 def patch_uv_builds_on(minor: str, cwd: Path) -> str | None:
     """``X.Y.Z`` of the interpreter ``uv venv --python <minor>`` would build on, or None.
@@ -199,11 +211,16 @@ _FOUND_VERSION = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:(?:a|b|rc)[0-9]+)?"
 
 
 def release_of(found: str | None, minor: str) -> str | None:
-    """``X.Y.Z`` of a ``--show-version`` answer for ``minor``; None for no answer or one for another minor."""
+    """``X.Y.Z`` of a ``--show-version`` answer for ``minor``; None for no answer or one for another minor.
+
+    ``minor`` is the uv request, so ``3.15t`` compares as 3.15: uv prints the free-threaded build's
+    version without the ``t`` (``3.15.0``, measured on uv 0.13.0).
+    """
+    target = PythonTarget.from_request(minor)
     match = _FOUND_VERSION.fullmatch(found.strip()) if found else None
-    if match is None or f"{match[1]}.{match[2]}" != minor:
+    if target is None or match is None or f"{match[1]}.{match[2]}" != target.minor:
         return None
-    return f"{minor}.{match[3]}"
+    return f"{target.minor}.{match[3]}"
 
 
 def _uv_python_entries(listing: str | None) -> list[_UvPythonEntry] | None:
@@ -673,8 +690,9 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
     all means the minor is absent. Read-only and offline (~0.05s). If uv cannot answer, the
     answer is True: the old always-run behaviour, never a skipped install on a guess.
 
-    Only the ``default`` variant counts: ``uv python install X.Y`` installs that one, while uv
-    also lists a never-installed ``freethreaded`` download beside every 3.13+ minor.
+    Only the variant the request names counts: ``uv python install X.Y`` installs the ``default``
+    build, while uv also lists a never-installed ``freethreaded`` download beside every 3.13+ minor;
+    ``X.Yt`` installs that ``freethreaded`` build, and the default one is then not its work.
     ``--allow-python-downloads``: with ``python-downloads`` set to manual or never (env OR any uv
     config file) uv hides every download entry, and "nothing listed" would read as "current".
     """
@@ -685,18 +703,20 @@ def _minor_needs_install(minor: str, cwd: Path) -> bool:
 def listing_needs_install(listing: str | None, minor: str) -> bool:
     """Whether a ``uv python list --allow-python-downloads`` listing has work for ``minor``.
 
-    True when the default CPython build of ``minor`` is absent or a download of it is on offer
-    (an entry with no ``path``), and when there is no usable listing: no answer is not "current".
+    True when the CPython build ``minor`` requests (``X.Y`` the default one, ``X.Yt`` the
+    free-threaded one) is absent or a download of it is on offer (an entry with no ``path``), and
+    when there is no usable listing or request: no answer is not "current".
     """
     entries = _uv_python_entries(listing)
-    if entries is None:
+    target = PythonTarget.from_request(minor)
+    if entries is None or target is None:
         return True
     relevant = [
         entry
         for entry in entries
         if entry.implementation is PythonImplementation.CPYTHON
-        and entry.is_default_build
-        and f"{entry.version_parts.major}.{entry.version_parts.minor}" == minor
+        and entry.is_build(target.variant)
+        and f"{entry.version_parts.major}.{entry.version_parts.minor}" == target.minor
     ]
     return not relevant or any(entry.path is None for entry in relevant)
 
@@ -750,15 +770,24 @@ def discard_venv_on_wrong_python(venv: Path, minor: str | None, cwd: Path, *, qu
     Only fires on a real mismatch against a target uv actually reports; if uv cannot answer
     (offline, absent, unexpected output) the existing venv is left exactly as it was. The
     rebuild costs a full re-resolve, so it must never be triggered by a guess.
+
+    A free-threaded request (``3.15t``) also rebuilds a venv whose interpreter has the GIL: the
+    patch matches, but the cell would test the wrong build. A plain ``X.Y`` request does not check
+    the build, because uv may itself build it on a free-threaded interpreter that comes first on
+    PATH (see :func:`patch_uv_builds_on`), and demanding the GIL build would rebuild every run.
     """
     if not minor or not is_venv(venv):
         return
     target = patch_uv_builds_on(minor, cwd)
-    current = venv_version(venv)
-    if not target or not current or current == target:
+    current = probe_interpreter(venv)
+    if not target or current is None:
+        return
+    wanted = PythonTarget.from_request(minor)
+    wrong_build = wanted is not None and wanted.variant is PythonVariant.FREETHREADED and not current.gil_disabled
+    if current.version == target and not wrong_build:
         return
     if not quiet:
-        print(f"[venv] python {current} -> {target}: rebuilding {venv.name}")
+        print(f"[venv] python {current.version} -> {minor} ({target}): rebuilding {venv.name}")
     shutil.rmtree(venv, ignore_errors=True)
 
 

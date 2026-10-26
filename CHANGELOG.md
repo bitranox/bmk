@@ -6,6 +6,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Added
+
+- `make test-all` tests free-threaded builds the way CI does. Each minor in
+  `[tool.ci] free-threaded = ["3.15"]` gets a second cell on its free-threaded build (`3.15t`,
+  venv `.venv-3.15t`), right after the regular one. bmk used to ignore the key, so a project's
+  `test-all` ran 3.10 to 3.15 while its CI also ran 3.15t. An entry the CI template refuses is
+  refused here before anything is installed (exit 2): it must be an `"X.Y"` string, and that
+  version must be a declared `Programming Language :: Python :: X.Y` classifier. A missing
+  `Free Threading :: <level>` classifier draws a warning. Installing the free-threaded build, the
+  check that it is current, and the rebuild of a `.venv-3.15t` that holds the GIL build all go by
+  the build: a current 3.15t no longer reads as "needs install" on every run.
+
 ### Fixed
 
 - `make test` now reports an import block that a NEW file made unsorted, as CI does. The

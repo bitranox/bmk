@@ -31,7 +31,7 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     pytest_marker_args,
     resolve_workers,
 )
-from bmk.adapters.stagerunner.venv import venv_python
+from bmk.adapters.stagerunner.venv import probe_interpreter, venv_python
 from bmk.domain.enums import RefusalKind
 from bmk.domain.errors import RefusalError
 
@@ -590,3 +590,158 @@ def test_every_minor_is_prepared_once_before_any_cell_starts(tmp_path: Path) -> 
     assert main(project_dir=tmp_path, prepare_minors=prepare, run_cell=_Cells({})) == 0
     assert events[0] == "prepare:3.10,3.12,3.14"
     assert sorted(events[1:]) == ["cell:3.10", "cell:3.12", "cell:3.14"]
+
+
+# ---------------------------------------------------------------------------
+# Free-threaded cells: `[tool.ci] free-threaded = ["3.15"]` adds a `3.15t` cell, as in CI
+#
+# The CI template (default_cicd_public) adds an `X.Yt` job for each entry and refuses an entry
+# that is not an "X.Y" string or not a declared classifier. test-all reads the same key and
+# refuses the same entries, so the local matrix and the CI matrix cannot disagree.
+# ---------------------------------------------------------------------------
+
+_FREE_THREADING_CLASSIFIER = '  "Programming Language :: Python :: Free Threading :: 2 - Beta",\n'
+
+
+def _write_free_threaded_pyproject(
+    project: Path, minors: list[str], free_threaded: str, *, classifier: bool = True
+) -> None:
+    """``_write_pyproject`` plus ``[tool.ci] free-threaded = <free_threaded>`` (TOML, verbatim)."""
+    _write_pyproject(project, minors)
+    pyproject = project / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    if classifier:
+        text = text.replace("classifiers = [\n", "classifiers = [\n" + _FREE_THREADING_CLASSIFIER, 1)
+    pyproject.write_text(text + f"[tool.ci]\nfree-threaded = {free_threaded}\n", encoding="utf-8")
+
+
+class _RecordingPrepare:
+    """Records what ``main`` asked to prepare, so the free-threaded build is shown to be installed too."""
+
+    def __init__(self) -> None:
+        self.prepared: list[list[str]] = []
+
+    def __call__(self, _project_dir: Path, minors: list[str], *, quiet: bool = True) -> None:
+        _ = quiet
+        self.prepared.append(list(minors))
+
+
+@pytest.mark.os_agnostic
+def test_a_free_threaded_entry_adds_its_cell_right_after_the_regular_one(tmp_path: Path) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.13", "3.14", "3.15"], '["3.13"]')
+    cells = _FakeCells({})
+    prepare = _RecordingPrepare()
+
+    rc = main(project_dir=tmp_path, prepare_minors=prepare, run_cell=cells, env={})
+
+    assert rc == 0
+    assert prepare.prepared == [["3.13", "3.13t", "3.14", "3.15"]]
+    assert sorted(cells.seen) == ["3.13", "3.13t", "3.14", "3.15"]
+
+
+@pytest.mark.os_agnostic
+def test_the_report_names_the_free_threaded_cell(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.15"], '["3.15"]')
+
+    main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=_FakeCells({"3.15t": CellStatus.FAIL}), env={})
+
+    out = capsys.readouterr().out
+    assert "3.15t" in out
+    assert "FAIL" in out
+
+
+@pytest.mark.os_agnostic
+def test_a_failing_free_threaded_cell_fails_the_run(tmp_path: Path) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.14", "3.15"], '["3.15"]')
+
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=_FakeCells({"3.15t": CellStatus.FAIL}), env={})
+
+    assert rc == 1
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("free_threaded", "named"),
+    [
+        ('["3.15t"]', "'3.15t'"),
+        ("[3]", "3"),
+        ('["3"]', "'3'"),
+        ('["3.16"]', "3.16"),
+        ('"3.15"', "array"),
+    ],
+    ids=["t-suffix", "not-a-string", "no-minor", "not-declared", "not-an-array"],
+)
+def test_a_free_threaded_entry_ci_refuses_is_refused_before_anything_is_installed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], free_threaded: str, named: str
+) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.14", "3.15"], free_threaded)
+    cells = _FakeCells({})
+    prepare = _RecordingPrepare()
+
+    rc = main(project_dir=tmp_path, prepare_minors=prepare, run_cell=cells, env={})
+
+    assert rc == 2
+    assert prepare.prepared == []
+    assert cells.seen == []
+    err = capsys.readouterr().err
+    assert "[tool.ci] free-threaded" in err
+    assert named in err
+
+
+@pytest.mark.os_agnostic
+def test_a_free_threaded_entry_without_any_classifier_is_refused(tmp_path: Path) -> None:
+    """CI refuses it (no declared version to match), so test-all must not fall back to one default cell."""
+    _write_free_threaded_pyproject(tmp_path, [], '["3.15"]', classifier=False)
+
+    assert main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=_FakeCells({}), env={}) == 2
+
+
+@pytest.mark.os_agnostic
+def test_free_threaded_without_its_trove_classifier_warns(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.15"], '["3.15"]', classifier=False)
+
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=_FakeCells({}), env={})
+
+    assert rc == 0
+    assert "Free Threading" in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_free_threaded_with_its_trove_classifier_does_not_warn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.15"], '["3.15"]')
+
+    main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=_FakeCells({}), env={})
+
+    assert "Free Threading" not in capsys.readouterr().err
+
+
+@pytest.mark.os_agnostic
+def test_an_empty_free_threaded_list_changes_nothing(tmp_path: Path) -> None:
+    _write_free_threaded_pyproject(tmp_path, ["3.14", "3.15"], "[]", classifier=False)
+    cells = _FakeCells({})
+
+    assert main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells, env={}) == 0
+    assert sorted(cells.seen) == ["3.14", "3.15"]
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_the_free_threaded_cell_runs_on_the_free_threaded_build(tmp_path: Path) -> None:
+    """The real matrix: `.venv-3.15t` is provisioned on the GIL-free build, `.venv-3.15` on the GIL one."""
+    _make_project(tmp_path, ["3.15"], "def test_ok() -> None:\n    assert True\n")
+    pyproject = tmp_path / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8").replace(
+        "classifiers = [\n", "classifiers = [\n" + _FREE_THREADING_CLASSIFIER, 1
+    )
+    pyproject.write_text(text + '[tool.ci]\nfree-threaded = ["3.15"]\n', encoding="utf-8")
+
+    rc = main(project_dir=tmp_path, quiet=True)
+
+    assert rc == 0
+    regular = probe_interpreter(tmp_path / ".venv-3.15")
+    free_threaded = probe_interpreter(tmp_path / ".venv-3.15t")
+    assert regular is not None and not regular.gil_disabled
+    assert free_threaded is not None and free_threaded.gil_disabled

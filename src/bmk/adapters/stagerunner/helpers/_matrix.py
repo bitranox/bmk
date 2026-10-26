@@ -14,6 +14,10 @@ uv auto-follows patch upgrades), installs the project into it, then runs
 ``VIRTUAL_ENV``, so the pin is what makes per-version type-checking real), once per OS
 ``[tool.ci].os`` declares (``--pythonplatform``), as ``make test``'s pyright stage does. ruff/bandit/
 import-linter are version-independent and pip-audit is env-based, so they are not repeated.
+
+Each minor in ``[tool.ci] free-threaded`` gets a second cell on its free-threaded build
+(``3.15t``, venv ``.venv-3.15t``), right after the regular one, as the CI matrix adds one. An entry
+CI refuses is refused here too, before anything is installed.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
-from bmk.adapters.stagerunner.project import pyright_runs
+from bmk.adapters.stagerunner.project import free_threaded_targets, pyright_runs
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
     ensure_minors_installed,
@@ -52,6 +56,7 @@ __all__ = [
     "cell_env",
     "failure_excerpt",
     "main",
+    "matrix_cells",
     "pytest_marker_args",
     "resolve_workers",
     "run_version_cell",
@@ -227,6 +232,39 @@ def _exit_code(results: list[CellResult]) -> int:
     return 0 if all(r.status is CellStatus.PASSED for r in results) else 1
 
 
+_FREE_THREADING_CLASSIFIER = "Programming Language :: Python :: Free Threading"
+
+
+def _warn_without_free_threading_classifier(project_dir: Path) -> None:
+    """Say so when free-threaded cells run but no classifier tells PyPI users the package supports it.
+
+    The CI template warns about the same thing; it is advice, so the run goes on.
+    """
+    try:
+        classifiers = load_pyproject_config(project_dir / "pyproject.toml").project.classifiers
+    except Exception:  # an unreadable manifest degrades, never aborts - see all_python_minors
+        return
+    if not any(c.startswith(_FREE_THREADING_CLASSIFIER) for c in classifiers):
+        print(
+            f'WARNING: [tool.ci] free-threaded is set, but no "{_FREE_THREADING_CLASSIFIER} :: <level>"\n'
+            "         classifier tells PyPI users the package supports it.",
+            file=sys.stderr,
+        )
+
+
+def matrix_cells(project_dir: Path, minors: list[str]) -> list[str]:
+    """The uv request of every cell: each declared minor, its free-threaded build right after it.
+
+    Raises:
+        RefusalError: ``[tool.ci] free-threaded`` holds an entry the CI template refuses.
+    """
+    free_threaded = free_threaded_targets(project_dir / "pyproject.toml", tuple(minors))
+    if free_threaded:
+        _warn_without_free_threading_classifier(project_dir)
+    extra = {target.minor: target.request for target in free_threaded}
+    return [request for minor in minors for request in (minor, extra.get(minor)) if request is not None]
+
+
 def _workers_from_pyproject(project_dir: Path) -> int | None:
     """``[tool.scripts.test-all].workers``, or ``None`` if unset, unreadable or not an integer.
 
@@ -323,26 +361,28 @@ def main(
     cell: doing it inside the cells let one cell's install rewrite uv's minor aliases while
     another cell synced its venv, which then had no interpreter (bmk OPEN-WORK [102]).
 
-    A refused worker count returns 2 with one stderr line, before any Python is installed:
-    raising past this helper would leave the stage engine nothing to report but a crash.
+    A refused worker count or ``[tool.ci] free-threaded`` entry returns 2 with one stderr line,
+    before any Python is installed: raising past this helper would leave the stage engine nothing to
+    report but a crash. The free-threaded entries are checked first, even with no classifier
+    declared: CI refuses them then too, so a single default cell would hide the refusal.
     """
     minors = all_python_minors(project_dir)
-    if not minors:
-        return _run_default_cell(project_dir, quiet=quiet)
-
     try:
-        workers = resolve_workers(project_dir, minors, env=env)
+        cells = matrix_cells(project_dir, minors)
+        if not cells:
+            return _run_default_cell(project_dir, quiet=quiet)
+        workers = resolve_workers(project_dir, cells, env=env)
     except RefusalError as exc:
         print(f"[test-all] {exc}", file=sys.stderr)
         return 2
 
-    prepare_minors(project_dir, minors, quiet=quiet)
+    prepare_minors(project_dir, cells, quiet=quiet)
 
-    def run(minor: str) -> CellResult:
-        return run_cell(project_dir, minor, quiet=quiet)
+    def run(request: str) -> CellResult:
+        return run_cell(project_dir, request, quiet=quiet)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(run, minors))
+        results = list(pool.map(run, cells))
 
     _print_report(results)
     return _exit_code(results)

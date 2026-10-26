@@ -544,3 +544,128 @@ def test_the_listing_asks_for_downloads_whatever_python_downloads_says(
 
     listings = [cmd for cmd in stub_uv.commands() if cmd[:3] == ["uv", "python", "list"]]
     assert listings == [_LIST_OFFERED]
+
+
+# ---------------------------------------------------------------------------
+# Free-threaded targets (`3.15t`): test-all's cell for a `[tool.ci] free-threaded` minor
+#
+# Every check below compares against a uv request. `3.15t` names the free-threaded BUILD of 3.15,
+# so it must match the free-threaded listing entries and a venv whose interpreter has the GIL
+# disabled - never the default build, and never be read as "no such minor".
+# ---------------------------------------------------------------------------
+
+
+def _freethreaded(version: str, *, installed: bool) -> dict[str, object]:
+    """A free-threaded listing entry in the shape uv 0.13.0 prints (``variant`` plus the ``key``)."""
+    return {
+        **_entry(version, installed=installed),
+        "variant": "freethreaded",
+        "key": f"cpython-{version}+freethreaded-linux-x86_64-gnu",
+    }
+
+
+def _default(version: str, *, installed: bool) -> dict[str, object]:
+    return {**_entry(version, installed=installed), "variant": "default", "key": f"cpython-{version}-linux-x86_64-gnu"}
+
+
+@pytest.mark.os_agnostic
+def test_a_current_free_threaded_build_needs_no_install() -> None:
+    """Measured listing shape: both builds of 3.15.0 installed, nothing newer on offer."""
+    listing = json.dumps([_default("3.15.0", installed=True), _freethreaded("3.15.0", installed=True)])
+
+    assert venv_mod.listing_needs_install(listing, "3.15t") is False
+
+
+@pytest.mark.os_agnostic
+def test_a_free_threaded_build_only_on_offer_needs_an_install() -> None:
+    """The default build is installed, the free-threaded one is only a download."""
+    listing = json.dumps([_default("3.15.0", installed=True), _freethreaded("3.15.0", installed=False)])
+
+    assert venv_mod.listing_needs_install(listing, "3.15t") is True
+
+
+@pytest.mark.os_agnostic
+def test_a_newer_default_build_does_not_make_a_current_free_threaded_build_stale() -> None:
+    listing = json.dumps(
+        [
+            _default("3.15.1", installed=False),
+            _default("3.15.0", installed=True),
+            _freethreaded("3.15.0", installed=True),
+        ]
+    )
+
+    assert venv_mod.listing_needs_install(listing, "3.15t") is False
+
+
+@pytest.mark.os_agnostic
+def test_a_free_threaded_build_named_only_by_its_key_is_recognised() -> None:
+    """A uv that predates the ``variant`` field still names the build in its ``key``."""
+    old_uv = {**_entry("3.15.0", installed=True), "key": "cpython-3.15.0+freethreaded-linux-x86_64-gnu"}
+
+    assert venv_mod.listing_needs_install(json.dumps([old_uv]), "3.15t") is False
+
+
+@pytest.mark.os_posix
+def test_a_current_free_threaded_build_reaches_uv_only_to_list(tmp_path: Path, stub_uv: StubUv) -> None:
+    """Without this the alias-rewriting commands ran on every test-all (bmk OPEN-WORK [102])."""
+    stub_uv.install(offered_json=json.dumps([_freethreaded("3.15.0", installed=True)]))
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.15t"])
+
+    assert stub_uv.commands() == [_LIST_OFFERED]
+
+
+@pytest.mark.os_posix
+def test_a_missing_free_threaded_build_is_installed_by_its_own_request(tmp_path: Path, stub_uv: StubUv) -> None:
+    stub_uv.install(offered_json=json.dumps([_freethreaded("3.15.0", installed=False)]))
+
+    venv_mod.ensure_minors_installed(tmp_path, ["3.15t"])
+
+    assert stub_uv.commands() == [
+        _LIST_OFFERED,
+        ["uv", "python", "install", "3.15t"],
+        ["uv", "python", "upgrade", "3.15t"],
+    ]
+
+
+@pytest.mark.os_agnostic
+def test_uvs_answer_for_a_free_threaded_request_is_its_patch() -> None:
+    """``uv python find --show-version 3.15t`` prints ``3.15.0`` (measured, uv 0.13.0)."""
+    assert venv_mod.release_of("3.15.0\n", "3.15t") == "3.15.0"
+
+
+@pytest.mark.os_posix
+def test_a_gil_venv_for_a_free_threaded_target_is_rebuilt(tmp_path: Path, stub_uv: StubUv) -> None:
+    """Same patch, wrong build: the cell would test the GIL build while reporting 3.15t."""
+    venv = tmp_path / ".venv-3.15t"
+    marker = _venv_reporting(venv, "cpython 3.15.0 0")
+    stub_uv.install(found_version="3.15.0")
+
+    venv_mod.discard_venv_on_wrong_python(venv, "3.15t", tmp_path, quiet=True)
+
+    assert not marker.exists()
+
+
+@pytest.mark.os_posix
+def test_a_free_threaded_venv_for_a_free_threaded_target_is_kept(tmp_path: Path, stub_uv: StubUv) -> None:
+    venv = tmp_path / ".venv-3.15t"
+    marker = _venv_reporting(venv, "cpython 3.15.0 1")
+    stub_uv.install(found_version="3.15.0")
+
+    venv_mod.discard_venv_on_wrong_python(venv, "3.15t", tmp_path, quiet=True)
+
+    assert marker.exists()
+
+
+@pytest.mark.os_posix
+def test_a_free_threaded_venv_for_a_plain_minor_is_kept(tmp_path: Path, stub_uv: StubUv) -> None:
+    """A plain ``3.14`` request may itself land on a free-threaded build that comes first on PATH
+    (see ``patch_uv_builds_on``), so the variant is checked only when the target names one: else a
+    venv uv just built would be rebuilt on every run."""
+    venv = tmp_path / ".venv"
+    marker = _venv_reporting(venv, "cpython 3.14.8 1")
+    stub_uv.install(found_version="3.14.8")
+
+    venv_mod.discard_venv_on_wrong_python(venv, "3.14", tmp_path, quiet=True)
+
+    assert marker.exists()

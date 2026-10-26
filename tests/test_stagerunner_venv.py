@@ -778,7 +778,7 @@ def test_ensure_venv_ignored_glob_covers_matrix_and_siblings(tmp_path: Path) -> 
 
     ensure_venv_ignored(tmp_path, tmp_path / ".venv")
 
-    for name in (".venv", ".venv-win", ".venv-bmk", ".venv-3.10", ".venv-3.14"):
+    for name in (".venv", ".venv-win", ".venv-bmk", ".venv-3.10", ".venv-3.14", ".venv-3.15t"):
         code = subprocess.run(
             ["git", "-C", str(tmp_path), "check-ignore", "-q", "--", f"{name}/"], check=False
         ).returncode
