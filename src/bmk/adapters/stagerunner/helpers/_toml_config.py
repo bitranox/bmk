@@ -36,8 +36,18 @@ __all__ = [
     "ToolConfig",
     "coerce_str_tuple",
     "coerce_table",
+    "describe_validation_error",
     "load_pyproject_config",
 ]
+
+
+def describe_validation_error(exc: ValidationError) -> str:
+    """One ``<dotted.key>: <reason>`` per problem, joined by ``"; "``.
+
+    Never ``str(exc)``: that adds pydantic's model names, input values and a documentation URL,
+    which tell a user editing pyproject.toml nothing they can act on.
+    """
+    return "; ".join(f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}" for error in exc.errors())
 
 
 # ---------------------------------------------------------------------------

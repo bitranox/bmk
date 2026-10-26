@@ -14,9 +14,10 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
@@ -26,17 +27,16 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     CellResult,
     CellStatus,
     cell_env,
+    cell_pytest_argv,
     failure_excerpt,
     main,
     pytest_marker_args,
     resolve_workers,
 )
+from bmk.adapters.stagerunner.helpers._parallel import WORKERS_ENV as TEST_WORKERS_ENV
 from bmk.adapters.stagerunner.venv import probe_interpreter, venv_python
 from bmk.domain.enums import RefusalKind
 from bmk.domain.errors import RefusalError
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _classifiers(minors: list[str]) -> str:
@@ -100,10 +100,12 @@ class _FakeCells:
     def __init__(self, statuses: dict[str, CellStatus]) -> None:
         self.statuses = statuses
         self.seen: list[str] = []
+        self.pytest_workers: list[str] = []
 
-    def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True) -> CellResult:
+    def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True, pytest_workers: str = "1") -> CellResult:
         _ = quiet
         self.seen.append(minor)
+        self.pytest_workers.append(pytest_workers)
         return CellResult(minor, f"{minor}.0", self.statuses.get(minor, CellStatus.PASSED))
 
 
@@ -535,8 +537,8 @@ class _ConcurrencyProbeCells:
         self._active = 0
         self.max_concurrent = 0
 
-    def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True) -> CellResult:
-        _ = quiet
+    def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True, pytest_workers: str = "1") -> CellResult:
+        _ = quiet, pytest_workers
         with self._lock:
             self._active += 1
             self.max_concurrent = max(self.max_concurrent, self._active)
@@ -583,9 +585,11 @@ def test_every_minor_is_prepared_once_before_any_cell_starts(tmp_path: Path) -> 
         events.append("prepare:" + ",".join(minors))
 
     class _Cells(_FakeCells):
-        def __call__(self, _project_dir: Path, minor: str, *, quiet: bool = True) -> CellResult:
+        def __call__(
+            self, _project_dir: Path, minor: str, *, quiet: bool = True, pytest_workers: str = "1"
+        ) -> CellResult:
             events.append("cell:" + minor)
-            return super().__call__(_project_dir, minor, quiet=quiet)
+            return super().__call__(_project_dir, minor, quiet=quiet, pytest_workers=pytest_workers)
 
     assert main(project_dir=tmp_path, prepare_minors=prepare, run_cell=_Cells({})) == 0
     assert events[0] == "prepare:3.10,3.12,3.14"
@@ -745,3 +749,71 @@ def test_e2e_the_free_threaded_cell_runs_on_the_free_threaded_build(tmp_path: Pa
     free_threaded = probe_interpreter(tmp_path / ".venv-3.15t")
     assert regular is not None and not regular.gil_disabled
     assert free_threaded is not None and free_threaded.gil_disabled
+
+
+# ---------------------------------------------------------------------------
+# Parallel pytest inside each cell: the cells share the CPUs instead of each taking all of them
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+def test_each_cell_gets_its_share_of_the_cpus_so_the_matrix_never_oversubscribes(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.11", "3.12", "3.13"])
+    cells = _FakeCells({})
+    cpus = os.cpu_count() or 1
+    at_once = min(4, cpus)
+
+    assert main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells, env={}) == 0
+
+    assert cells.pytest_workers == [str(max(1, cpus // at_once))] * 4
+    assert int(cells.pytest_workers[0]) * at_once <= max(cpus, at_once)
+
+
+@pytest.mark.os_agnostic
+def test_an_explicit_pytest_worker_count_reaches_every_cell_unchanged(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.12"])
+    cells = _FakeCells({})
+
+    assert main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells, env={TEST_WORKERS_ENV: "3"}) == 0
+
+    assert cells.pytest_workers == ["3", "3"]
+
+
+@pytest.mark.os_agnostic
+def test_a_bad_pytest_worker_count_is_refused_with_exit_2_before_any_cell_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_pyproject(tmp_path, ["3.10", "3.12"])
+    cells = _FakeCells({})
+
+    rc = main(project_dir=tmp_path, prepare_minors=_no_prepare, run_cell=cells, env={TEST_WORKERS_ENV: "lots"})
+
+    assert rc == 2
+    assert TEST_WORKERS_ENV in capsys.readouterr().err
+    assert cells.seen == []
+
+
+@pytest.mark.os_agnostic
+def test_a_cell_runs_pytest_across_workers_when_its_venv_has_xdist(tmp_path: Path) -> None:
+    # bmk's own venv interpreter has pytest-xdist; a real probe decides, nothing is patched.
+    argv = cell_pytest_argv(Path(sys.executable), tmp_path, pytest_workers="3", env=dict(os.environ))
+
+    assert argv[:3] == [sys.executable, "-m", "pytest"]
+    assert argv[3:7] == ["-n", "3", "--dist", "loadgroup"]
+
+
+@pytest.mark.os_agnostic
+def test_a_cell_without_xdist_runs_pytest_in_one_process(tmp_path: Path) -> None:
+    venv = tmp_path / "bare"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
+
+    argv = cell_pytest_argv(venv_python(venv), tmp_path, pytest_workers="3", env=dict(os.environ))
+
+    assert "-n" not in argv
+
+
+@pytest.mark.os_agnostic
+def test_one_pytest_worker_never_asks_the_interpreter(tmp_path: Path) -> None:
+    argv = cell_pytest_argv(tmp_path / "absent-python", tmp_path, pytest_workers="1", env={})
+
+    assert "-n" not in argv

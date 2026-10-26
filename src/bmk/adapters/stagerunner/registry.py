@@ -145,8 +145,9 @@ def deps_update_action(ctx: StageContext, sink: OutputSink) -> int:
     )
 
 
-# The test pipeline: sequential apply-fixes stages, then a wide parallel batch of
-# checks at order 40, then shellcheck.
+# The test pipeline: the stages up to order 30 each write what the next one reads (the lock,
+# the venv synced from it, the source the two ruff passes rewrite), so they run one at a time.
+# Every check after them only reads, so all of them share the order-40 batch.
 _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("update_deps", 10, PipelineAction("deps_update")),
     Stage("uv_lock", 15, ToolAction(tools.uv_lock_argv)),
@@ -155,12 +156,12 @@ _TEST_PIPELINE: tuple[Stage, ...] = (
     Stage("bandit", 40, ToolAction(tools.bandit_argv)),
     Stage("lint_imports", 40, ToolAction(tools.lint_imports_argv)),
     Stage("pip_audit", 40, PipAuditAction(resolve_audit_python, tools.ensure_audit_pip_argv, tools.pip_audit_argv)),
-    Stage("pyright", 40, ToolRunsAction(tools.pyright_argvs)),
+    Stage("pyright", 40, ToolRunsAction(tools.pyright_argvs, first_alone=tools.pyright_may_install)),
     Stage("pytest", 40, ToolAction(tools.pytest_cov_argv)),
     Stage("ruff_format_check", 40, ToolAction(tools.ruff_format_check_argv)),
     Stage("ruff_lint", 40, ToolAction(tools.ruff_lint_argv)),
     Stage("psscriptanalyzer", 40, ToolAction(tools.psscriptanalyzer_argv)),
-    Stage("shellcheck", 60, ToolAction(tools.shellcheck_argv)),
+    Stage("shellcheck", 40, ToolAction(tools.shellcheck_argv)),
 )
 
 _COV_PIPELINE: tuple[Stage, ...] = (

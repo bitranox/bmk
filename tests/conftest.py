@@ -27,6 +27,8 @@ from click.testing import CliRunner, Result
 from lib_layered_config import Config
 from uv_stub import StubUv
 
+from bmk.adapters.stagerunner.helpers._parallel import WORKERS_ENV
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
 
@@ -221,6 +223,18 @@ def deterministic_cli_output(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rich_click.rich_click, "WIDTH", _CLI_OUTPUT_WIDTH)
     monkeypatch.setattr(rich_click.rich_click, "MAX_WIDTH", _CLI_OUTPUT_WIDTH)
     monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def serial_inner_test_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every pytest a test starts run serially, unless the test asks otherwise.
+
+    bmk's own venv has pytest-xdist, so a test driving the coverage helper or a test-all cell would
+    otherwise start a parallel run of its own - inside a suite that make test already runs across
+    every CPU - and the tests pinning the serial command would see the parallel one instead. A test
+    about parallel runs sets ``BMK_TEST_WORKERS`` itself.
+    """
+    monkeypatch.setenv(WORKERS_ENV, "1")
 
 
 # A push from a linked worktree exports the repository-scoping ones to git hooks, and git

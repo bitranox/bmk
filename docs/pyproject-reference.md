@@ -161,28 +161,75 @@ narrows what bandit scans and what coverage measures, and still reports success.
 
 ## Gates
 
-| Key                                        | Type   | Default           | Effect                                                                                                                                                              |
-|--------------------------------------------|--------|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `[tool.scripts.test].pytest-verbosity`     | string | `"-v"`            | Passed to pytest                                                                                                                                                    |
-| `[tool.scripts.test].exclude-markers`      | string | `"integration"`   | `make test` and every `make test-all` cell run pytest with `-m "not <value>"`, unless integration tests were explicitly requested. A single marker name, not a list |
-| `[tool.scripts.test].coverage-report-file` | string | `"coverage.xml"`  | Where the XML report is written                                                                                                                                     |
-| `[tool.scripts.test].src-path`             | string | `"src"`           | Prepended to `PYTHONPATH` for the test run                                                                                                                          |
-| `[tool.coverage.report].fail_under`        | int    | `80`              | `coverage report --fail-under=<value>`                                                                                                                              |
-| `[tool.coverage.run].source`               | list   | `["src"]`         | `coverage run --source=<...>`                                                                                                                                       |
-| `[tool.pip-audit].ignore-vulns`            | list   | `[]`              | Each id becomes `--ignore-vuln=<id>`                                                                                                                                |
-| `[tool.bandit].skips`                      | list   | none              | Read by **bandit itself** (bmk passes `-c pyproject.toml`), never by bmk                                                                                            |
-| `[tool.bashate].max-line-length`           | int    | `120`             | Line limit for `.sh` linting                                                                                                                                        |
-| `[tool.bashate].ignores`                   | list   | `["E003"]`        | Ignored bashate codes                                                                                                                                               |
-| `[tool.psscriptanalyzer].exclude-rules`    | list   | 3 built-ins       | Excluded PSScriptAnalyzer rules for `.ps1`                                                                                                                          |
-| `[tool.clean].patterns`                    | list   | 19 built-in globs | What `bmk clean` removes                                                                                                                                            |
-| `[tool.git].default-remote`                | string | `"origin"`        | Remote that `release` pushes to                                                                                                                                     |
-| `[tool.scripts.test-all].workers`          | int    | parallel          | Caps how many `test-all` version cells run at once. See "test-all: capping the matrix" below                                                                        |
-| `[tool.ci].free-threaded`                  | list   | `[]`              | Adds a free-threaded `X.Yt` cell to `make test-all` for each listed `"X.Y"`, as CI does. See "Free-threaded builds" above                                           |
+| Key                                        | Type          | Default           | Effect                                                                                                                                                                                        |
+|--------------------------------------------|---------------|-------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `[tool.scripts.test].pytest-verbosity`     | string        | `"-v"`            | Passed to pytest                                                                                                                                                                              |
+| `[tool.scripts.test].exclude-markers`      | string        | `"integration"`   | `make test` and every `make test-all` cell run pytest with `-m "not <value>"`, unless integration tests were explicitly requested. A single marker name, not a list                           |
+| `[tool.scripts.test].coverage-report-file` | string        | `"coverage.xml"`  | Where the XML report is written                                                                                                                                                               |
+| `[tool.scripts.test].src-path`             | string        | `"src"`           | Prepended to `PYTHONPATH` for the test run                                                                                                                                                    |
+| `[tool.scripts.test].workers`              | string or int | `"auto"`          | pytest-xdist workers for `make test` and each `make test-all` cell; `1` runs the suite in one process. Takes effect only when the project's venv has pytest-xdist. See "Parallel tests" below |
+| `[tool.coverage.report].fail_under`        | int           | `80`              | `coverage report --fail-under=<value>`                                                                                                                                                        |
+| `[tool.coverage.run].source`               | list          | `["src"]`         | `coverage run --source=<...>`                                                                                                                                                                 |
+| `[tool.pip-audit].ignore-vulns`            | list          | `[]`              | Each id becomes `--ignore-vuln=<id>`                                                                                                                                                          |
+| `[tool.bandit].skips`                      | list          | none              | Read by **bandit itself** (bmk passes `-c pyproject.toml`), never by bmk                                                                                                                      |
+| `[tool.bashate].max-line-length`           | int           | `120`             | Line limit for `.sh` linting                                                                                                                                                                  |
+| `[tool.bashate].ignores`                   | list          | `["E003"]`        | Ignored bashate codes                                                                                                                                                                         |
+| `[tool.psscriptanalyzer].exclude-rules`    | list          | 3 built-ins       | Excluded PSScriptAnalyzer rules for `.ps1`                                                                                                                                                    |
+| `[tool.clean].patterns`                    | list          | 19 built-in globs | What `bmk clean` removes                                                                                                                                                                      |
+| `[tool.git].default-remote`                | string        | `"origin"`        | Remote that `release` pushes to                                                                                                                                                               |
+| `[tool.scripts.test-all].workers`          | int           | parallel          | Caps how many `test-all` version cells run at once. See "test-all: capping the matrix" below                                                                                                  |
+| `[tool.ci].free-threaded`                  | list          | `[]`              | Adds a free-threaded `X.Yt` cell to `make test-all` for each listed `"X.Y"`, as CI does. See "Free-threaded builds" above                                                                     |
 
 `ignore-vulns` and `skips` are **different vocabularies and neither tool reads the other's
 table**. `[tool.pip-audit].ignore-vulns` takes PYSEC / GHSA / CVE ids. `[tool.bandit].skips`
 takes bandit check ids (`B101`, `B603`). A CVE id in `[tool.bandit].skips` is silently
 inert: it looks like protection and does nothing.
+
+### Parallel tests (pytest-xdist)
+
+`make test` spreads the suite over several processes when the project's own venv has
+pytest-xdist. bmk never installs it for you: a suite that was never written to run in
+parallel keeps running in one process until the project opts in by adding one line to its dev
+extra:
+
+```toml
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "pytest-xdist"]
+```
+
+- **Coverage stays the same.** A parallel run measures through pytest-cov
+  (`pytest -n <workers> --cov=<source>`) instead of `coverage run`, which would only see the
+  controller process. The `fail_under` check and `coverage.xml` read the combined data as
+  before. pytest-cov is therefore required too; without it the run stays serial.
+- **Shared resources run one at a time.** Every parallel run passes `--dist loadgroup`. Tests
+  marked with the same `@pytest.mark.xdist_group("<name>")` go to one worker and run one after
+  another, while the rest of the suite stays parallel. Use one group per test database, fixed
+  port or shared file. A conftest can apply the mark to every test that uses such a fixture.
+- **The floor is checked once, by the report.** The parallel run passes
+  `--cov-fail-under=0` so pytest-cov does not enforce `fail_under` itself; the coverage report
+  step that follows does, and prints the missing lines as in a serial run.
+- **pytest decides, not an import check.** bmk runs pytest's own configuration in the
+  project's venv and directory to see which plugins load. With plugin autoload off
+  (`PYTEST_DISABLE_PLUGIN_AUTOLOAD`) or `-p no:xdist` in `addopts`, xdist is installed but not
+  loaded, so the suite runs serially and no hint is printed. A `-n` the project already passes
+  in `addopts` is left to the project (bmk adds neither `-n` nor `--dist`), and a `--dist` mode
+  it chose is kept (bmk adds only `-n`).
+- **Turning it off.** `workers = 1` under `[tool.scripts.test]` stops bmk adding `-n`, so a
+  suite without its own `-n` in `addopts` runs in one process. `BMK_TEST_WORKERS` overrides the setting for one run (`BMK_TEST_WORKERS=1 make
+  test`). A value other than `auto` or a whole number of at least 1, there or in
+  `pyproject.toml`, is refused with one line naming the setting and exit code 2.
+- **No xdist, one hint.** Without pytest-xdist (or pytest-cov) the suite runs serially and the
+  pytest stage prints one line naming the package to add. In JSON mode that line is shown only
+  when the stage fails.
+- **test-all shares the CPUs.** Its version cells already run side by side, so with `auto`
+  each cell's pytest gets the CPU count divided by the number of cells running at once
+  (at least 1). An explicit count is used as written in every cell. Cells do not need
+  pytest-cov.
+
+Before adding pytest-xdist to an existing project, look for tests that share something outside
+their own temp directory: a database, a port, a file in the repository, the working directory,
+environment variables. Group them or set `workers = 1`, then run the suite with `-n auto` a few
+times before relying on it.
 
 ### test-all: capping the matrix
 

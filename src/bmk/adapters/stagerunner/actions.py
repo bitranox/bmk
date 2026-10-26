@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING
 from bmk.domain.stages import normalize_returncode
 
 from . import signals
+from .output import CapturingSink
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -94,22 +96,51 @@ class ToolAction:
 
 
 class ToolRunsAction:
-    """Run one tool several times in turn; the stage fails if any run does.
+    """Run one tool several times at once; the stage fails if any run does.
 
     Every run executes even after one fails, so a single stage reports every failing variant
     (pyright for Linux AND Windows) rather than the first. Each run's output is headed by its
     argv, because the variants print the same diagnostics format and the failure output alone
     would not say which run produced it.
+
+    The runs are independent reads of one tree, so they share the wall clock instead of adding
+    up. Each captures into its own buffer and the buffers are written in argv order afterwards:
+    interleaving them line by line would make a failing run's diagnostics unreadable, and the
+    first failing run in ARGV order decides the code, not the first to finish, so the verdict
+    does not depend on timing. A single run streams straight through as before.
+
+    ``first_alone`` says, per context, that the first run must finish before the others start:
+    for a tool whose first run may populate a cache the others read (pyright installing from
+    npm), concurrent first runs would race on it.
     """
 
-    def __init__(self, build_argvs: Callable[[StageContext], list[list[str]]]) -> None:
+    def __init__(
+        self,
+        build_argvs: Callable[[StageContext], list[list[str]]],
+        *,
+        first_alone: Callable[[StageContext], bool] | None = None,
+    ) -> None:
         self._build_argvs = build_argvs
+        self.first_alone = first_alone
 
     def __call__(self, ctx: StageContext, sink: OutputSink) -> int:
+        argvs = self._build_argvs(ctx)
+        if len(argvs) == 1:
+            sink.write(f"$ {' '.join(argvs[0])}\n")
+            return run_argv(argvs[0], ctx, sink)
+        buffers = [CapturingSink() for _ in argvs]
+
+        def run_into(argv: list[str], buf: CapturingSink) -> int:
+            return run_argv(argv, ctx, buf)
+
+        lead = 1 if self.first_alone is not None and self.first_alone(ctx) else 0
+        codes = [run_into(argvs[0], buffers[0])] if lead else []
+        with ThreadPoolExecutor(max_workers=len(argvs) - lead) as pool:
+            codes += list(pool.map(run_into, argvs[lead:], buffers[lead:]))
         first_failure = 0
-        for argv in self._build_argvs(ctx):
+        for argv, buf, rc in zip(argvs, buffers, codes, strict=True):
             sink.write(f"$ {' '.join(argv)}\n")
-            rc = run_argv(argv, ctx, sink)
+            sink.write(buf.getvalue())
             first_failure = first_failure or rc
         return first_failure
 

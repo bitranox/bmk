@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,101 @@ def test_a_failing_run_does_not_stop_the_runs_after_it(tmp_path: Path) -> None:
     assert rc == 3, "the first failure's code decides the stage"
     assert "second run reached" in sink.getvalue()
     assert sink.getvalue().count("$ ") == 2, "each run is headed by its argv"
+
+
+def _timed(marks: Path, name: str, seconds: float = 0.5) -> list[str]:
+    """A run that records when it started and ended, so overlap is read from the runs themselves.
+
+    One file per mark: several processes appending to one file can interleave on Windows.
+    """
+    code = (
+        "import pathlib, sys, time\n"
+        "marks = pathlib.Path(sys.argv[1])\n"
+        f"(marks / '{name}.start').write_text(repr(time.time()))\n"
+        f"time.sleep({seconds})\n"
+        f"(marks / '{name}.end').write_text(repr(time.time()))\n"
+    )
+    return [sys.executable, "-c", code, str(marks)]
+
+
+def _spans(marks: Path) -> dict[str, tuple[float, float]]:
+    def read(path: Path) -> float:
+        return float(path.read_text(encoding="utf-8"))
+
+    return {path.stem: (read(path), read(path.with_suffix(".end"))) for path in marks.glob("*.start")}
+
+
+@pytest.mark.os_agnostic
+def test_the_runs_execute_at_the_same_time(tmp_path: Path) -> None:
+    # Overlap, not wall time: a loaded machine slows every run, but serial runs never overlap.
+    log = tmp_path / "marks"
+    log.mkdir()
+
+    def argvs(_ctx: StageContext) -> list[list[str]]:
+        return [_timed(log, name) for name in ("a", "b", "c")]
+
+    rc = ToolRunsAction(argvs)(_ctx(_project(tmp_path, None)), CapturingSink())
+
+    spans = _spans(log)
+    assert rc == 0
+    assert max(start for start, _ in spans.values()) < min(end for _, end in spans.values()), spans
+
+
+@pytest.mark.os_agnostic
+def test_a_first_run_that_must_go_alone_finishes_before_the_rest_start_together(tmp_path: Path) -> None:
+    log = tmp_path / "marks"
+    log.mkdir()
+
+    def argvs(_ctx: StageContext) -> list[list[str]]:
+        return [_timed(log, name) for name in ("first", "b", "c")]
+
+    rc = ToolRunsAction(argvs, first_alone=lambda _ctx: True)(_ctx(_project(tmp_path, None)), CapturingSink())
+
+    spans = _spans(log)
+    assert rc == 0
+    assert spans["first"][1] <= min(spans["b"][0], spans["c"][0]), spans
+    assert max(spans["b"][0], spans["c"][0]) < min(spans["b"][1], spans["c"][1]), spans
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [(None, False), ("PYRIGHT_PYTHON_FORCE_VERSION", True), ("PYRIGHT_PYTHON_USE_BUNDLED_PYRIGHT", True)],
+)
+def test_pyright_runs_go_one_first_only_when_it_may_install_from_npm(
+    tmp_path: Path, variable: str | None, expected: bool
+) -> None:
+    # pyright-python installs a non-bundled version into one shared cache with no lock, so
+    # concurrent cold installs collide; the bundled copy (the default) never installs.
+    ctx = _ctx(_project(tmp_path, None))
+    env = {key: value for key, value in ctx.env.items() if not key.startswith("PYRIGHT_PYTHON_")}
+    if variable:
+        env[variable] = "1.1.400"
+    assert tools.pyright_may_install(replace(ctx, env=env)) is expected
+
+
+@pytest.mark.os_agnostic
+def test_the_registered_pyright_stage_asks_whether_its_first_run_must_go_alone() -> None:
+    (stage,) = [s for s in PIPELINES["test"] if s.name == "pyright"]
+
+    assert isinstance(stage.action, ToolRunsAction)
+    assert stage.action.first_alone is tools.pyright_may_install
+
+
+@pytest.mark.os_agnostic
+def test_each_run_output_stays_whole_and_in_argv_order_whichever_finishes_first(tmp_path: Path) -> None:
+    def argvs(_ctx: StageContext) -> list[list[str]]:
+        return [
+            [sys.executable, "-c", "import time; time.sleep(1.0); print('slow-a'); print('slow-b')"],
+            [sys.executable, "-c", "print('fast-a'); print('fast-b'); raise SystemExit(4)"],
+        ]
+
+    sink = CapturingSink()
+    rc = ToolRunsAction(argvs)(_ctx(_project(tmp_path, None)), sink)
+
+    out = sink.getvalue()
+    assert rc == 4
+    assert out.index("slow-a") < out.index("slow-b") < out.index("fast-a") < out.index("fast-b"), out
 
 
 # --- the real stage, real pyright --------------------------------------------

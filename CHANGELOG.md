@@ -6,6 +6,37 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Added
+
+- `make test` runs pytest across processes when the project's venv has pytest-xdist and
+  pytest-cov: `pytest -n <workers> --dist loadgroup --cov=<source>`. bmk never installs xdist
+  itself, so a project goes parallel only once it adds `pytest-xdist` to its dev extra; until
+  then the suite runs in one process and the stage prints one line naming the package to add.
+  Coverage, the `fail_under` floor and `coverage.xml` are unchanged (bmk's own suite measures the
+  same lines and branches either way, in 20s instead of 85s). Tests sharing a database or a port
+  keep running one at a time when they carry the same `@pytest.mark.xdist_group("<name>")`.
+  bmk asks pytest itself whether the plugins load, so a run with plugin autoload off or
+  `-p no:xdist` in `addopts` stays serial without a hint, and a `-n` or `--dist` the project
+  already passes in `addopts` is left alone. The floor is still checked by the coverage report
+  step, which prints the missing lines, never by pytest-cov.
+- `[tool.scripts.test] workers` (`"auto"` by default, or a count; `1` is serial) and the
+  `BMK_TEST_WORKERS` override for one run. A bad value is refused with one line and exit 2.
+- `make test-all` passes the same setting to each version cell, split between the cells running
+  at once so the matrix never starts more pytest workers than there are CPUs.
+
+### Changed
+
+- The pyright runs for several `[tool.ci].os` platforms run at the same time instead of one after
+  another. Each run's output is still printed whole and in platform order. When
+  `PYRIGHT_PYTHON_FORCE_VERSION` or `PYRIGHT_PYTHON_USE_BUNDLED_PYRIGHT` is set, pyright may
+  install itself from npm into one unlocked cache, so the first run goes alone and the rest
+  start together after it.
+- shellcheck (with shfmt and bashate) joins the other read-only checks in the parallel batch of
+  `make test` instead of running alone after it.
+- bmk's own dependencies include `pytest-xdist`, so its suite runs in parallel.
+- bmk requires `lib_log_rich>=8.0.0` and `setuptools>=84.2.0`; the setuptools release is now older
+  than the cooldown, so its dated `[tool.uv]` pin is gone.
+
 ## [3.28.1] 2026-10-26 20:58:34
 
 ### Fixed

@@ -30,8 +30,17 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, NamedTuple
 
+from pydantic import ValidationError
+
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
-from bmk.adapters.stagerunner.helpers._toml_config import load_pyproject_config
+from bmk.adapters.stagerunner.helpers._parallel import (
+    ParallelSupport,
+    probe_parallel,
+    resolve_test_workers,
+    split_workers,
+    xdist_args,
+)
+from bmk.adapters.stagerunner.helpers._toml_config import describe_validation_error, load_pyproject_config
 from bmk.adapters.stagerunner.project import free_threaded_targets, pyright_runs
 from bmk.adapters.stagerunner.venv import (
     all_python_minors,
@@ -54,6 +63,7 @@ __all__ = [
     "CellResult",
     "CellStatus",
     "cell_env",
+    "cell_pytest_argv",
     "failure_excerpt",
     "main",
     "matrix_cells",
@@ -154,17 +164,37 @@ def pytest_marker_args(project_dir: Path) -> list[str]:
     return ["-m", f"not {exclude}"] if exclude else []
 
 
-def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> _GateOutcome:
+# What a cell needs from its venv to spread pytest over processes. Coverage is not measured in
+# a cell, so pytest-cov is not required here, unlike make test's coverage stage.
+_CELL_PARALLEL = frozenset({ParallelSupport.READY, ParallelSupport.XDIST_ONLY})
+
+
+def cell_pytest_argv(python: Path, project_dir: Path, *, pytest_workers: str, env: Mapping[str, str]) -> list[str]:
+    """The pytest command one cell runs.
+
+    ``-p no:cacheprovider`` keeps parallel cells from racing on a shared ``.pytest_cache``.
+    ``pytest_workers`` is this cell's share of the CPUs (``main`` splits them); it only takes
+    effect when the cell's venv has pytest-xdist, and the interpreter is not asked at all for
+    a serial run. No hint is printed when xdist is missing: ``make test`` already says so.
+    """
+    parallel: list[str] = []
+    if pytest_workers != "1":
+        plugins = probe_parallel(str(python), env=env, cwd=project_dir)
+        if plugins.support in _CELL_PARALLEL:
+            parallel = xdist_args(pytest_workers, project=plugins)
+    return [str(python), "-m", "pytest", *parallel, *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
+
+
+def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool, pytest_workers: str = "1") -> _GateOutcome:
     """Run pytest then pyright in ``venv``; the first failure wins.
 
     pytest runs from the venv's own interpreter (the project is installed there), with the
-    project's ``exclude-markers`` filter; pyright is pinned at it with ``--pythonpath``.
-    ``-p no:cacheprovider`` keeps parallel cells from racing on a shared ``.pytest_cache``.
-    Both run under ``cell_env`` so the cell's own tools resolve.
+    project's ``exclude-markers`` filter (see :func:`cell_pytest_argv`); pyright is pinned at
+    it with ``--pythonpath``. Both run under ``cell_env`` so the cell's own tools resolve.
     """
     python = venv_python(venv)
     env = cell_env(venv)
-    pytest_cmd = [str(python), "-m", "pytest", *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
+    pytest_cmd = cell_pytest_argv(python, project_dir, pytest_workers=pytest_workers, env=env)
     result = subprocess.run(pytest_cmd, cwd=project_dir, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
         return _GateOutcome(CellStatus.FAIL, failure_excerpt(result.stdout + result.stderr))
@@ -183,7 +213,7 @@ def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool) -> _GateOut
     return _GateOutcome(CellStatus.PASSED, "")
 
 
-def run_version_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResult:
+def run_version_cell(project_dir: Path, minor: str, *, quiet: bool, pytest_workers: str = "1") -> CellResult:
     """Provision ``.venv-<minor>`` and run its gates. Provisioning failure is ERROR, not FAIL.
 
     ``install_python=False``: :func:`main` already prepared every minor, serially, before any cell.
@@ -192,11 +222,11 @@ def run_version_cell(project_dir: Path, minor: str, *, quiet: bool) -> CellResul
     if venv is None:
         return CellResult(minor, "?", CellStatus.ERROR, "could not provision a venv for this Python")
     version = venv_version(venv) or "?"
-    outcome = _run_gate_in_venv(venv, project_dir, quiet=quiet)
+    outcome = _run_gate_in_venv(venv, project_dir, quiet=quiet, pytest_workers=pytest_workers)
     return CellResult(minor, version, outcome.status, outcome.detail)
 
 
-def _run_default_cell(project_dir: Path, *, quiet: bool) -> int:
+def _run_default_cell(project_dir: Path, *, quiet: bool, pytest_workers: str) -> int:
     """No classifiers: test the default ``.venv`` once, WARN, and return its exit code.
 
     The warning names the version actually tested so a green run is not mistaken for full-
@@ -212,7 +242,7 @@ def _run_default_cell(project_dir: Path, *, quiet: bool) -> int:
     )
     if venv is None:
         return 1
-    outcome = _run_gate_in_venv(venv, project_dir, quiet=quiet)
+    outcome = _run_gate_in_venv(venv, project_dir, quiet=quiet, pytest_workers=pytest_workers)
     _print_report([CellResult("default", version or "?", outcome.status, outcome.detail)])
     return 0 if outcome.status is CellStatus.PASSED else 1
 
@@ -339,6 +369,20 @@ def resolve_workers(project_dir: Path, minors: list[str], *, env: Mapping[str, s
     return min(configured_pyproject, len(minors))
 
 
+def _configured_pytest_workers(project_dir: Path, env: Mapping[str, str] | None) -> str:
+    """``[tool.scripts.test] workers``, or ``BMK_TEST_WORKERS`` when set: the same setting make test reads.
+
+    Raises:
+        RefusalError: either holds no valid worker setting.
+    """
+    try:
+        configured = CoverageConfig.from_pyproject(project_dir).workers
+    except ValidationError as exc:
+        msg = f"pyproject.toml: {describe_validation_error(exc)}"
+        raise RefusalError(msg, kind=RefusalKind.INVALID_ARGUMENT) from None
+    return resolve_test_workers(configured, env=env if env is not None else os.environ)
+
+
 def main(
     *,
     project_dir: Path,
@@ -369,17 +413,22 @@ def main(
     minors = all_python_minors(project_dir)
     try:
         cells = matrix_cells(project_dir, minors)
+        configured = _configured_pytest_workers(project_dir, env)
         if not cells:
-            return _run_default_cell(project_dir, quiet=quiet)
+            return _run_default_cell(
+                project_dir, quiet=quiet, pytest_workers=split_workers(configured, cells=1, cpus=os.cpu_count())
+            )
         workers = resolve_workers(project_dir, cells, env=env)
     except RefusalError as exc:
         print(f"[test-all] {exc}", file=sys.stderr)
         return 2
+    # The cells run side by side, so each gets its share of the CPUs rather than all of them.
+    pytest_workers = split_workers(configured, cells=workers, cpus=os.cpu_count())
 
     prepare_minors(project_dir, cells, quiet=quiet)
 
     def run(request: str) -> CellResult:
-        return run_cell(project_dir, request, quiet=quiet)
+        return run_cell(project_dir, request, quiet=quiet, pytest_workers=pytest_workers)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(run, cells))

@@ -133,6 +133,17 @@ def pyright_argv(ctx: StageContext) -> list[str]:
     return [*argv, "--outputjson"] if _is_json(ctx) else argv
 
 
+def pyright_may_install(ctx: StageContext) -> bool:
+    """Whether a pyright run may install pyright from npm rather than use the bundled copy.
+
+    pyright-python installs any non-bundled version into one shared cache directory with no
+    lock, so concurrent first runs on a cold cache collide (ENOTEMPTY / EEXIST), which reads
+    like a type-check failure. It does so only when one of these variables is set; the bundled
+    default never installs.
+    """
+    return any(ctx.env.get(name) for name in ("PYRIGHT_PYTHON_FORCE_VERSION", "PYRIGHT_PYTHON_USE_BUNDLED_PYRIGHT"))
+
+
 def pyright_argvs(ctx: StageContext) -> list[list[str]]:
     """The pyright runs that cover every platform ``[tool.ci].os`` declares (see ``pyright_runs``).
 

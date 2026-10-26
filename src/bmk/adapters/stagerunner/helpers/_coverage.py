@@ -18,8 +18,9 @@ Contents
 
 System Role
 -----------
-Called from the test orchestrator (``test.py``) after pytest completes,
-or standalone via ``cov_010_coverage.sh`` stage script.
+Run as a subprocess by the ``pytest`` and ``coverage`` stages
+(``tools.pytest_cov_argv`` / ``tools.coverage_run_argv``), under bmk's interpreter; the
+suite itself runs under the project's.
 """
 
 from __future__ import annotations
@@ -37,12 +38,23 @@ from pathlib import Path
 from typing import Annotated, NamedTuple
 
 import rtoml
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 
-from bmk.adapters.stagerunner.helpers._toml_config import coerce_table
+from bmk.adapters.stagerunner.helpers._parallel import (
+    AUTO,
+    ParallelSupport,
+    PytestPlugins,
+    normalise_workers,
+    probe_parallel,
+    resolve_test_workers,
+    xdist_args,
+)
+from bmk.adapters.stagerunner.helpers._toml_config import coerce_table, describe_validation_error
 from bmk.domain.enums import ToolOutputFormat
+from bmk.domain.errors import RefusalError
 
 __all__ = [
+    "WorkerPlan",
     "build_codecov_args",
     "build_codecov_env",
     "build_env",
@@ -52,6 +64,7 @@ __all__ = [
     "get_repo_metadata_from_git",
     "handle_codecov_result",
     "main",
+    "plan_test_workers",
     "prune_coverage_data_files",
     "remove_report_artifacts",
     "resolve_commit_sha",
@@ -96,6 +109,10 @@ class CoverageConfig(BaseModel):
     fail_under: int = Field(default=80)
     coverage_source: list[str] = Field(default_factory=lambda: ["src"], alias="source")
     exclude_markers: str = Field(default="integration", alias="exclude-markers")
+    # "auto" or a count; 1 runs the suite in one process. Only takes effect once the project's
+    # venv has pytest-xdist (see _parallel), so the default changes nothing for a project
+    # that never declared it.
+    workers: Annotated[str, BeforeValidator(normalise_workers)] = Field(default=AUTO)
 
     @classmethod
     def from_pyproject(cls, project_dir: Path) -> CoverageConfig:
@@ -321,6 +338,8 @@ class _CoverageRun:
         env: Subprocess environment, including ``PYTHONPATH`` and ``COVERAGE_FILE``.
         project_dir: Working directory for every step.
         quiet: Suppress the announced command lines and the terminal report.
+        workers: The pytest-xdist worker setting the suite runs with; ``"1"`` is serial.
+        plugins: What the project's pytest loads and already configures (see ``_parallel``).
     """
 
     python: str
@@ -328,6 +347,8 @@ class _CoverageRun:
     env: dict[str, str]
     project_dir: Path
     quiet: bool
+    workers: str
+    plugins: PytestPlugins
 
 
 def _announce(line: str, *, quiet: bool) -> None:
@@ -364,12 +385,12 @@ def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> _PytestComm
         The argv to execute and the human-readable line describing it.
     """
     config = run.config
-    coverage_source = ",".join(config.coverage_source)
+    head, head_display = _pytest_head(run)
     # The PROJECT's interpreter, never sys.executable: that is bmk's own tool env,
     # whose dependency tree is not the one the project declares (bmk's got only
     # `[dev]`; the project's venv gets every extra), so testing there exercised an
     # environment nobody ships while pyright/pip-audit inspected the real one.
-    argv = [run.python, "-m", "coverage", "run", f"--source={coverage_source}", "-m", "pytest"]
+    argv = [run.python, *head]
 
     marker_filter = ""
     if not include_integration and config.exclude_markers:
@@ -382,11 +403,84 @@ def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> _PytestComm
         argv.append(config.pytest_verbosity)
 
     marker_display = f"-m '{marker_filter}' " if marker_filter else ""
-    display = (
-        f"[coverage] python -m coverage run --source={coverage_source} "
-        f"-m pytest {marker_display}{config.pytest_verbosity}"
-    )
+    display = f"[coverage] python {head_display} {marker_display}{config.pytest_verbosity}"
     return _PytestCommand(argv=argv, display=display)
+
+
+def _pytest_head(run: _CoverageRun) -> tuple[list[str], str]:
+    """The interpreter arguments that start pytest under coverage, and how they read.
+
+    Serial runs keep ``coverage run -m pytest``. A parallel run measures through
+    pytest-cov instead, because ``coverage run`` sees only the controller process
+    while the tests execute in the xdist workers; pytest-cov starts coverage in every
+    worker and combines their data into ``COVERAGE_FILE``, which the report and XML
+    steps then read unchanged. ``--cov-report=`` leaves the reporting to those steps, and
+    ``--cov-fail-under=0`` the floor: pytest-cov would otherwise enforce coverage's own
+    ``fail_under`` inside pytest and fail the run as if a test had failed, before the
+    report step could print which lines are missing.
+    """
+    sources = run.config.coverage_source
+    if run.workers == "1":
+        joined = ",".join(sources)
+        head = ["-m", "coverage", "run", f"--source={joined}", "-m", "pytest"]
+    else:
+        head = [
+            "-m",
+            "pytest",
+            *xdist_args(run.workers, project=run.plugins),
+            *(f"--cov={source}" for source in sources),
+            "--cov-report=",
+            "--cov-fail-under=0",
+        ]
+    return head, " ".join(head)
+
+
+class WorkerPlan(NamedTuple):
+    """How one coverage run spreads the suite.
+
+    Attributes:
+        workers: ``"1"`` for a serial run, else ``"auto"`` or a count.
+        plugins: What the project's pytest loads; unanswered when it was never asked.
+    """
+
+    workers: str
+    plugins: PytestPlugins
+
+
+def plan_test_workers(configured: str, *, python: str, env: dict[str, str], cwd: Path) -> WorkerPlan:
+    """The worker setting this coverage run uses, after asking the project's own pytest.
+
+    A parallel run needs pytest-xdist AND pytest-cov loaded by the project's pytest. When
+    one is not installed the suite runs serially and one stderr line names the package to
+    add; it reaches the user in text mode and, in JSON mode, only with a failing stage's
+    output. A plugin that is installed but switched off by the project's configuration is
+    the project's decision: serial, and nothing printed.
+
+    Args:
+        configured: ``[tool.scripts.test] workers``, already normalised.
+        python: The project's interpreter.
+        env: The run's environment; ``BMK_TEST_WORKERS`` in it overrides ``configured``.
+        cwd: The project directory.
+
+    Returns:
+        The worker setting and the plugin facts the pytest command is built from.
+
+    Raises:
+        RefusalError: ``BMK_TEST_WORKERS`` holds no valid worker setting.
+    """
+    workers = resolve_test_workers(configured, env=env)
+    if workers == "1":
+        return WorkerPlan("1", PytestPlugins(answered=False))
+    plugins = probe_parallel(python, env=env, cwd=cwd)
+    if plugins.support is ParallelSupport.READY:
+        return WorkerPlan(workers, plugins)
+    if plugins.missing:
+        print(
+            f"[coverage] tests run in one process: add {plugins.missing} to the project's dev extra to run "
+            "them in parallel, or set [tool.scripts.test] workers = 1 to keep them serial",
+            file=sys.stderr,
+        )
+    return WorkerPlan("1", plugins)
 
 
 def _run_pytest_under_coverage(run: _CoverageRun, *, include_integration: bool) -> int:
@@ -499,6 +593,7 @@ def run_coverage_tests(
     remove_report_artifacts(project_dir, config.coverage_report_file)
 
     base_env = build_env(project_dir, config.src_path)
+    plan = plan_test_workers(config.workers, python=test_python, env=base_env, cwd=project_dir)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         run = _CoverageRun(
@@ -507,6 +602,8 @@ def run_coverage_tests(
             env=base_env | {"COVERAGE_FILE": str(Path(tmpdir) / ".coverage")},
             project_dir=project_dir,
             quiet=quiet,
+            workers=plan.workers,
+            plugins=plan.plugins,
         )
         returncode = _run_pytest_under_coverage(run, include_integration=include_integration)
         if returncode != 0:
@@ -997,20 +1094,29 @@ def main(
         python: Interpreter to run the suite under - the project's own venv python.
 
     Returns:
-        Exit code: the test run's own code when it fails, 1 when an upload fails,
-        otherwise 0 (a skipped upload counts as success).
+        Exit code: the test run's own code when it fails, 2 when a setting is refused, 1
+        when an upload fails, otherwise 0 (a skipped upload counts as success).
     """
     if project_dir is None:
         project_dir = Path.cwd()
 
     if run_tests:
-        exit_code = _run_tests_step(
-            project_dir,
-            verbose=verbose,
-            include_integration=include_integration,
-            quiet=quiet,
-            python=python,
-        )
+        # This runs as the stage's subprocess, out of reach of the CLI's refusal handler, so a
+        # refused setting is reported here as one line with test-all's exit code, not a traceback.
+        try:
+            exit_code = _run_tests_step(
+                project_dir,
+                verbose=verbose,
+                include_integration=include_integration,
+                quiet=quiet,
+                python=python,
+            )
+        except RefusalError as exc:
+            print(f"[coverage] {exc}", file=sys.stderr)
+            return 2
+        except ValidationError as exc:
+            print(f"[coverage] pyproject.toml: {describe_validation_error(exc)}", file=sys.stderr)
+            return 2
         if exit_code != 0:
             return exit_code
 

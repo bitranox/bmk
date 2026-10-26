@@ -23,8 +23,8 @@ def test_test_pipeline_stage_names_and_orders() -> None:
     assert by_name["update_deps"] == 10
     assert by_name["ruff_format_apply"] == 20
     assert by_name["ruff_fix_apply"] == 30
-    assert by_name["shellcheck"] == 60
-    # The order-40 batch runs these in parallel:
+    # The order-40 batch runs every read-only check in parallel; shellcheck only reads too
+    # (shfmt -d, never -w), so it joins the batch rather than running alone after it.
     order_40 = {s.name for s in stages if s.order == 40}
     assert order_40 == {
         "bandit",
@@ -35,14 +35,15 @@ def test_test_pipeline_stage_names_and_orders() -> None:
         "ruff_format_check",
         "ruff_lint",
         "psscriptanalyzer",
+        "shellcheck",
     }
 
 
 def test_test_pipeline_batches_are_ordered() -> None:
     batches = group_into_batches(list(PIPELINES["test"]), key=lambda s: s.order)
     orders = [batch[0].order for batch in batches]
-    assert orders == [10, 15, 20, 30, 40, 60]
-    assert len(next(b for b in batches if b[0].order == 40)) == 8  # parallel batch
+    assert orders == [10, 15, 20, 30, 40]
+    assert len(next(b for b in batches if b[0].order == 40)) == 9  # parallel batch
 
 
 def test_the_lock_is_checked_after_the_floors_rise_and_before_any_gate_reads_the_tree() -> None:
