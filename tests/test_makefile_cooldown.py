@@ -22,6 +22,7 @@ answers ``bmk_selfcheck`` and passes ``bmk_toollock ... -- cmd`` through to the 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -212,3 +213,51 @@ def test_a_cooldown_file_that_sets_none_behaves_like_no_file(tmp_path: Path) -> 
 
     assert proc.returncode == 0, proc.stderr
     assert calls == ["tool upgrade bmk"]
+
+
+# ``help`` greps $(MAKEFILE_LIST) for "target: ## text" lines. With one file grep prints bare
+# lines; with two (the template ``-include``s the cooldown) it prefixes each with "Makefile:",
+# and awk's ":.*?## " separator then reads "Makefile" as every target's name.
+DEV_MAKEFILE = TEMPLATE.parents[3] / "Makefile"
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_lines(project: Path, *extra: str) -> list[str]:
+    files = [arg for name in ("Makefile", *extra) for arg in ("-f", name)]
+    proc = subprocess.run(
+        ["make", "--no-print-directory", *files, "help"],
+        cwd=project,
+        env={"PATH": os.pathsep.join(["/usr/bin", "/bin"]), "HOME": str(project)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return [_ANSI.sub("", line).split()[0] for line in proc.stdout.splitlines() if line.strip()]
+
+
+@pytest.mark.os_posix
+@pytest.mark.parametrize("cooldown", [True, False], ids=["with-cooldown", "without-cooldown"])
+def test_help_names_each_target_whether_or_not_the_cooldown_file_is_included(tmp_path: Path, cooldown: bool) -> None:
+    project = _project(tmp_path, cooldown=cooldown)
+
+    names = _help_lines(project)
+
+    assert "test" in names
+    assert "Makefile" not in names
+
+
+@pytest.mark.os_posix
+def test_the_dev_makefile_help_names_each_target_beside_a_second_makefile(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    shutil.copy(DEV_MAKEFILE, project / "Makefile")
+    (project / "extra.mk").write_text("EXTRA := 1\n", encoding="utf-8")
+
+    names = _help_lines(project, "extra.mk")
+
+    assert "test" in names
+    assert "Makefile" not in names

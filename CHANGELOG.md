@@ -11,6 +11,10 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `logdemo` refuses a `LOG_*` variable lib_log_rich refuses (`LOG_CONSOLE_LEVEL=bogus`) with exit 78
   and lib_log_rich's own line, as `config` does. The demo reads the variables itself, so its
   `ValueError` reached `main()` and exited with the OS errno (22 on POSIX, 87 on Windows).
+- `make help` names each target again in a project that has `.bmk-cooldown.mk`. The Makefile
+  `-include`s that file, so its help grep read two files and prefixed every match with
+  `Makefile:`, which the listing then showed as every target's name. The help grep now prints
+  no file names (`grep -hE`), in the template and in bmk's own dev Makefile.
 
 ## [3.28.0] 2026-10-26 17:59:59
 
