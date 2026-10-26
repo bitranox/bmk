@@ -6,6 +6,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- `logdemo` refuses a `LOG_*` variable lib_log_rich refuses (`LOG_CONSOLE_LEVEL=bogus`) with exit 78
+  and lib_log_rich's own line, as `config` does. The demo reads the variables itself, so its
+  `ValueError` reached `main()` and exited with the OS errno (22 on POSIX, 87 on Windows).
+
 ## [3.28.0] 2026-10-26 17:59:59
 
 ### Added
