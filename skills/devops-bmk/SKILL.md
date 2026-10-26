@@ -629,7 +629,7 @@ bmk runs pytest in **this project's own `.venv`** (section 1), which it syncs wi
 helpers) are present. That is the same venv pyright and pip-audit resolve, so the suite, the type
 check and the audit all describe one environment.
 
-**pytest runs in parallel once the project declares pytest-xdist.** bmk runs the project's own
+**pytest runs in parallel once the project's pytest loads pytest-xdist and pytest-cov.** bmk runs the project's own
 pytest configuration in its venv and directory and asks which plugins it LOADS, not which are
 installed. When both `xdist` and `pytest_cov` load, the stage runs
 `pytest -n <workers> --dist loadgroup --cov=<source>`; otherwise it runs serially. bmk never
@@ -690,9 +690,10 @@ per run, so a check on Linux passes code whose types break under Windows' stubs 
 `signal.SIGHUP`). Unless one of the two project files below changes the runs, the stage runs
 `pyright --pythonplatform` once per OS family listed in `[tool.ci].os`, the key CI builds its OS
 matrix from (`ubuntu-*` -> Linux, `windows-*` -> Windows, `macos-*` -> Darwin), at the same time,
-and fails if any run does, with the exit code of the first failing run in platform order (not the
-first to finish); each run's output is printed whole, in platform order, headed by its command
-line. With `PYRIGHT_PYTHON_FORCE_VERSION` or
+and fails if any run does. The runs are listed in a fixed order: each OS in the order
+`[tool.ci].os` first names it (or the one pinned run), then the `pyrightconfig.<platform>.json`
+arms. The stage takes the exit code of the first failing run in that order, not the first to
+finish, and prints each run's output whole, in that order, headed by its command line. With `PYRIGHT_PYTHON_FORCE_VERSION` or
 `PYRIGHT_PYTHON_USE_BUNDLED_PYRIGHT` set, pyright may install itself from npm into one unlocked
 cache, so the first run goes alone and the others start together after it.
 With no `[tool.ci].os` it checks the host only. So in a project that declares Windows, a

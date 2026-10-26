@@ -27,7 +27,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Changed
 
 - The pyright runs for several `[tool.ci].os` platforms run at the same time instead of one after
-  another. Each run's output is still printed whole and in platform order. When
+  another. Each run's output is still printed whole and in the order the runs are listed. When
   `PYRIGHT_PYTHON_FORCE_VERSION` or `PYRIGHT_PYTHON_USE_BUNDLED_PYRIGHT` is set, pyright may
   install itself from npm into one unlocked cache, so the first run goes alone and the rest
   start together after it.
