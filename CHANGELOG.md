@@ -8,6 +8,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Fixed
 
+- `make test` now reports an import block that a NEW file made unsorted, as CI does. The
+  `ruff_fix_apply` and `ruff_lint` stages run `ruff check --no-cache`. ruff caches each file's
+  verdict by that file's own bytes, but isort's verdict also depends on which modules are
+  first-party. Adding a root `conftest.py` makes `import conftest` first-party, and the cached run
+  kept passing files that CI's fresh `ruff check .` failed with I001. The `ruff format` stages keep
+  the cache. Measured cost: 39 ms for 286 files.
 - The test suite no longer reads the app and host configuration layers of the machine it runs on.
   An autouse fixture points lib_layered_config's three app-root variables (`LIB_LAYERED_CONFIG_ETC`,
   `_MAC_APP_ROOT`, `_PROGRAMDATA`) at an empty directory under `tmp_path`, so a system-wide deploy

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -34,17 +36,68 @@ def test_ruff_lint_argv_json_flag(tmp_path: Path) -> None:
     assert tools.ruff_lint_argv(_ctx(tmp_path, ToolOutputFormat.JSON)) == [
         "ruff",
         "check",
+        "--no-cache",
         "--output-format",
         "json",
         ".",
     ]
-    assert tools.ruff_lint_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)) == ["ruff", "check", "."]
+    assert tools.ruff_lint_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)) == ["ruff", "check", "--no-cache", "."]
 
 
 def test_ruff_format_argvs(tmp_path: Path) -> None:
     assert tools.ruff_format_apply_argv(_ctx(tmp_path)) == ["ruff", "format", "."]
-    assert tools.ruff_fix_apply_argv(_ctx(tmp_path)) == ["ruff", "check", "--fix", "."]
+    assert tools.ruff_fix_apply_argv(_ctx(tmp_path)) == ["ruff", "check", "--no-cache", "--fix", "."]
     assert tools.ruff_format_check_argv(_ctx(tmp_path)) == ["ruff", "format", "--check", "."]
+
+
+# Both imports are third-party until a root `conftest.py` appears; then `conftest` is first-party
+# and the block is unsorted. Only the import CLASSIFICATION changes, never this file's bytes, which
+# is the case ruff's per-file content cache cannot see.
+_RECLASSIFIED_IMPORTS = "import conftest\nimport pytest\n\nprint(conftest, pytest)\n"
+
+
+def _project_whose_imports_get_reclassified(root: Path) -> Path:
+    """A ruff project linted once (cache written), then given the root module that reclassifies."""
+    (root / "pyproject.toml").write_text('[tool.ruff.lint]\nselect = ["I"]\n', encoding="utf-8")
+    test_file = root / "tests" / "test_x.py"
+    test_file.parent.mkdir()
+    test_file.write_text(_RECLASSIFIED_IMPORTS, encoding="utf-8")
+    first = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "."], cwd=root, capture_output=True, text=True, check=False
+    )
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert (root / ".ruff_cache").is_dir()
+    (root / "conftest.py").write_text("X = 1\n", encoding="utf-8")
+    return test_file
+
+
+def _run_ruff_stage(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    # `python -m ruff` resolves the ruff installed beside the running interpreter, so the test does
+    # not depend on which `ruff` comes first on PATH.
+    assert argv[0] == "ruff"
+    return subprocess.run(
+        [sys.executable, "-m", "ruff", *argv[1:]], cwd=cwd, capture_output=True, text=True, check=False
+    )
+
+
+@pytest.mark.os_agnostic
+def test_ruff_lint_stage_reports_an_import_reclassified_by_a_new_root_module(tmp_path: Path) -> None:
+    _project_whose_imports_get_reclassified(tmp_path)
+
+    result = _run_ruff_stage(tools.ruff_lint_argv(_ctx(tmp_path, ToolOutputFormat.TEXT)), tmp_path)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "I001" in result.stdout
+
+
+@pytest.mark.os_agnostic
+def test_ruff_fix_stage_reorders_an_import_reclassified_by_a_new_root_module(tmp_path: Path) -> None:
+    test_file = _project_whose_imports_get_reclassified(tmp_path)
+
+    result = _run_ruff_stage(tools.ruff_fix_apply_argv(_ctx(tmp_path)), tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert test_file.read_text(encoding="utf-8").startswith("import pytest\n\nimport conftest\n")
 
 
 def test_bandit_argv_uses_package_name_and_format(tmp_path: Path) -> None:

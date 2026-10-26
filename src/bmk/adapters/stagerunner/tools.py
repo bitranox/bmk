@@ -52,8 +52,16 @@ def ruff_format_apply_argv(_ctx: StageContext) -> list[str]:
     return ["ruff", "format", "."]
 
 
+# The two `ruff check` stages run without ruff's cache. The cache is keyed on each file's own
+# bytes, but isort's verdict also depends on which modules are first-party, which a NEW file can
+# change (a root `conftest.py` makes `import conftest` first-party). A cached run then repeats a
+# pass for a file whose verdict changed, while CI's fresh `ruff check .` reports I001. `ruff format`
+# depends on the file alone, so its stages keep the cache.
+_RUFF_CHECK = ["ruff", "check", "--no-cache"]
+
+
 def ruff_fix_apply_argv(_ctx: StageContext) -> list[str]:
-    return ["ruff", "check", "--fix", "."]
+    return [*_RUFF_CHECK, "--fix", "."]
 
 
 def ruff_format_check_argv(_ctx: StageContext) -> list[str]:
@@ -61,7 +69,7 @@ def ruff_format_check_argv(_ctx: StageContext) -> list[str]:
 
 
 def ruff_lint_argv(ctx: StageContext) -> list[str]:
-    argv = ["ruff", "check"]
+    argv = list(_RUFF_CHECK)
     if _is_json(ctx):
         argv += ["--output-format", "json"]
     return [*argv, "."]
