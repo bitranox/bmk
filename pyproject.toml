@@ -28,7 +28,7 @@ dependencies = [
     "httpx2>=2.14.0",               # PyPI version lookups
     "python-dotenv>=1.2.4",        # reads CODECOV_TOKEN from .env, and the LOG_* lines of a .env
                                    # in adapters/logging/setup.py
-    "filelock>=4.2.3; python_version >= \"3.11\"",              # the cross-process lock serialising venv provisioning
+    "filelock>=4.2.4; python_version >= \"3.11\"",              # the cross-process lock serialising venv provisioning
                                    # (adapters/stagerunner/venv.py). It already arrived here
                                    # TRANSITIVELY via pip-audit -> cachecontrol[filecache], which is
                                    # far too fragile a provenance for something bmk imports: drop
