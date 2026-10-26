@@ -8,6 +8,7 @@ through ``BMK_TEST_WORKERS``, the way a user sets it.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET  # parses the coverage.xml this test just wrote, never foreign XML
@@ -43,15 +44,16 @@ import pytest
 
 from pkg.mod import double, kind
 
-LOG = Path(__file__).parent / "workers.log"
+MARKS = Path(__file__).parent / "marks"
 
 
 def _record(name: str) -> None:
-    with LOG.open("a", encoding="utf-8") as f:
-        f.write(f"start {name} {os.getpid()} {time.time()}\\n")
+    # One file per test, written once: worker processes never share a file. Windows emulates
+    # append as seek-then-write, so concurrent appends to one log lose and tear lines.
+    start = time.time()
     time.sleep(0.3)
-    with LOG.open("a", encoding="utf-8") as f:
-        f.write(f"end {name} {time.time()}\\n")
+    MARKS.mkdir(exist_ok=True)
+    (MARKS / name).write_text(f"{os.getpid()} {start} {time.time()}", encoding="utf-8")
 
 
 @pytest.mark.parametrize("n", [-1, 0, 1])
@@ -88,7 +90,7 @@ def _project(tmp_path: Path, *, extra_toml: str = "") -> Path:
 
 def _run(project: Path, workers: str, monkeypatch: pytest.MonkeyPatch) -> tuple[int, dict[str, str]]:
     monkeypatch.setenv(WORKERS_ENV, workers)
-    (project / "tests" / "workers.log").unlink(missing_ok=True)
+    shutil.rmtree(project / "tests" / "marks", ignore_errors=True)
     rc = run_coverage_tests(project_dir=project, python=sys.executable, generate_xml=True, quiet=True)
     root = ET.parse(project / "coverage.xml").getroot()  # noqa: S314 - our own file
     return rc, {key: root.attrib[key] for key in ("lines-covered", "lines-valid", "branches-covered", "branches-valid")}
@@ -96,15 +98,12 @@ def _run(project: Path, workers: str, monkeypatch: pytest.MonkeyPatch) -> tuple[
 
 def _spans(project: Path) -> tuple[set[str], list[tuple[float, float]]]:
     workers: set[str] = set()
-    starts: dict[str, float] = {}
     db: list[tuple[float, float]] = []
-    for line in (project / "tests" / "workers.log").read_text(encoding="utf-8").splitlines():
-        parts = line.split()
-        if parts[0] == "start":
-            workers.add(parts[2])
-            starts[parts[1]] = float(parts[3])
-        elif parts[1].startswith("db"):
-            db.append((starts[parts[1]], float(parts[2])))
+    for mark in (project / "tests" / "marks").iterdir():
+        pid, start, end = mark.read_text(encoding="utf-8").split()
+        workers.add(pid)
+        if mark.name.startswith("db"):
+            db.append((float(start), float(end)))
     return workers, sorted(db)
 
 
