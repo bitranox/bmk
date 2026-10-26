@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.29.0] 2026-10-26 23:11:44
+
 ### Added
 
 - `make test` runs pytest across processes when the project's venv has pytest-xdist and
