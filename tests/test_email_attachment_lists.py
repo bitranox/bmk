@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from click.testing import CliRunner
+
     from conftest import EmailCliContext
 
 VALID = {"smtp_hosts": ["smtp.example.com:587"], "from_address": "sender@example.com"}
