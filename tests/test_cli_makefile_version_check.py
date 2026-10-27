@@ -296,3 +296,25 @@ def test_install_command_skips_check(
     assert result.exit_code == 0
     assert "outdated" not in result.output
     assert "Updating existing bmk Makefile" in result.output
+
+
+# =============================================================================
+# release never rewrites the Makefile it is about to check is committed
+# =============================================================================
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("command", ["release", "rel", "r"])
+def test_release_leaves_an_outdated_makefile_alone_in_json_mode(
+    cli_pipeline_probe: Callable[..., Result], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    # release refuses a dirty working tree; a Makefile it rewrote itself would make every release
+    # right after a new bmk version refuse, naming a change the same command made.
+    monkeypatch.setenv("BMK_OUTPUT_FORMAT", "json")
+    (tmp_path / "Makefile").write_text(_STALE_MAKEFILE, encoding="utf-8")
+
+    result = cli_pipeline_probe([command], prefix="rel")
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "PROBE").read_text(encoding="utf-8") == "ran"
+    assert (tmp_path / "Makefile").read_text(encoding="utf-8") == _STALE_MAKEFILE

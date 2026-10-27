@@ -183,3 +183,28 @@ def test_a_first_release_has_nothing_to_have_drifted_from(tmp_path: Path) -> Non
     _git(repo, "commit", "-qm", "first")
 
     assert _release.shipped_skill_needs_a_bump(repo) is None
+
+
+@pytest.mark.os_agnostic
+def test_a_detached_head_is_refused_before_anything_is_tagged_or_pushed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # git rev-parse --abbrev-ref HEAD answers the literal "HEAD" when detached, and the release
+    # would then push a ref named HEAD; refuse first, so no tag is left behind.
+    repo = tmp_path / "detached"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nname = "d"\nversion = "1.0.0"\n', encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.test")
+    _git(repo, "config", "user.name", "T")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "first")
+    _git(repo, "checkout", "-q", "--detach")
+    monkeypatch.chdir(repo)  # the git wrappers run in the cwd, as under make release
+
+    rc = _release.release(project_dir=repo, remote="origin")
+
+    assert rc == 1
+    assert "detached" in capsys.readouterr().err
+    tags = subprocess.run(["git", "tag"], cwd=repo, capture_output=True, text=True, check=True).stdout
+    assert tags == ""

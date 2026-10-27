@@ -256,6 +256,15 @@ def release(*, project_dir: Path, remote: str | None = None) -> int:
 
     # Push branch
     branch = git_branch()
+    if branch == "HEAD":
+        # rev-parse --abbrev-ref answers the literal "HEAD" when detached; pushing that ref
+        # fails only after the tag exists locally, so refuse before anything is created.
+        print(
+            "[release] HEAD is detached: check out the branch to release (a clean "
+            "`git worktree add <path> <branch>` works when the main checkout is busy).",
+            file=sys.stderr,
+        )
+        return 1
     print(f"[release] Pushing branch {branch} to {remote}")
     git_push(remote, branch)
 

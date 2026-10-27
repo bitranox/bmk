@@ -32,6 +32,7 @@ from bmk.adapters.stagerunner.helpers._coverage import (
     run_coverage_tests,
     upload_coverage_report,
 )
+from bmk.adapters.stagerunner.helpers._parallel import PytestPlugins
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
@@ -43,6 +44,17 @@ if TYPE_CHECKING:
 
 def _make_completed(returncode: int, *, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _unanswered(_python: str, *, env: Mapping[str, str], cwd: Path) -> PytestPlugins:
+    """A worker probe that could not ask the interpreter: the run stays serial and adds no -n.
+
+    These tests pin the coverage commands by replacing subprocess.run, which the real probe also
+    calls; injected, the probe never consumes one of their scripted results. The real probe is
+    exercised in test_helper_parallel.py and test_coverage_parallel.py.
+    """
+    del env, cwd
+    return PytestPlugins(answered=False)
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +338,7 @@ def test_run_coverage_tests_returns_zero_on_success(tmp_path: Path, monkeypatch:
     )
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert result == 0
 
@@ -338,7 +350,7 @@ def test_run_coverage_tests_returns_nonzero_when_pytest_fails(tmp_path: Path, mo
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(1)):
-        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert result == 1
 
@@ -359,7 +371,7 @@ def test_run_coverage_tests_returns_nonzero_when_report_fails(tmp_path: Path) ->
         return _make_completed(2)  # coverage report fails
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
-        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert result == 2
 
@@ -380,7 +392,7 @@ def test_run_coverage_tests_xml_failure_does_not_fail_run(tmp_path: Path, capsys
         return _make_completed(3)  # xml generation fails
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
-        result = run_coverage_tests(project_dir=tmp_path, generate_xml=True, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, generate_xml=True, python=sys.executable)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -401,7 +413,7 @@ def test_run_coverage_tests_skips_xml_when_disabled(tmp_path: Path) -> None:
         return _make_completed(0)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect):
-        result = run_coverage_tests(project_dir=tmp_path, generate_xml=False, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, generate_xml=False, python=sys.executable)
 
     assert result == 0
     assert call_count == 2  # only pytest + report, no xml
@@ -416,7 +428,7 @@ def test_run_coverage_tests_includes_marker_filter_by_default(tmp_path: Path) ->
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)
     ) as mock_run:
-        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     first_call_args = mock_run.call_args_list[0][0][0]
     assert "-m" in first_call_args
@@ -434,7 +446,7 @@ def test_run_coverage_tests_omits_marker_filter_for_integration(tmp_path: Path) 
     with patch(
         "bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)
     ) as mock_run:
-        run_coverage_tests(project_dir=tmp_path, include_integration=True, python=sys.executable)
+        run_coverage_tests(probe=_unanswered, project_dir=tmp_path, include_integration=True, python=sys.executable)
 
     first_call_args = mock_run.call_args_list[0][0][0]
     # Should only have the module -m for pytest, not a marker filter -m
@@ -451,7 +463,7 @@ def test_run_coverage_tests_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        result = run_coverage_tests(python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, python=sys.executable)
 
     assert result == 0
 
@@ -463,7 +475,7 @@ def test_run_coverage_tests_prints_commands(tmp_path: Path, capsys: pytest.Captu
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     captured = capsys.readouterr()
     assert "[coverage] python -m coverage run" in captured.out
@@ -505,7 +517,7 @@ def test_run_coverage_tests_default_run_pins_argv_kwargs_and_output(
         return _make_completed(0)
 
     with patch(_RUN_PATCH, side_effect=_side_effect) as mock_run:
-        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert result == 0
     calls = mock_run.call_args_list
@@ -515,10 +527,8 @@ def test_run_coverage_tests_default_run_pins_argv_kwargs_and_output(
         [sys.executable, "-m", "coverage", "xml", "-o", "coverage.xml"],
     ]
     assert set(calls[0].kwargs) == {"env", "cwd", "check"}
-    assert set(calls[1].kwargs) == {"env", "cwd", "check", "stdout", "stderr"}
+    assert set(calls[1].kwargs) == {"env", "cwd", "check"}
     assert set(calls[2].kwargs) == {"env", "cwd", "check"}
-    assert calls[1].kwargs["stdout"] is None
-    assert calls[1].kwargs["stderr"] is None
     for call in calls:
         assert call.kwargs["cwd"] == tmp_path
         assert call.kwargs["check"] is False
@@ -539,14 +549,14 @@ def test_run_coverage_tests_default_run_pins_argv_kwargs_and_output(
 
 
 @pytest.mark.os_agnostic
-def test_run_coverage_tests_quiet_pins_argv_devnull_report_and_silence(
+def test_run_coverage_tests_quiet_pins_argv_captured_report_and_silence(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Quiet mode swaps verbosity for short-traceback flags, silences the report, and prints nothing."""
+    """Quiet mode swaps verbosity for short-traceback flags, captures the report, and prints nothing on a pass."""
     _minimal_pyproject(tmp_path)
 
     with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
-        result = run_coverage_tests(project_dir=tmp_path, quiet=True, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, quiet=True, python=sys.executable)
 
     assert result == 0
     calls = mock_run.call_args_list
@@ -568,8 +578,9 @@ def test_run_coverage_tests_quiet_pins_argv_devnull_report_and_silence(
         [sys.executable, "-m", "coverage", "report", "-m", "--fail-under=80"],
         [sys.executable, "-m", "coverage", "xml", "-o", "coverage.xml"],
     ]
-    assert calls[1].kwargs["stdout"] is subprocess.DEVNULL
-    assert calls[1].kwargs["stderr"] is subprocess.DEVNULL
+    # Captured, not discarded: on a failure the captured report is printed (test_coverage_parallel).
+    assert calls[1].kwargs["capture_output"] is True
+    assert (calls[1].kwargs["encoding"], calls[1].kwargs["errors"]) == ("utf-8", "replace")
     assert "stdout" not in calls[0].kwargs
     assert "stdout" not in calls[2].kwargs
     captured = capsys.readouterr()
@@ -584,7 +595,7 @@ def test_run_coverage_tests_quiet_still_warns_when_xml_fails(
     """The XML-failure warning is not gated by quiet; the run still succeeds."""
     _minimal_pyproject(tmp_path)
     with patch(_RUN_PATCH, side_effect=_returncodes_in_order(0, 0, 3)):
-        result = run_coverage_tests(project_dir=tmp_path, quiet=True, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, quiet=True, python=sys.executable)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -600,7 +611,7 @@ def test_run_coverage_tests_pytest_failure_stops_before_report(
     _minimal_pyproject(tmp_path)
 
     with patch(_RUN_PATCH, return_value=_make_completed(4)) as mock_run:
-        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert result == 4
     assert mock_run.call_count == 1
@@ -614,7 +625,7 @@ def test_run_coverage_tests_report_failure_skips_xml(tmp_path: Path) -> None:
     """A failing report returns its own code and never runs the xml step."""
     _minimal_pyproject(tmp_path)
     with patch(_RUN_PATCH, side_effect=_returncodes_in_order(0, 7)) as mock_run:
-        result = run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert result == 7
     assert mock_run.call_count == 2
@@ -630,7 +641,7 @@ def test_run_coverage_tests_without_interpreter_refuses_before_any_side_effect(
     stale_report.write_text("<coverage/>")
 
     with patch(_RUN_PATCH) as mock_run:
-        result = run_coverage_tests(project_dir=tmp_path, python=None)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=None)
 
     assert result == 1
     mock_run.assert_not_called()
@@ -654,7 +665,7 @@ def test_run_coverage_tests_with_missing_interpreter_path_refuses(
     missing = str(tmp_path / "no-such-python")
 
     with patch(_RUN_PATCH) as mock_run:
-        result = run_coverage_tests(project_dir=tmp_path, python=missing)
+        result = run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=missing)
 
     assert result == 1
     mock_run.assert_not_called()
@@ -681,7 +692,7 @@ def test_run_coverage_tests_cleans_stale_artifacts_before_the_first_command(tmp_
         return _make_completed(0)
 
     with patch(_RUN_PATCH, side_effect=_side_effect):
-        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     assert present_at_first_call == [False, False, False, False]
 
@@ -694,7 +705,7 @@ def test_run_coverage_tests_empty_exclude_markers_adds_no_marker_filter(
     _minimal_pyproject(tmp_path, '\n[tool.scripts.test]\nexclude-markers = ""\n')
 
     with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
-        run_coverage_tests(project_dir=tmp_path, generate_xml=False, python=sys.executable)
+        run_coverage_tests(probe=_unanswered, project_dir=tmp_path, generate_xml=False, python=sys.executable)
 
     assert mock_run.call_args_list[0].args[0] == [
         sys.executable,
@@ -727,7 +738,7 @@ def test_run_coverage_tests_uses_every_configured_value(tmp_path: Path, capsys: 
     )
 
     with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
-        run_coverage_tests(project_dir=tmp_path, python=sys.executable)
+        run_coverage_tests(probe=_unanswered, project_dir=tmp_path, python=sys.executable)
 
     calls = mock_run.call_args_list
     assert [c.args[0] for c in calls] == [
@@ -1487,7 +1498,7 @@ def test_main_runs_tests_and_returns_zero_on_success(
     monkeypatch.delenv("CODECOV_TOKEN", raising=False)
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(0)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1504,7 +1515,7 @@ def test_main_returns_nonzero_when_tests_fail(
     pyproject.write_text('[project]\nname = "test"\n')
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(5)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
 
     assert result == 5
     captured = capsys.readouterr()
@@ -1519,7 +1530,7 @@ def test_main_skips_upload_when_tests_fail(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", return_value=_make_completed(1)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
 
     assert result == 1
 
@@ -1548,7 +1559,7 @@ def test_main_uploads_and_returns_zero_on_success(
         patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
         patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
-        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1572,7 +1583,7 @@ def test_main_returns_one_when_upload_fails(tmp_path: Path, monkeypatch: pytest.
         patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
         patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
-        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True)
 
     assert result == 1
 
@@ -1592,7 +1603,7 @@ def test_main_returns_zero_when_codecovcli_is_not_installed(
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value=None):
-        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True)
 
     assert result == 0
     assert "not installed" in capsys.readouterr().err
@@ -1607,7 +1618,7 @@ def test_main_returns_zero_when_no_token_for_upload(
     child = tmp_path / "project"
     child.mkdir()
 
-    result = main(project_dir=child, run_tests=False, upload=True)
+    result = main(probe=_unanswered, project_dir=child, run_tests=False, upload=True)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1620,7 +1631,7 @@ def test_main_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
     monkeypatch.delenv("CODECOV_TOKEN", raising=False)
 
-    result = main(run_tests=False, upload=False)
+    result = main(probe=_unanswered, run_tests=False, upload=False)
 
     assert result == 0
 
@@ -1713,7 +1724,7 @@ def test_main_runs_tests_then_uploads(tmp_path: Path, monkeypatch: pytest.Monkey
         patch("bmk.adapters.stagerunner.helpers._coverage.shutil.which", return_value="/usr/bin/codecovcli"),
         patch("bmk.adapters.stagerunner.helpers._coverage.subprocess.run", side_effect=_side_effect),
     ):
-        result = main(project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=True, python=sys.executable)
 
     assert result == 0
 
@@ -1742,7 +1753,7 @@ def _upload_side_effect(upload_returncode: int) -> Callable[..., subprocess.Comp
 def test_main_with_neither_step_does_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """With run_tests and upload both off, main prints nothing and runs nothing."""
     with patch(_RUN_PATCH) as mock_run, patch(_WHICH_PATCH) as mock_which:
-        result = main(project_dir=tmp_path, run_tests=False, upload=False)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=False)
 
     assert result == 0
     mock_run.assert_not_called()
@@ -1758,7 +1769,7 @@ def test_main_run_tests_pins_announce_lines_around_the_run(tmp_path: Path, capsy
     _minimal_pyproject(tmp_path)
 
     with patch(_RUN_PATCH, return_value=_make_completed(0)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=False, python=sys.executable)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1778,7 +1789,9 @@ def test_main_quiet_run_tests_success_prints_nothing(tmp_path: Path, capsys: pyt
     _minimal_pyproject(tmp_path)
 
     with patch(_RUN_PATCH, return_value=_make_completed(0)):
-        result = main(project_dir=tmp_path, run_tests=True, upload=False, quiet=True, python=sys.executable)
+        result = main(
+            probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=False, quiet=True, python=sys.executable
+        )
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1795,7 +1808,9 @@ def test_main_quiet_test_failure_still_reports_on_stderr(
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch(_RUN_PATCH, return_value=_make_completed(5)), patch(_WHICH_PATCH) as mock_which:
-        result = main(project_dir=tmp_path, run_tests=True, upload=True, quiet=True, python=sys.executable)
+        result = main(
+            probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=True, quiet=True, python=sys.executable
+        )
 
     assert result == 5
     mock_which.assert_not_called()
@@ -1805,19 +1820,17 @@ def test_main_quiet_test_failure_still_reports_on_stderr(
 
 
 @pytest.mark.os_agnostic
-def test_main_without_interpreter_returns_one_with_both_error_lines(
+def test_main_without_interpreter_returns_one_with_the_refusal_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A missing interpreter surfaces as exit 1: the refusal line, then the Tests failed line."""
+    """A missing interpreter surfaces as exit 1 with one line naming it; no tests ran, so none failed."""
     _minimal_pyproject(tmp_path)
     missing = str(tmp_path / "no-such-python")
 
-    result = main(project_dir=tmp_path, run_tests=True, upload=False, quiet=True, python=missing)
+    result = main(probe=_unanswered, project_dir=tmp_path, run_tests=True, upload=False, quiet=True, python=missing)
 
     assert result == 1
-    assert capsys.readouterr().err == (
-        f"Cannot run tests: the project's interpreter does not exist: {missing}\n[coverage] Tests failed (exit 1)\n"
-    )
+    assert capsys.readouterr().err == (f"Cannot run tests: the project's interpreter does not exist: {missing}\n")
 
 
 @pytest.mark.os_agnostic
@@ -1827,6 +1840,7 @@ def test_main_forwards_integration_and_quiet_to_the_run(tmp_path: Path) -> None:
 
     with patch(_RUN_PATCH, return_value=_make_completed(0)) as mock_run:
         main(
+            probe=_unanswered,
             project_dir=tmp_path,
             run_tests=True,
             upload=False,
@@ -1859,7 +1873,7 @@ def test_main_missing_token_pins_exact_warning_and_skips_uploader_lookup(
     child.mkdir()
 
     with patch(_WHICH_PATCH) as mock_which:
-        result = main(project_dir=child, run_tests=False, upload=True)
+        result = main(probe=_unanswered, project_dir=child, run_tests=False, upload=True)
 
     assert result == 0
     mock_which.assert_not_called()
@@ -1877,7 +1891,7 @@ def test_main_quiet_missing_token_prints_nothing(
     child = tmp_path / "project"
     child.mkdir()
 
-    result = main(project_dir=child, run_tests=False, upload=True, quiet=True)
+    result = main(probe=_unanswered, project_dir=child, run_tests=False, upload=True, quiet=True)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1893,7 +1907,7 @@ def test_main_missing_uploader_pins_exact_warning(
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch(_WHICH_PATCH, return_value=None), patch(_RUN_PATCH) as mock_run:
-        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True)
 
     assert result == 0
     mock_run.assert_not_called()
@@ -1910,7 +1924,7 @@ def test_main_quiet_missing_uploader_prints_nothing(
     monkeypatch.setenv("CODECOV_TOKEN", "token123")
 
     with patch(_WHICH_PATCH, return_value=None):
-        result = main(project_dir=tmp_path, run_tests=False, upload=True, quiet=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True, quiet=True)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1929,7 +1943,7 @@ def test_main_quiet_upload_hides_only_the_uploading_line(
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch(_WHICH_PATCH, return_value="/usr/bin/codecovcli"), patch(_RUN_PATCH, side_effect=_upload_side_effect(0)):
-        result = main(project_dir=tmp_path, run_tests=False, upload=True, quiet=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True, quiet=True)
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1948,7 +1962,7 @@ def test_main_upload_failure_pins_uploading_line_and_exit_one(
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     with patch(_WHICH_PATCH, return_value="/usr/bin/codecovcli"), patch(_RUN_PATCH, side_effect=_upload_side_effect(2)):
-        result = main(project_dir=tmp_path, run_tests=False, upload=True)
+        result = main(probe=_unanswered, project_dir=tmp_path, run_tests=False, upload=True)
 
     assert result == 1
     captured = capsys.readouterr()

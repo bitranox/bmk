@@ -42,6 +42,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationEr
 
 from bmk.adapters.stagerunner.helpers._parallel import (
     AUTO,
+    ParallelProbe,
     ParallelSupport,
     PytestPlugins,
     normalise_workers,
@@ -422,7 +423,9 @@ def _pytest_head(run: _CoverageRun) -> tuple[list[str], str]:
     sources = run.config.coverage_source
     if run.workers == "1":
         joined = ",".join(sources)
-        head = ["-m", "coverage", "run", f"--source={joined}", "-m", "pytest"]
+        # coverage run measures this process only; a project's own -n would move the tests
+        # into workers it never sees, so xdist_args overrides it with -n 0.
+        head = ["-m", "coverage", "run", f"--source={joined}", "-m", "pytest", *xdist_args("1", project=run.plugins)]
     else:
         head = [
             "-m",
@@ -447,7 +450,9 @@ class WorkerPlan(NamedTuple):
     plugins: PytestPlugins
 
 
-def plan_test_workers(configured: str, *, python: str, env: dict[str, str], cwd: Path) -> WorkerPlan:
+def plan_test_workers(
+    configured: str, *, python: str, env: dict[str, str], cwd: Path, probe: ParallelProbe = probe_parallel
+) -> WorkerPlan:
     """The worker setting this coverage run uses, after asking the project's own pytest.
 
     A parallel run needs pytest-xdist AND pytest-cov loaded by the project's pytest. When
@@ -461,6 +466,7 @@ def plan_test_workers(configured: str, *, python: str, env: dict[str, str], cwd:
         python: The project's interpreter.
         env: The run's environment; ``BMK_TEST_WORKERS`` in it overrides ``configured``.
         cwd: The project directory.
+        probe: Asks the project's interpreter what its pytest loads.
 
     Returns:
         The worker setting and the plugin facts the pytest command is built from.
@@ -469,9 +475,10 @@ def plan_test_workers(configured: str, *, python: str, env: dict[str, str], cwd:
         RefusalError: ``BMK_TEST_WORKERS`` holds no valid worker setting.
     """
     workers = resolve_test_workers(configured, env=env)
+    # Asked even for a serial run: a project whose addopts passes -n needs -n 0 then.
+    plugins = probe(python, env=env, cwd=cwd)
     if workers == "1":
-        return WorkerPlan("1", PytestPlugins(answered=False))
-    plugins = probe_parallel(python, env=env, cwd=cwd)
+        return WorkerPlan("1", plugins)
     if plugins.support is ParallelSupport.READY:
         return WorkerPlan(workers, plugins)
     if plugins.missing:
@@ -519,14 +526,27 @@ def _run_coverage_report(run: _CoverageRun) -> int:
     """
     fail_under = run.config.fail_under
     _announce(f"[coverage] python -m coverage report -m --fail-under={fail_under}", quiet=run.quiet)
-    result = subprocess.run(
-        [run.python, "-m", "coverage", "report", "-m", f"--fail-under={fail_under}"],
-        env=run.env,
-        cwd=run.project_dir,
-        check=False,
-        stdout=subprocess.DEVNULL if run.quiet else None,
-        stderr=subprocess.DEVNULL if run.quiet else None,
-    )
+    argv = [run.python, "-m", "coverage", "report", "-m", f"--fail-under={fail_under}"]
+    if not run.quiet:
+        result = subprocess.run(argv, env=run.env, cwd=run.project_dir, check=False)
+    else:
+        # Captured, not discarded: a passing report is noise in quiet mode, but a failing one is
+        # the only place that names the lines the floor is missing.
+        result = subprocess.run(
+            argv,
+            env=run.env,
+            cwd=run.project_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0:
+            sys.stdout.write(result.stdout)
+            sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        print(f"[coverage] Coverage is below fail_under = {fail_under} (exit {result.returncode})", file=sys.stderr)
     return result.returncode
 
 
@@ -562,6 +582,7 @@ def run_coverage_tests(
     include_integration: bool = False,
     quiet: bool = False,
     python: str | None = None,
+    probe: ParallelProbe = probe_parallel,
 ) -> int:
     """Run pytest under coverage and generate reports.
 
@@ -574,6 +595,7 @@ def run_coverage_tests(
         python: Interpreter to run the suite under - the PROJECT's venv python. Required;
             this script itself runs under bmk's interpreter (it is stdlib-only), but the
             tests must not.
+        probe: Asks the project's interpreter what its pytest loads (``probe_parallel``).
 
     Returns:
         Exit code (0 for success, non-zero for failure).
@@ -593,7 +615,7 @@ def run_coverage_tests(
     remove_report_artifacts(project_dir, config.coverage_report_file)
 
     base_env = build_env(project_dir, config.src_path)
-    plan = plan_test_workers(config.workers, python=test_python, env=base_env, cwd=project_dir)
+    plan = plan_test_workers(config.workers, python=test_python, env=base_env, cwd=project_dir, probe=probe)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         run = _CoverageRun(
@@ -607,6 +629,7 @@ def run_coverage_tests(
         )
         returncode = _run_pytest_under_coverage(run, include_integration=include_integration)
         if returncode != 0:
+            print(f"[coverage] Tests failed (exit {returncode})", file=sys.stderr)
             return returncode
 
         returncode = _run_coverage_report(run)
@@ -1009,6 +1032,7 @@ def _run_tests_step(
     include_integration: bool,
     quiet: bool,
     python: str | None,
+    probe: ParallelProbe,
 ) -> int:
     """Run the suite under coverage, reporting the outcome.
 
@@ -1021,6 +1045,7 @@ def _run_tests_step(
         include_integration: Include integration tests (excluded by default).
         quiet: Minimize output (short tracebacks, no per-test lines).
         python: Interpreter to run the suite under - the project's own venv python.
+        probe: Asks the project's interpreter what its pytest loads.
 
     Returns:
         The test exit code (0 when the suite and the coverage floor passed).
@@ -1032,9 +1057,10 @@ def _run_tests_step(
         include_integration=include_integration,
         quiet=quiet,
         python=python,
+        probe=probe,
     )
     if exit_code != 0:
-        print(f"[coverage] Tests failed (exit {exit_code})", file=sys.stderr)
+        # run_coverage_tests has already said which step failed: the tests or the floor.
         return exit_code
     _announce("[coverage] Tests passed", quiet=quiet)
     return 0
@@ -1081,6 +1107,7 @@ def main(
     include_integration: bool = False,
     quiet: bool = False,
     python: str | None = None,
+    probe: ParallelProbe = probe_parallel,
 ) -> int:
     """Main entry point for coverage operations.
 
@@ -1092,6 +1119,7 @@ def main(
         include_integration: Include integration tests (excluded by default).
         quiet: Minimize output (short tracebacks, no per-test lines).
         python: Interpreter to run the suite under - the project's own venv python.
+        probe: Asks the project's interpreter what its pytest loads (``probe_parallel``).
 
     Returns:
         Exit code: the test run's own code when it fails, 2 when a setting is refused, 1
@@ -1110,6 +1138,7 @@ def main(
                 include_integration=include_integration,
                 quiet=quiet,
                 python=python,
+                probe=probe,
             )
         except RefusalError as exc:
             print(f"[coverage] {exc}", file=sys.stderr)

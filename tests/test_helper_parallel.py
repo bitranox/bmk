@@ -67,6 +67,27 @@ def test_one_worker_means_no_xdist_arguments_at_all() -> None:
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("xdist_loaded", "project_workers", "expected"),
+    [
+        (True, True, ["-n", "0"]),
+        (True, False, []),
+        # Without xdist loaded pytest rejects -n, and the project cannot be passing one.
+        (False, True, []),
+        (False, False, []),
+    ],
+)
+def test_one_worker_overrides_an_n_the_project_passes_itself(
+    *, xdist_loaded: bool, project_workers: bool, expected: list[str]
+) -> None:
+    # workers = 1 means one process, also against `-n` in the project's addopts: the last -n on
+    # the command line wins, and -n 0 makes xdist run nothing in parallel.
+    plugins = PytestPlugins(xdist_installed=xdist_loaded, xdist_loaded=xdist_loaded, project_workers=project_workers)
+
+    assert xdist_args("1", project=plugins) == expected
+
+
+@pytest.mark.os_agnostic
 def test_parallel_runs_keep_each_xdist_group_on_one_worker() -> None:
     # loadgroup sends every test marked @pytest.mark.xdist_group("<name>") to the same worker,
     # one after another: the way a project keeps its test database out of the parallel part.

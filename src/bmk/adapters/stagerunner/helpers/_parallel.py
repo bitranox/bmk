@@ -9,7 +9,9 @@ A parallel run always uses ``--dist loadgroup``: every test carrying the same
 ``@pytest.mark.xdist_group("<name>")`` goes to one worker and runs one after another, while the
 rest of the suite spreads out. That is how a project keeps tests that share an external resource
 (a test database, a fixed port) out of the parallel part without giving up the speed elsewhere.
-``[tool.scripts.test] workers = 1`` (or ``BMK_TEST_WORKERS=1``) stops bmk adding ``-n``.
+``[tool.scripts.test] workers = 1`` (or ``BMK_TEST_WORKERS=1``) runs the suite in one process, also
+when the project's own ``addopts`` passes ``-n``: bmk then adds ``-n 0``, which pytest-xdist reads
+as "do not distribute".
 
 What the run will load is asked of the project's own pytest, with its configuration fully parsed,
 never inferred from what is importable: plugin autoload can be off
@@ -23,7 +25,7 @@ import subprocess
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AUTO",
     "WORKERS_ENV",
+    "ParallelProbe",
     "ParallelSupport",
     "PytestPlugins",
     "normalise_workers",
@@ -137,6 +140,12 @@ class PytestPlugins(BaseModel):
         return None
 
 
+class ParallelProbe(Protocol):
+    """Asks a project's interpreter which parallel-run plugins its pytest loads (``probe_parallel``)."""
+
+    def __call__(self, python: str, /, *, env: Mapping[str, str], cwd: Path) -> PytestPlugins: ...
+
+
 def normalise_workers(raw: object) -> str:
     """``"auto"`` or a positive count as text.
 
@@ -194,13 +203,19 @@ def split_workers(workers: str, *, cells: int, cpus: int | None) -> str:
 
 
 def xdist_args(workers: str, *, project: PytestPlugins) -> list[str]:
-    """The pytest arguments for ``workers``; none at all for a serial run.
+    """The pytest arguments for ``workers``.
 
     pytest puts addopts before the command line and the last value wins, so an ``-n`` or
-    ``--dist`` from bmk would silently replace one the project chose. A project that already
-    passes ``-n`` gets nothing added; one that passes only ``--dist`` keeps its mode.
+    ``--dist`` from bmk would silently replace one the project chose. For a parallel run that is
+    the project's call: a project that already passes ``-n`` gets nothing added, one that passes
+    only ``--dist`` keeps its mode. A serial run is bmk's call, because it is either the off
+    switch (``workers = 1``) or a run whose coverage only one process can measure, so a project's
+    own ``-n`` is overridden with ``-n 0``. Without xdist loaded pytest would reject ``-n``, and
+    the project cannot be passing one.
     """
-    if workers == "1" or project.project_workers:
+    if workers == "1":
+        return ["-n", "0"] if project.xdist_loaded and project.project_workers else []
+    if project.project_workers:
         return []
     dist = [] if project.project_dist else ["--dist", "loadgroup"]
     return ["-n", workers, *dist]

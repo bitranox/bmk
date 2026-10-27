@@ -813,7 +813,18 @@ def test_a_cell_without_xdist_runs_pytest_in_one_process(tmp_path: Path) -> None
 
 
 @pytest.mark.os_agnostic
-def test_one_pytest_worker_never_asks_the_interpreter(tmp_path: Path) -> None:
+def test_one_pytest_worker_with_an_interpreter_that_cannot_answer_adds_nothing(tmp_path: Path) -> None:
     argv = cell_pytest_argv(tmp_path / "absent-python", tmp_path, pytest_workers="1", env={})
 
     assert "-n" not in argv
+
+
+@pytest.mark.os_agnostic
+def test_one_pytest_worker_beats_an_n_the_project_passes_itself(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "p"\nversion = "0"\n\n[tool.pytest.ini_options]\naddopts = "-n 2"\n', encoding="utf-8"
+    )
+
+    argv = cell_pytest_argv(Path(sys.executable), tmp_path, pytest_workers="1", env=dict(os.environ))
+
+    assert argv[3:5] == ["-n", "0"]

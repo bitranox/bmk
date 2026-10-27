@@ -27,6 +27,12 @@ if TYPE_CHECKING:
     from bmk.composition import AppServices
 
 
+# Commands that must not rewrite the Makefile first. `install` writes it itself. A release refuses a
+# working tree with uncommitted changes, so a Makefile it had just rewritten would make every release
+# after a new bmk version refuse, naming a change the same command made; the next target updates it.
+_SKIP_MAKEFILE_CHECK = frozenset({"install", "release", "rel", "r"})
+
+
 @click.group(
     help=__init__conf__.title,
     context_settings=CLICK_CONTEXT_SETTINGS,
@@ -109,7 +115,7 @@ def cli(
     )
     apply_traceback_preferences(traceback)
 
-    if ctx.invoked_subcommand is not None and ctx.invoked_subcommand != "install":
+    if ctx.invoked_subcommand is not None and ctx.invoked_subcommand not in _SKIP_MAKEFILE_CHECK:
         try:
             # Same lazy-import rationale as `_register_commands` below: importing
             # `.commands` here (before `cli` finishes definition) is deferred by convention.

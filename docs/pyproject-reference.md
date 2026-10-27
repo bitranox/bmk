@@ -207,17 +207,21 @@ dev = ["pytest", "pytest-cov", "pytest-xdist"]
   port or shared file. A conftest can apply the mark to every test that uses such a fixture.
 - **The floor is checked once, by the report.** The parallel run passes
   `--cov-fail-under=0` so pytest-cov does not enforce `fail_under` itself; the `coverage report`
-  step that follows does, exactly as after a serial run. In JSON mode a floor failure shows only
-  its exit line; `--human` prints the report table with the missing lines.
+  step that follows does, exactly as after a serial run. A floor failure prints the report table
+  with the missing lines, in JSON mode too, and then `[coverage] Coverage is below fail_under = N`;
+  `[coverage] Tests failed` is printed only when a test failed.
 - **pytest decides, not an import check.** bmk runs pytest's own configuration in the
   project's venv and directory to see which plugins it LOADS. A plugin that is installed but not
   loaded (`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, `-p no:xdist` in `addopts`) gives a serial run with no
   hint; with autoload off, `-p xdist -p pytest_cov` in `addopts` loads them again. The hint is
-  printed only for a package that is not installed. A `-n` the project already passes
-  in `addopts` is left to the project (bmk adds neither `-n` nor `--dist`), and a `--dist` mode
-  it chose is kept (bmk adds only `-n`).
-- **Turning it off.** `workers = 1` under `[tool.scripts.test]` stops bmk adding `-n`, so a
-  suite without its own `-n` in `addopts` runs in one process. `BMK_TEST_WORKERS` overrides the setting for one run (`BMK_TEST_WORKERS=1 make
+  printed only for a package that is not installed. In a parallel run, a `-n` the project already
+  passes in `addopts` is left to the project (bmk adds neither `-n` nor `--dist`), and a `--dist`
+  mode it chose is kept (bmk adds only `-n`). In a serial run bmk overrides that `-n` with `-n 0`:
+  `coverage run` measures only its own process, so a suite spread over xdist workers it never sees
+  would fail the floor.
+- **Turning it off.** `workers = 1` under `[tool.scripts.test]` runs the suite in one process,
+  also when the project's own `addopts` passes `-n` (bmk adds `-n 0`, which xdist reads as "do not
+  distribute"). `BMK_TEST_WORKERS` overrides the setting for one run (`BMK_TEST_WORKERS=1 make
   test`). A value other than `auto` or a whole number of at least 1, there or in
   `pyproject.toml`, is refused with one line naming the setting and exit code 2.
 - **No xdist, one hint.** Without pytest-xdist (or pytest-cov) the suite runs serially and the

@@ -147,7 +147,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "7 days"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, certifi = "2026-10-20T02:24:17Z"}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"

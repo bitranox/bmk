@@ -130,6 +130,32 @@ def test_a_parallel_run_measures_the_same_coverage_as_a_serial_one(
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("addopts", "workers"),
+    [
+        # workers = 1 is the off switch, also against the project's own -n.
+        ("-n 2", "1"),
+        # pytest-cov switched off: coverage run cannot see the workers, so the run stays serial.
+        ("-n 2 -p no:pytest_cov", "3"),
+    ],
+    ids=["workers-1", "no-pytest-cov"],
+)
+def test_an_n_the_project_passes_runs_in_one_process_when_bmk_runs_serially(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, addopts: str, workers: str
+) -> None:
+    plain = _project(tmp_path / "plain")
+    owned = _project(tmp_path / "owned", extra_toml=f'\n[tool.pytest.ini_options]\naddopts = "{addopts}"\n')
+
+    plain_rc, plain_cov = _run(plain, "1", monkeypatch)
+    owned_rc, owned_cov = _run(owned, workers, monkeypatch)
+    owned_workers, _ = _spans(owned)
+
+    assert (plain_rc, owned_rc) == (0, 0)
+    assert len(owned_workers) == 1, owned_workers
+    assert owned_cov == plain_cov
+
+
+@pytest.mark.os_agnostic
 def test_tests_sharing_an_xdist_group_never_overlap_in_a_parallel_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -179,8 +205,8 @@ def test_a_project_with_xdist_gets_the_count_it_asked_for(tmp_path: Path, capsys
 
 
 @pytest.mark.os_agnostic
-def test_workers_one_never_probes_and_never_hints(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # A missing interpreter would make any probe answer UNKNOWN; serial must not depend on it.
+def test_workers_one_never_hints(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # A missing interpreter makes the probe answer UNKNOWN; serial must not depend on it.
     workers = plan_test_workers("1", python=str(tmp_path / "absent"), env={}, cwd=tmp_path).workers
 
     assert workers == "1"
@@ -212,7 +238,9 @@ def test_a_nonsense_project_setting_is_refused(tmp_path: Path) -> None:
 _HELPER = Path(_coverage_module.__file__)
 
 
-def _stage(project: Path, workers: str, **extra_env: str) -> subprocess.CompletedProcess[str]:
+def _stage(
+    project: Path, workers: str, *, output_format: str = "text", **extra_env: str
+) -> subprocess.CompletedProcess[str]:
     """Run the helper exactly as the pytest stage does: a subprocess under bmk's interpreter."""
     env = {**os.environ, WORKERS_ENV: workers, **extra_env}
     return subprocess.run(
@@ -225,6 +253,8 @@ def _stage(project: Path, workers: str, **extra_env: str) -> subprocess.Complete
             str(project),
             "--python",
             sys.executable,
+            "--output-format",
+            output_format,
         ],
         cwd=project,
         env=env,
@@ -245,6 +275,30 @@ def test_a_parallel_run_below_the_floor_fails_like_a_serial_one_with_the_missing
 
     assert serial.returncode == parallel.returncode == 2, (serial.stderr[-800:], parallel.stderr[-800:])
     assert "unused.py" in parallel.stdout, "the report naming the missing lines must still print"
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("workers", ["1", "3"], ids=["serial", "parallel"])
+def test_a_floor_failure_in_json_mode_prints_the_missing_lines_and_says_it_is_the_floor(
+    tmp_path: Path, workers: str
+) -> None:
+    # JSON is make test's default: the stage runner shows this output only because the stage failed.
+    project = _project(tmp_path, extra_toml="\n[tool.coverage.report]\nfail_under = 100\n")
+
+    result = _stage(project, workers, output_format="json")
+
+    assert result.returncode == 2, result.stderr[-800:]
+    assert "unused.py" in result.stdout, "the report naming the missing lines must reach the user"
+    assert "fail_under = 100" in result.stderr
+    assert "Tests failed" not in result.stderr, "every test passed; only the floor failed"
+
+
+@pytest.mark.os_agnostic
+def test_a_passing_json_run_prints_no_coverage_report(tmp_path: Path) -> None:
+    result = _stage(_project(tmp_path), "1", output_format="json")
+
+    assert result.returncode == 0, result.stderr[-800:]
+    assert "TOTAL" not in result.stdout
 
 
 @pytest.mark.os_agnostic

@@ -6,6 +6,29 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- `[tool.scripts.test] workers = 1` (and `BMK_TEST_WORKERS=1`) now runs the suite in one process
+  even when the project's own `addopts` passes `-n`: bmk adds `-n 0`. Before, the project's `-n`
+  still spread the tests over xdist workers that `coverage run` never measures, so the run failed
+  its `fail_under` floor although every test passed. A venv with pytest-xdist but no pytest-cov,
+  which bmk already ran serially, gets the same `-n 0`, and its hint ("tests run in one process")
+  is now true. bmk asks the project's pytest what it loads on every run, serial ones included.
+- `release` (`rel`, `r`) no longer rewrites an outdated Makefile before it runs. It refuses a
+  working tree with uncommitted changes, so after a new bmk version every release refused,
+  naming the Makefile change the same command had just made; the next other target updates it.
+
+### Fixed
+
+- A coverage floor failure in JSON mode (make test's default) printed only an exit line: the
+  `coverage report` table naming the missing lines was discarded. It is now printed whenever the
+  floor fails, in every mode, and a passing report stays silent in JSON mode.
+- A floor failure was reported as `[coverage] Tests failed (exit 2)` although every test passed.
+  It now reads `[coverage] Coverage is below fail_under = <N> (exit 2)`; `Tests failed` is printed
+  only when pytest fails.
+- `release` on a detached HEAD pushed a ref named `HEAD` and failed only after creating the tag.
+  It now refuses first, naming the clean-worktree route.
+
 ## [3.29.0] 2026-10-26 23:11:44
 
 ### Added

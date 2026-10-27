@@ -174,14 +174,13 @@ def cell_pytest_argv(python: Path, project_dir: Path, *, pytest_workers: str, en
 
     ``-p no:cacheprovider`` keeps parallel cells from racing on a shared ``.pytest_cache``.
     ``pytest_workers`` is this cell's share of the CPUs (``main`` splits them); it only takes
-    effect when the cell's venv has pytest-xdist, and the interpreter is not asked at all for
-    a serial run. No hint is printed when xdist is missing: ``make test`` already says so.
+    effect when the cell's venv has pytest-xdist. The interpreter is asked for a serial run too,
+    because a project whose addopts passes ``-n`` then needs ``-n 0`` (see ``xdist_args``). No
+    hint is printed when xdist is missing: ``make test`` already says so.
     """
-    parallel: list[str] = []
-    if pytest_workers != "1":
-        plugins = probe_parallel(str(python), env=env, cwd=project_dir)
-        if plugins.support in _CELL_PARALLEL:
-            parallel = xdist_args(pytest_workers, project=plugins)
+    plugins = probe_parallel(str(python), env=env, cwd=project_dir)
+    workers = pytest_workers if plugins.support in _CELL_PARALLEL else "1"
+    parallel = xdist_args(workers, project=plugins)
     return [str(python), "-m", "pytest", *parallel, *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
 
 
