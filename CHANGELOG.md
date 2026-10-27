@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.30.0] 2026-10-27 09:24:21
+
 ### Changed
 
 - `[tool.scripts.test] workers = 1` (and `BMK_TEST_WORKERS=1`) now runs the suite in one process
