@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.31.0] 2026-10-28 22:08:07
+
 ### Fixed
 
 - - With pytest 9.2.0 and pytest-xdist 3.8.0 every `xdist_group` was silently ignored: xdist groups
