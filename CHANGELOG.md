@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Documentation
+
+- `docs/pyproject-reference.md` and the devops-bmk skill said a conftest can put
+  `xdist_group` on every test that uses a fixture, but a `pytest_collection_modifyitems` hook
+  adds the mark too late unless it is `@pytest.hookimpl(tryfirst=True)`, and the tests then
+  spread over every worker while the run stays green. Both now show the `tryfirst` hook and how
+  to check a group: each grouped node id ends in `@<name>` and they all run on one worker.
+
 ## [3.30.0] 2026-10-27 09:24:21
 
 ### Changed

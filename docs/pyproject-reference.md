@@ -204,7 +204,26 @@ dev = ["pytest", "pytest-cov", "pytest-xdist"]
 - **Shared resources run one at a time.** Every parallel run passes `--dist loadgroup`. Tests
   marked with the same `@pytest.mark.xdist_group("<name>")` go to one worker and run one after
   another, while the rest of the suite stays parallel. Use one group per test database, fixed
-  port or shared file. A conftest can apply the mark to every test that uses such a fixture.
+  port or shared file. A conftest can apply the mark to every test that uses such a fixture, but
+  only from a hook that runs BEFORE xdist reads the marks: xdist reads them in its own
+  `pytest_collection_modifyitems`, so a conftest hook of that name must be `tryfirst`, or the mark
+  arrives too late and the tests spread over every worker while the run stays green:
+
+  ```python
+  import pytest
+
+
+  @pytest.hookimpl(tryfirst=True)
+  def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+      for item in items:
+          if "test_database" in item.fixturenames:
+              item.add_marker(pytest.mark.xdist_group("test-database"))
+  ```
+
+  A module-level `pytestmark = pytest.mark.xdist_group("<name>")` needs no hook. Check a group in
+  a `pytest -n 4 --dist loadgroup -v` run: every grouped test's node id ends in `@<name>` and they
+  all run on one worker. A green run proves nothing here, because an ungrouped suite passes too
+  until two tests collide.
 - **The floor is checked once, by the report.** The parallel run passes
   `--cov-fail-under=0` so pytest-cov does not enforce `fail_under` itself; the `coverage report`
   step that follows does, exactly as after a serial run. A floor failure prints the report table
