@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.32.0] 2026-10-29 00:28:13
+
 ### Fixed
 
 - A `-m` in the project's own pytest configuration (addopts or `PYTEST_ADDOPTS`, e.g.
