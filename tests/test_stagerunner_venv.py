@@ -1124,8 +1124,10 @@ def test_the_refused_refresh_notice_reaches_the_stream_it_is_given(
     monkeypatch.setenv("UV_OFFLINE", "1")
     out = io.StringIO()
 
-    assert lock_project_reporting(tmp_path, quiet=True, upgrade=True, stream=out)
+    locked = lock_project_reporting(tmp_path, quiet=True, upgrade=True, stream=out)
 
+    # A failed lock wrote uv's own reason to the stream; without it a red run reads "assert False".
+    assert locked, out.getvalue()
     assert "refused --refresh-package" in out.getvalue()
     assert "refused --refresh-package" not in capsys.readouterr().err
 
