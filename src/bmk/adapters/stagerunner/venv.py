@@ -1309,11 +1309,15 @@ _REFRESH_REFUSALS = ("cannot be used with `--refresh`", "for '--refresh-package"
 # `--color never` does not reach clap's own parse errors, so the text is compared with its SGR
 # sequences removed.
 _ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
+# With COLUMNS set, uv reflows its own error to that width (uv 0.13.6, measured): at 80 the offline
+# refusal breaks inside "cannot be used with `--refresh`", so the text is compared with every run of
+# whitespace, line breaks and the continuation indent included, collapsed to one space.
+_WHITESPACE = re.compile(r"\s+")
 
 
 def refresh_refused(rc: int, stderr: str) -> bool:
     """True only when uv refused ``--refresh-package`` itself, so the plain lock may stand in."""
-    plain = _ANSI_SGR.sub("", stderr)
+    plain = _WHITESPACE.sub(" ", _ANSI_SGR.sub("", stderr))
     return rc == _UV_ERROR_EXIT and any(marker in plain for marker in _REFRESH_REFUSALS)
 
 

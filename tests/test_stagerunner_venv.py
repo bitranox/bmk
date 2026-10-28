@@ -1027,6 +1027,23 @@ def test_a_coloured_refusal_is_still_a_refused_refresh() -> None:
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "error: the argument `UV_OFFLINE` (environment variable) cannot be used with\n       `--refresh`\n",
+        "error: the argument `UV_OFFLINE` (environment variable)\n       cannot be used with `--refresh`\n",
+    ],
+    ids=["columns-80", "columns-60"],
+)
+def test_a_refusal_uv_wrapped_to_the_terminal_width_is_still_a_refused_refresh(stderr: str) -> None:
+    """With COLUMNS set, uv 0.13.6 reflows its error to that width (measured at 80 and 60).
+
+    Unset or wide it prints one line, which is why only some environments broke the retry.
+    """
+    assert refresh_refused(2, stderr)
+
+
+@pytest.mark.os_agnostic
 def test_a_real_lock_failure_on_exit_2_is_not_read_as_a_refused_refresh() -> None:
     """Exit 2 is uv's general error status, not a usage-error code (third review of 58394fe).
 
@@ -1085,7 +1102,12 @@ def test_a_failing_upgrade_lock_still_shows_uv_s_reason_when_not_quiet(
 
 
 @pytest.mark.os_agnostic
-@pytest.mark.parametrize("colour", [{}, {"FORCE_COLOR": "1", "CLICOLOR_FORCE": "1"}], ids=["plain", "forced-colour"])
+@pytest.mark.parametrize(
+    "colour",
+    # COLUMNS=80 is the width at which uv splits "cannot be used with `--refresh`" across two lines.
+    [{}, {"FORCE_COLOR": "1", "CLICOLOR_FORCE": "1"}, {"COLUMNS": "80"}],
+    ids=["plain", "forced-colour", "narrow-terminal"],
+)
 def test_offline_upgrade_lock_succeeds_for_real(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], colour: dict[str, str]
 ) -> None:
