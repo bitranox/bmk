@@ -209,6 +209,11 @@ def integration_pytest_argv(ctx: StageContext) -> list[str]:
     defect as the unit-test stage. Fall back to the bare name only when no project venv
     resolves, so the failure looks the way it always did rather than a confusing
     FileNotFoundError.
+
+    ``-m integration`` deliberately REPLACES an ``-m`` from the project's addopts (pytest keeps the
+    last one), unlike ``make test``'s exclusion, which combines with it (``_parallel.marker_args``):
+    this lane exists to run exactly the integration tests, and a project's ``-m "not slow"`` would
+    otherwise silently drop the slow ones from the lane meant for them.
     """
     python = resolve_test_python(ctx)
     head = [python, "-m", "pytest"] if python else ["pytest"]

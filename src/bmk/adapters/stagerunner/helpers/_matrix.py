@@ -35,6 +35,8 @@ from pydantic import ValidationError
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig
 from bmk.adapters.stagerunner.helpers._parallel import (
     ParallelSupport,
+    PytestPlugins,
+    marker_args,
     probe_parallel,
     resolve_test_workers,
     split_workers,
@@ -153,15 +155,16 @@ def cell_env(venv: Path) -> dict[str, str]:
     return env
 
 
-def pytest_marker_args(project_dir: Path) -> list[str]:
+def pytest_marker_args(project_dir: Path, *, plugins: PytestPlugins) -> list[str]:
     """The ``-m`` filter ``make test`` applies, read from the same ``[tool.scripts.test]`` key.
 
     A project marks tests that must never run in the gate (host-mutating ones, say) through
     ``exclude-markers``; a matrix with its own hardcoded filter runs them in every cell. An
-    empty value filters nothing, as it does in ``make test``.
+    empty value filters nothing, as it does in ``make test``. The project's own ``-m`` from
+    ``plugins`` is kept in the expression (see ``marker_args``).
     """
     exclude = CoverageConfig.from_pyproject(project_dir).exclude_markers
-    return ["-m", f"not {exclude}"] if exclude else []
+    return marker_args(exclude, project=plugins)
 
 
 # What a cell needs from its venv to spread pytest over processes. Coverage is not measured in
@@ -181,7 +184,8 @@ def cell_pytest_argv(python: Path, project_dir: Path, *, pytest_workers: str, en
     plugins = probe_parallel(str(python), env=env, cwd=project_dir)
     workers = pytest_workers if plugins.support in _CELL_PARALLEL else "1"
     parallel = xdist_args(workers, project=plugins)
-    return [str(python), "-m", "pytest", *parallel, *pytest_marker_args(project_dir), "-q", "-p", "no:cacheprovider"]
+    markers = pytest_marker_args(project_dir, plugins=plugins)
+    return [str(python), "-m", "pytest", *parallel, *markers, "-q", "-p", "no:cacheprovider"]
 
 
 def _run_gate_in_venv(venv: Path, project_dir: Path, *, quiet: bool, pytest_workers: str = "1") -> _GateOutcome:

@@ -34,6 +34,7 @@ from bmk.adapters.stagerunner.helpers._matrix import (
     resolve_workers,
 )
 from bmk.adapters.stagerunner.helpers._parallel import WORKERS_ENV as TEST_WORKERS_ENV
+from bmk.adapters.stagerunner.helpers._parallel import PytestPlugins
 from bmk.adapters.stagerunner.venv import probe_interpreter, venv_python
 from bmk.domain.enums import RefusalKind
 from bmk.domain.errors import RefusalError
@@ -300,6 +301,26 @@ def test_e2e_an_empty_exclude_markers_runs_every_test(tmp_path: Path) -> None:
     assert main(project_dir=tmp_path, quiet=True) == 1
 
 
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+@pytest.mark.skipif(not _TOOLS_PRESENT, reason="needs uv + pyright")
+def test_e2e_the_projects_own_mark_expression_reaches_every_cell(tmp_path: Path) -> None:
+    """A project's addopts ``-m "not slow"`` survives the cell's ``-m "not integration"``.
+
+    pytest keeps the last ``-m``, so the cell's exclusion used to replace the project's and the
+    slow tests it excluded ran in every cell.
+    """
+    _make_project(tmp_path, _E2E_MINORS[:1], _MARKED_FAILURE.format(marker="slow"))
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + '[tool.pytest.ini_options]\nmarkers = ["slow: test marker"]\naddopts = "-m \'not slow\'"\n',
+        encoding="utf-8",
+    )
+
+    assert main(project_dir=tmp_path, quiet=True) == 0
+
+
 def _pyproject_with_test_table(project: Path, table: str) -> Path:
     _write_pyproject(project, ["3.12"])
     pyproject = project / "pyproject.toml"
@@ -312,7 +333,17 @@ def test_marker_args_follow_the_projects_exclude_markers(tmp_path: Path) -> None
     """The cell filter is the project's ``exclude-markers``, not a fixed ``integration``."""
     project = _pyproject_with_test_table(tmp_path, '[tool.scripts.test]\nexclude-markers = "mutating"\n')
 
-    assert pytest_marker_args(project) == ["-m", "not mutating"]
+    assert pytest_marker_args(project, plugins=PytestPlugins()) == ["-m", "not mutating"]
+
+
+@pytest.mark.os_agnostic
+def test_marker_args_keep_the_projects_own_mark_expression(tmp_path: Path) -> None:
+    """The cell filter combines with the project's own ``-m`` instead of replacing it."""
+    _write_pyproject(tmp_path, ["3.12"])
+
+    plugins = PytestPlugins(project_markexpr="not slow")
+
+    assert pytest_marker_args(tmp_path, plugins=plugins) == ["-m", "(not slow) and not (integration)"]
 
 
 @pytest.mark.os_agnostic
@@ -320,7 +351,7 @@ def test_marker_args_default_to_excluding_integration(tmp_path: Path) -> None:
     """No ``exclude-markers`` key: the same default as ``make test``."""
     _write_pyproject(tmp_path, ["3.12"])
 
-    assert pytest_marker_args(tmp_path) == ["-m", "not integration"]
+    assert pytest_marker_args(tmp_path, plugins=PytestPlugins()) == ["-m", "not integration"]
 
 
 @pytest.mark.os_agnostic
@@ -328,7 +359,7 @@ def test_marker_args_are_empty_when_exclude_markers_is_empty(tmp_path: Path) -> 
     """An empty ``exclude-markers`` filters nothing, so no ``-m`` at all."""
     project = _pyproject_with_test_table(tmp_path, '[tool.scripts.test]\nexclude-markers = ""\n')
 
-    assert pytest_marker_args(project) == []
+    assert pytest_marker_args(project, plugins=PytestPlugins()) == []
 
 
 @pytest.mark.os_agnostic

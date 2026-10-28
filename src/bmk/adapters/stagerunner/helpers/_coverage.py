@@ -45,6 +45,7 @@ from bmk.adapters.stagerunner.helpers._parallel import (
     ParallelProbe,
     ParallelSupport,
     PytestPlugins,
+    marker_args,
     normalise_workers,
     probe_parallel,
     resolve_test_workers,
@@ -394,9 +395,10 @@ def _pytest_argv(run: _CoverageRun, *, include_integration: bool) -> _PytestComm
     argv = [run.python, *head]
 
     marker_filter = ""
-    if not include_integration and config.exclude_markers:
-        marker_filter = f"not {config.exclude_markers}"
-        argv.extend(["-m", marker_filter])
+    markers = [] if include_integration else marker_args(config.exclude_markers, project=run.plugins)
+    if markers:
+        marker_filter = markers[1]
+        argv.extend(markers)
 
     if run.quiet:
         argv.extend(["--tb=short", "-q", "--no-header"])

@@ -173,6 +173,43 @@ def test_tests_sharing_an_xdist_group_never_overlap_in_a_parallel_run(
     assert all(end <= next_start for (_, end), (next_start, _) in pairwise(db)), db
 
 
+_MARKED_FAILURES = """
+import pytest
+
+
+@pytest.mark.slow
+def test_slow_fails() -> None:
+    assert False, "the project's own -m must keep this out"
+
+
+@pytest.mark.integration
+def test_integration_fails() -> None:
+    assert False, "bmk's exclude-markers must keep this out"
+"""
+
+_OWN_MARKEXPR = """
+[tool.pytest.ini_options]
+markers = ["slow: slow", "integration: integration"]
+addopts = "-m 'not slow'"
+"""
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize("workers", ["1", "2"], ids=["serial", "parallel"])
+def test_the_projects_own_mark_expression_survives_bmks_exclusion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: str
+) -> None:
+    # pytest keeps the last -m: bmk's "-m 'not integration'" used to replace the project's
+    # "-m 'not slow'", so make test ran the slow tests the project had excluded.
+    project = _project(tmp_path, extra_toml=_OWN_MARKEXPR)
+    (project / "tests" / "test_marked.py").write_text(_MARKED_FAILURES, encoding="utf-8")
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+
+    rc, _ = _run(project, workers, monkeypatch)
+
+    assert rc == 0
+
+
 # --- choosing the worker count ---------------------------------------------------
 
 

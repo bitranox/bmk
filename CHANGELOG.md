@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- A `-m` in the project's own pytest configuration (addopts or `PYTEST_ADDOPTS`, e.g.
+  `-m "not slow"`) was dropped by `make test` and every `make test-all` cell: pytest keeps only the
+  last `-m`, and bmk's `-m "not integration"` came after it, so the tests the project excluded ran
+  anyway. bmk now reads the project's expression through the pytest probe it already runs and
+  passes `-m "(<project expr>) and not (<exclude-markers>)"`. `make testintegration` still runs
+  exactly `-m integration`.
+
 ## [3.31.0] 2026-10-28 22:08:07
 
 ### Fixed

@@ -607,8 +607,11 @@ Run one with `bmk custom <name>` / `make custom <name>`. This is the only overri
 where `exclude-markers` comes from `[tool.scripts.test].exclude-markers` and **defaults to
 `"integration"`**. So out of the box `make test` runs your unit tests AND `local_only` tests and
 skips `integration`; `make testintegration` runs `-m integration`; a CI job typically runs
-`pytest -m "not local_only"`. The local-vs-CI difference is intentional - `make test` is not meant
-to be identical to CI.
+`pytest -m "not local_only"`. A project's own `-m` (in addopts or `PYTEST_ADDOPTS`) is kept, not
+replaced: `make test` and `test-all` pass `-m "(<project expr>) and not (<exclude-markers>)"`, so
+`addopts = "-m 'not slow'"` still keeps the slow tests out. `make testintegration` alone replaces it
+on purpose, since that lane runs exactly the integration tests. The local-vs-CI difference is
+intentional - `make test` is not meant to be identical to CI.
 
 | Marker                                                              | Meaning                                                                    | Where it runs                                                    |
 |---------------------------------------------------------------------|----------------------------------------------------------------------------|------------------------------------------------------------------|

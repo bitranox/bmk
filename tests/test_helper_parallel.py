@@ -19,6 +19,7 @@ from bmk.adapters.stagerunner.helpers._parallel import (
     WORKERS_ENV,
     ParallelSupport,
     PytestPlugins,
+    marker_args,
     normalise_workers,
     probe_parallel,
     resolve_test_workers,
@@ -60,6 +61,30 @@ def test_a_bad_environment_value_is_a_refusal_naming_the_variable() -> None:
 
 
 # --- the arguments ---------------------------------------------------------------
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("exclude", "markexpr", "expected"),
+    [
+        ("integration", "", ["-m", "not integration"]),
+        # pytest keeps the LAST -m, so bmk's own would silently drop the project's: combine them.
+        ("integration", "not slow", ["-m", "(not slow) and not (integration)"]),
+        ("mutating", "slow or fast", ["-m", "(slow or fast) and not (mutating)"]),
+        # Nothing to exclude: no -m from bmk, so the project's own stays in force untouched.
+        ("", "not slow", []),
+        ("", "", []),
+    ],
+)
+def test_bmks_exclusion_is_combined_with_the_projects_own_mark_expression(
+    exclude: str, markexpr: str, expected: list[str]
+) -> None:
+    assert marker_args(exclude, project=PytestPlugins(project_markexpr=markexpr)) == expected
+
+
+@pytest.mark.os_agnostic
+def test_an_unanswered_probe_keeps_the_plain_exclusion() -> None:
+    assert marker_args("integration", project=PytestPlugins(answered=False)) == ["-m", "not integration"]
 
 
 @pytest.mark.os_agnostic
@@ -190,6 +215,32 @@ def test_a_dist_mode_the_project_chose_is_kept(tmp_path: Path) -> None:
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("pytest_ini", "extra_env", "expected"),
+    [
+        ('addopts = "-m slow"', {}, "slow"),
+        ('addopts = "-mslow"', {}, "slow"),
+        ('addopts = ["-m", "not slow"]', {}, "not slow"),
+        ("", {"PYTEST_ADDOPTS": "-m 'not slow'"}, "not slow"),
+        # Both: PYTEST_ADDOPTS comes after the ini addopts, and pytest keeps the last -m.
+        ('addopts = "-m slow"', {"PYTEST_ADDOPTS": "-m 'not slow'"}, "not slow"),
+        ("", {}, ""),
+    ],
+    ids=["m-space", "m-attached", "ini-list", "pytest-addopts", "env-wins", "none"],
+)
+def test_the_probe_reads_the_mark_expression_the_projects_configuration_passes(
+    tmp_path: Path, pytest_ini: str, extra_env: dict[str, str], expected: str
+) -> None:
+    # pytest merges every spelling and source into one option before the probe reads it, so bmk
+    # never parses an -m itself.
+    env = {key: value for key, value in os.environ.items() if key != "PYTEST_ADDOPTS"} | extra_env
+
+    plugins = probe_parallel(sys.executable, env=env, cwd=_project(tmp_path, pytest_ini))
+
+    assert plugins.project_markexpr == expected
+
+
+@pytest.mark.os_agnostic
 def test_an_interpreter_that_cannot_run_is_unknown_not_missing_a_plugin(tmp_path: Path) -> None:
     plugins = probe_parallel(str(tmp_path / "no-python"), env={}, cwd=tmp_path)
 
@@ -209,7 +260,7 @@ def test_an_interpreter_that_cannot_run_is_unknown_not_missing_a_plugin(tmp_path
     ],
 )
 def test_the_facts_decide_the_support_and_the_hint(facts: dict[str, bool], support: str, missing: str | None) -> None:
-    plugins = PytestPlugins(**facts)
+    plugins = PytestPlugins.model_validate(facts)
 
     assert plugins.support is ParallelSupport[support]
     assert plugins.missing == missing

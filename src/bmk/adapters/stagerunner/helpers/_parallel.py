@@ -41,6 +41,7 @@ __all__ = [
     "ParallelProbe",
     "ParallelSupport",
     "PytestPlugins",
+    "marker_args",
     "normalise_workers",
     "probe_parallel",
     "resolve_test_workers",
@@ -84,6 +85,7 @@ if pytest is not None:
             facts["cov_loaded"] = plugins.hasplugin("pytest_cov")
             facts["project_workers"] = getattr(config.option, "numprocesses", None) is not None
             facts["project_dist"] = getattr(config.option, "dist", "no") not in ("no", None)
+            facts["project_markexpr"] = getattr(config.option, "markexpr", "") or ""
             return 0
     pytest.main(["-p", "no:cacheprovider"], plugins=[_Probe()])
     if facts.get("xdist_loaded"):
@@ -130,6 +132,8 @@ class PytestPlugins(BaseModel):
         project_dist: The project's own configuration already passes a ``--dist`` mode.
         groups_ignored: The installed pytest-xdist groups tests by a rename the installed pytest
             no longer reads, so ``--dist loadgroup`` would run grouped tests in parallel.
+        project_markexpr: The ``-m`` expression the project's own configuration passes (ini
+            addopts and ``PYTEST_ADDOPTS``, already merged by pytest); empty when it passes none.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -142,6 +146,7 @@ class PytestPlugins(BaseModel):
     project_workers: bool = False
     project_dist: bool = False
     groups_ignored: bool = False
+    project_markexpr: str = ""
 
     @property
     def support(self) -> ParallelSupport:
@@ -249,6 +254,26 @@ def xdist_args(workers: str, *, project: PytestPlugins) -> list[str]:
         return []
     dist = [] if project.project_dist else ["--dist", "loadgroup"]
     return ["-n", workers, *dist]
+
+
+def marker_args(exclude: str, *, project: PytestPlugins) -> list[str]:
+    """The ``-m`` argument that keeps ``exclude`` out of the run without dropping the project's own.
+
+    pytest keeps only the LAST ``-m`` it sees, and the command line comes after addopts, so a
+    plain ``-m "not <exclude>"`` would replace an ``-m`` the project's configuration passes and
+    run the tests the project itself excluded. The two are combined into one expression instead.
+    With nothing to exclude bmk passes no ``-m`` at all, which leaves the project's in force.
+
+    Args:
+        exclude: ``[tool.scripts.test] exclude-markers``; empty excludes nothing.
+        project: What the project's pytest configuration passes; an unanswered probe has no
+            expression, so the plain exclusion applies.
+    """
+    if not exclude:
+        return []
+    if not project.project_markexpr:
+        return ["-m", f"not {exclude}"]
+    return ["-m", f"({project.project_markexpr}) and not ({exclude})"]
 
 
 def probe_parallel(python: str, *, env: Mapping[str, str], cwd: Path) -> PytestPlugins:
