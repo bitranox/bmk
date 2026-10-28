@@ -56,6 +56,15 @@ AUTO = "auto"
 # PYTEST_ADDOPTS, plugin autoload and blocks), then the probe's tryfirst cmdline hook records what
 # that configuration loaded and returns before anything is collected. The answer goes to a file,
 # because pytest's global output capture may own stdout at that point.
+#
+# groups_ignored: pytest-xdist up to 3.8.0 groups a test by renaming it in its worker
+# (`item._nodeid = f"{item.nodeid}@<group>"`), and pytest 9.2.0 builds `nodeid` from a structured
+# `_id` that never reads `_nodeid`, so `--dist loadgroup` spreads every group over all workers and
+# each run stays green (pytest-xdist issue #1386). Both halves are asked of the installed code: does
+# this xdist still rename, and does this pytest's node read the rename back? A version comparison
+# would misjudge the xdist release that fixes it (it sends group names separately), and a pytest
+# that honours the rename again. Any failure of the check leaves the field unset: an unknowable
+# answer must not take parallel runs away.
 _PROBE = """
 import importlib.util, json, sys
 facts = {
@@ -77,6 +86,21 @@ if pytest is not None:
             facts["project_dist"] = getattr(config.option, "dist", "no") not in ("no", None)
             return 0
     pytest.main(["-p", "no:cacheprovider"], plugins=[_Probe()])
+    if facts.get("xdist_loaded"):
+        try:
+            import inspect
+            import xdist.remote
+            from _pytest.nodes import Node
+            renames = "item._nodeid =" in inspect.getsource(xdist.remote)
+            node = object.__new__(Node)
+            try:
+                node._nodeid = "bmk-group-probe"
+                honoured = node.nodeid == "bmk-group-probe"
+            except Exception:
+                honoured = False
+            facts["groups_ignored"] = renames and not honoured
+        except Exception:
+            pass
 with open(sys.argv[1], "w", encoding="utf-8") as out:
     json.dump(facts, out)
 """
@@ -87,6 +111,7 @@ class ParallelSupport(Enum):
 
     READY = "ready"  # pytest-xdist and pytest-cov loaded: a parallel run with coverage
     XDIST_ONLY = "xdist-only"  # parallel without coverage (enough for test-all's cells)
+    GROUPS_IGNORED = "groups-ignored"  # xdist loaded, but this pytest drops xdist_group marks: serial
     NO_XDIST = "no-xdist"  # the project has not declared pytest-xdist
     DISABLED = "disabled"  # installed, but the project's configuration does not load it
     UNKNOWN = "unknown"  # the interpreter did not answer; stay serial and say nothing
@@ -103,6 +128,8 @@ class PytestPlugins(BaseModel):
         cov_loaded: The project's configured pytest loads it.
         project_workers: The project's own configuration already passes ``-n``.
         project_dist: The project's own configuration already passes a ``--dist`` mode.
+        groups_ignored: The installed pytest-xdist groups tests by a rename the installed pytest
+            no longer reads, so ``--dist loadgroup`` would run grouped tests in parallel.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -114,12 +141,15 @@ class PytestPlugins(BaseModel):
     cov_loaded: bool = False
     project_workers: bool = False
     project_dist: bool = False
+    groups_ignored: bool = False
 
     @property
     def support(self) -> ParallelSupport:
         """The parallel run these plugins allow."""
         if not self.answered:
             return ParallelSupport.UNKNOWN
+        if self.xdist_loaded and self.groups_ignored:
+            return ParallelSupport.GROUPS_IGNORED
         if self.xdist_loaded:
             return ParallelSupport.READY if self.cov_loaded else ParallelSupport.XDIST_ONLY
         return ParallelSupport.DISABLED if self.xdist_installed else ParallelSupport.NO_XDIST

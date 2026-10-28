@@ -224,6 +224,15 @@ dev = ["pytest", "pytest-cov", "pytest-xdist"]
   a `pytest -n 4 --dist loadgroup -v` run: every grouped test's node id ends in `@<name>` and they
   all run on one worker. A green run proves nothing here, because an ungrouped suite passes too
   until two tests collide.
+- - **A pytest that drops the groups runs serially.** pytest-xdist 3.8.0 groups a test by renaming
+  its node id, and pytest 9.2.0 no longer reads that rename, so with that pair every group spreads
+  over all workers and the run stays green (pytest-xdist issue #1386). bmk asks the installed pair
+  whether the rename still takes effect; when it does not, the suite runs in one process and one
+  stderr line names the cause (in JSON mode it shows only when the stage fails); a `-n` in the
+  project's own addopts is overridden with `-n 0`. Keep the marks. Because the check reads the
+  installed code rather than version numbers, a pytest-xdist release newer than 3.8.0 with the fix,
+  or `pytest<9.2` in the dev extra, brings the parallel run back without any change to bmk's
+  settings. test-all's cells run serially in that case too.
 - **The floor is checked once, by the report.** The parallel run passes
   `--cov-fail-under=0` so pytest-cov does not enforce `fail_under` itself; the `coverage report`
   step that follows does, exactly as after a serial run. A floor failure prints the report table

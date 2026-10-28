@@ -14,13 +14,17 @@ import sys
 import xml.etree.ElementTree as ET  # parses the coverage.xml this test just wrote, never foreign XML
 from itertools import pairwise
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 
 from bmk.adapters.stagerunner.helpers import _coverage as _coverage_module
 from bmk.adapters.stagerunner.helpers._coverage import CoverageConfig, plan_test_workers, run_coverage_tests
-from bmk.adapters.stagerunner.helpers._parallel import WORKERS_ENV
+from bmk.adapters.stagerunner.helpers._parallel import WORKERS_ENV, PytestPlugins, xdist_args
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _MODULE = """
 def kind(n: int) -> str:
@@ -208,6 +212,65 @@ def test_a_project_with_xdist_gets_the_count_it_asked_for(tmp_path: Path, capsys
 def test_workers_one_never_hints(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # A missing interpreter makes the probe answer UNKNOWN; serial must not depend on it.
     workers = plan_test_workers("1", python=str(tmp_path / "absent"), env={}, cwd=tmp_path).workers
+
+    assert workers == "1"
+    assert capsys.readouterr().err == ""
+
+
+def _groups_ignored(_python: str, *, env: Mapping[str, str], cwd: Path) -> PytestPlugins:
+    """Both plugins loaded, but a pytest that drops xdist's groups (pytest 9.2.0 with xdist 3.8.0).
+
+    The real pair is probed in test_helper_parallel.py (local_only, it needs uv to build the venv).
+    """
+    del env, cwd
+    return PytestPlugins(
+        xdist_installed=True, xdist_loaded=True, cov_installed=True, cov_loaded=True, groups_ignored=True
+    )
+
+
+@pytest.mark.os_agnostic
+def test_a_pytest_that_drops_the_groups_runs_serially_and_says_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    env = {key: value for key, value in os.environ.items() if key != WORKERS_ENV}
+
+    workers = plan_test_workers("auto", python=sys.executable, env=env, cwd=tmp_path, probe=_groups_ignored).workers
+
+    assert workers == "1", "grouped tests must not run in parallel when the groups are dropped"
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1, err
+    assert "xdist_group" in err and "#1386" in err, err
+
+
+def _groups_ignored_with_project_workers(_python: str, *, env: Mapping[str, str], cwd: Path) -> PytestPlugins:
+    """The same pair, in a project whose own addopts already passes ``-n``."""
+    del env, cwd
+    return PytestPlugins(
+        xdist_installed=True,
+        xdist_loaded=True,
+        cov_installed=True,
+        cov_loaded=True,
+        project_workers=True,
+        groups_ignored=True,
+    )
+
+
+@pytest.mark.os_agnostic
+def test_a_dropped_group_overrides_the_projects_own_workers_with_n_0(tmp_path: Path) -> None:
+    env = {key: value for key, value in os.environ.items() if key != WORKERS_ENV}
+
+    plan = plan_test_workers(
+        "auto", python=sys.executable, env=env, cwd=tmp_path, probe=_groups_ignored_with_project_workers
+    )
+
+    assert xdist_args(plan.workers, project=plan.plugins) == ["-n", "0"]
+
+
+@pytest.mark.os_agnostic
+def test_a_dropped_group_is_not_mentioned_when_the_project_runs_serially_anyway(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workers = plan_test_workers("1", python=sys.executable, env={}, cwd=tmp_path, probe=_groups_ignored).workers
 
     assert workers == "1"
     assert capsys.readouterr().err == ""

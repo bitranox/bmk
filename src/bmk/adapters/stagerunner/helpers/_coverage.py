@@ -459,7 +459,9 @@ def plan_test_workers(
     one is not installed the suite runs serially and one stderr line names the package to
     add; it reaches the user in text mode and, in JSON mode, only with a failing stage's
     output. A plugin that is installed but switched off by the project's configuration is
-    the project's decision: serial, and nothing printed.
+    the project's decision: serial, and nothing printed. A pytest that drops xdist's groups
+    (``ParallelSupport.GROUPS_IGNORED``) also runs serially, with one stderr line naming why:
+    grouped tests share a database or a port, and a green parallel run would hide the clash.
 
     Args:
         configured: ``[tool.scripts.test] workers``, already normalised.
@@ -481,6 +483,14 @@ def plan_test_workers(
         return WorkerPlan("1", plugins)
     if plugins.support is ParallelSupport.READY:
         return WorkerPlan(workers, plugins)
+    if plugins.support is ParallelSupport.GROUPS_IGNORED:
+        print(
+            "[coverage] tests run in one process: this pytest drops pytest-xdist's xdist_group marks "
+            "(pytest-xdist issue #1386), so grouped tests would run in parallel; a pytest-xdist release "
+            "with the fix, or pytest<9.2 in the dev extra, restores the parallel run",
+            file=sys.stderr,
+        )
+        return WorkerPlan("1", plugins)
     if plugins.missing:
         print(
             f"[coverage] tests run in one process: add {plugins.missing} to the project's dev extra to run "

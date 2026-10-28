@@ -8,6 +8,7 @@ says what the run will see. Nothing is patched.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
@@ -212,3 +213,68 @@ def test_the_facts_decide_the_support_and_the_hint(facts: dict[str, bool], suppo
 
     assert plugins.support is ParallelSupport[support]
     assert plugins.missing == missing
+
+
+# --- a pytest that no longer honours xdist's groups -------------------------------
+#
+# pytest-xdist 3.8.0 groups a test by renaming it: its worker hook assigns
+# ``item._nodeid = f"{item.nodeid}@<group>"``. pytest 9.2.0 builds ``nodeid`` from a structured
+# ``_id`` and never reads ``_nodeid``, so the rename is lost and ``--dist loadgroup`` spreads every
+# group over all workers while each run stays green (pytest-xdist issue #1386; the fix sends group
+# names separately and is not in 3.8.0). A shared test database then gets parallel writers.
+
+
+@pytest.mark.os_agnostic
+def test_ignored_groups_are_their_own_support_and_name_nothing_to_add() -> None:
+    plugins = PytestPlugins(
+        xdist_installed=True, xdist_loaded=True, cov_installed=True, cov_loaded=True, groups_ignored=True
+    )
+
+    assert plugins.support is ParallelSupport.GROUPS_IGNORED
+    assert plugins.missing is None, "both plugins are installed; adding one fixes nothing"
+
+
+@pytest.mark.os_agnostic
+def test_ignored_groups_without_xdist_loaded_change_nothing() -> None:
+    # Groups only matter to a parallel run; a project that does not load xdist runs serially anyway.
+    plugins = PytestPlugins(xdist_installed=True, groups_ignored=True)
+
+    assert plugins.support is ParallelSupport.DISABLED
+
+
+@pytest.mark.os_agnostic
+def test_bmks_own_pytest_still_honours_the_groups(tmp_path: Path) -> None:
+    # bmk's venv locks a pytest older than 9.2, where xdist's rename takes effect.
+    plugins = probe_parallel(sys.executable, env=_env(), cwd=_project(tmp_path))
+
+    assert not plugins.groups_ignored
+    assert plugins.support is ParallelSupport.READY
+
+
+_PYTEST_THAT_DROPS_GROUPS = ("pytest==9.2.0", "pytest-xdist==3.8.0", "pytest-cov>=7.1.0")
+
+
+@pytest.fixture(scope="module")
+def groups_dropping_python(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A venv with the measured broken pair: pytest 9.2.0 and pytest-xdist 3.8.0.
+
+    Built with uv outside any project, so no ``[tool.uv]`` cooldown keeps pytest 9.2.0 out.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("needs uv to build the venv")
+    root = tmp_path_factory.mktemp("groups-dropped")
+    venv = root / "venv"
+    subprocess.run(["uv", "venv", "-q", str(venv)], cwd=root, check=True)
+    python = str(venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
+    subprocess.run(["uv", "pip", "install", "-q", "--python", python, *_PYTEST_THAT_DROPS_GROUPS], cwd=root, check=True)
+    return python
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.local_only
+def test_pytest_9_2_with_xdist_3_8_is_reported_as_ignoring_groups(tmp_path: Path, groups_dropping_python: str) -> None:
+    plugins = probe_parallel(groups_dropping_python, env=_env(), cwd=_project(tmp_path))
+
+    assert plugins.xdist_loaded and plugins.cov_loaded
+    assert plugins.groups_ignored
+    assert plugins.support is ParallelSupport.GROUPS_IGNORED

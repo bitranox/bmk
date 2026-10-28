@@ -6,6 +6,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- - With pytest 9.2.0 and pytest-xdist 3.8.0 every `xdist_group` was silently ignored: xdist groups
+  a test by renaming its node id, pytest 9.2.0 no longer reads that rename, so tests sharing a
+  database or a port ran in parallel while every run stayed green (pytest-xdist issue #1386, fixed
+  on xdist's master but in no release). bmk now asks the project's installed pytest and xdist
+  whether the rename takes effect; when it does not, `make test` runs the suite in one process and
+  prints one stderr line naming the cause (in JSON mode only when the stage fails), and test-all's
+  cells run serially; a `-n` in the project's own addopts is overridden with `-n 0`. A pytest-xdist
+  release with the fix, or `pytest<9.2` in the dev extra, brings the parallel run back by itself.
+
 ### Documentation
 
 - `docs/pyproject-reference.md` and the devops-bmk skill said a conftest can put
