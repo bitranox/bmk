@@ -21,7 +21,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   a host substring, which also matched `xsmtp.test.com:5870`. The substring form was what CodeQL
   flagged as `py/incomplete-url-substring-sanitization`.
 
-## [3.32.0] 2026-10-29 00:28:13
+## [3.32.0] - 2026-10-29
 
 ### Fixed
 
@@ -32,7 +32,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   passes `-m "(<project expr>) and not (<exclude-markers>)"`. `make testintegration` still runs
   exactly `-m integration`.
 
-## [3.31.0] 2026-10-28 22:08:07
+## [3.31.0] - 2026-10-28
 
 ### Fixed
 
@@ -58,7 +58,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   spread over every worker while the run stays green. Both now show the `tryfirst` hook and how
   to check a group: each grouped node id ends in `@<name>` and they all run on one worker.
 
-## [3.30.0] 2026-10-27 09:24:21
+## [3.30.0] - 2026-10-27
 
 ### Changed
 
@@ -83,7 +83,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `release` on a detached HEAD pushed a ref named `HEAD` and failed only after creating the tag.
   It now refuses first, naming the clean-worktree route.
 
-## [3.29.0] 2026-10-26 23:11:44
+## [3.29.0] - 2026-10-26
 
 ### Added
 
@@ -116,7 +116,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - bmk requires `lib_log_rich>=8.0.1` and `setuptools>=84.2.0`; the setuptools release is now older
   than the cooldown, so its dated `[tool.uv]` pin is gone.
 
-## [3.28.1] 2026-10-26 20:58:34
+## [3.28.1] - 2026-10-26
 
 ### Fixed
 
@@ -128,7 +128,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `Makefile:`, which the listing then showed as every target's name. The help grep now prints
   no file names (`grep -hE`), in the template and in bmk's own dev Makefile.
 
-## [3.28.0] 2026-10-26 17:59:59
+## [3.28.0] - 2026-10-26
 
 ### Added
 
@@ -172,14 +172,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   and pyright's `extraPaths`, and gives pyright an execution environment rooted at `tests/`. A test
   checks that every doctest collected from `src/` gets both redirects.
 
-## [3.27.1] 2026-10-25 22:24:01
+## [3.27.1] - 2026-10-25
 
 ### Changed
 
 - Internal only, no change in behaviour: `src` and `tests` carry no inline `type: ignore` or
   `pyright: ignore` left. Each one is replaced by a real annotation or a typed test fake.
 
-## [3.27.0] 2026-10-25 21:18:58
+## [3.27.0] - 2026-10-25
 
 ### Changed
 
@@ -209,7 +209,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   not bmk's, and `bmk install` refuses to replace it.
 - An empty interactive commit message is refused with one `Error:` line instead of a traceback.
 
-## [3.26.0] 2026-10-24 23:15:15
+## [3.26.0] - 2026-10-24
 
 ### Fixed
 
@@ -226,7 +226,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `pyproject.toml` the pin check takes 11-13 s (159 PyPI documents), against 6-6.5 s before the walk
   (37 documents) and about 31 s for the walk without them.
 
-## [3.25.3] 2026-10-24 21:00:26
+## [3.25.3] - 2026-10-24
 
 ### Changed
 
@@ -237,7 +237,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `config-generate-examples`, `send-notification`, the short aliases (`b`/`bmp`, `cl`/`cln`,
   `p`/`psh`, `coverage`/`cov`) and `bmk.print_info()`.
 
-## [3.25.2] 2026-10-24 18:52:21
+## [3.25.2] - 2026-10-24
 
 ### Changed
 
@@ -260,7 +260,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   comma-separated string is refused), a `.env` line takes `EMAIL__...` without the `BMK___`
   prefix, and the Python example uses the `EmailConfig` fields `smtphosts` and `smtp_timeout`.
 
-## [3.25.1] 2026-10-24 18:27:49
+## [3.25.1] - 2026-10-24
 
 ### Changed
 
@@ -268,7 +268,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   uv builds it on: its latest patch only under uv's default `python-preference`. They said "latest
   patch" unconditionally, which is wrong under `UV_PYTHON_PREFERENCE=system`.
 
-## [3.25.0] 2026-10-24 15:21:52
+## [3.25.0] - 2026-10-24
 
 ### Fixed
 
@@ -316,7 +316,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `docs/pyproject-reference.md` and the `devops-bmk` skill describe the venv interpreter choice,
   overlay precedence and refusals, and the Poetry conditions above.
 
-## [3.24.1] 2026-10-24 13:41:02
+## [3.24.1] - 2026-10-24
 
 ### Fixed
 
@@ -360,7 +360,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   affected `SoftFileLock` / `MarkerSoftFileLock` / `SoftFileLease`. 4.2.1 is younger than bmk's
   cooldown, so `[tool.uv]` pins it, as for certifi.
 
-## [3.24.0] 2026-10-24 00:03:08
+## [3.24.0] - 2026-10-24
 
 ### Changed
 
@@ -387,7 +387,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - setuptools (a transitive of bashate via pbr) is floored at 84.1.0 for GHSA-xmj3-9gf7-h52w. The
   fixed release is younger than bmk's cooldown, so `[tool.uv]` pins it, as for certifi.
 
-## [3.23.3] 2026-10-23 22:56:09
+## [3.23.3] - 2026-10-23
 
 ### Fixed
 
@@ -400,7 +400,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   every requirement that reaches it at once, and the tree is walked again at the new pins until they
   settle, so the walk order no longer changes which pins are written.
 
-## [3.23.2] 2026-10-23 21:24:19
+## [3.23.2] - 2026-10-23
 
 ### Changed
 
@@ -417,7 +417,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   and was removed, and only afterwards did the check refuse the value and exit 1. The refusal now
   comes first, so the update exits 1 naming the value and leaves `[tool.uv]` as it was.
 
-## [3.23.1] 2026-10-23 16:42:34
+## [3.23.1] - 2026-10-23
 
 ### Changed
 
@@ -427,7 +427,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   fails the `deps` stage; and how to read which bmk a repo runs. It no longer says bmk is managed
   per project: its env is shared by every project on the machine.
 
-## [3.23.0] 2026-10-23 15:48:52
+## [3.23.0] - 2026-10-23
 
 ### Changed
 
@@ -461,7 +461,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   pinned and left as written, whether the update would have raised it or lowered it to a release
   the oldest supported Python installs. A wildcard (`pkg==1.*`) and `~=` still move as before.
 
-## [3.22.7] 2026-10-23 13:02:17
+## [3.22.7] - 2026-10-23
 
 ### Fixed
 
@@ -484,7 +484,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `make deps-update` in JSON mode shows uv's own error when `uv lock --upgrade` fails; the failed
   stage block held only "uv lock --upgrade failed after the floor update".
 
-## [3.22.6] 2026-10-23 10:08:52
+## [3.22.6] - 2026-10-23
 
 ### Fixed
 
@@ -500,7 +500,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   configuration names no SMTP host; they exited 78 "No SMTP hosts configured", because the hosts
   were checked before the command-line overrides were applied.
 
-## [3.22.5] 2026-10-22 22:01:10
+## [3.22.5] - 2026-10-22
 
 ### Fixed
 
@@ -542,7 +542,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   for equality with what the venv's interpreter reports, `3.16.0`. The two never matched, so the
   venv was deleted and re-resolved each time. The patch is now compared as `X.Y.Z` on both sides.
 
-## [3.22.4] 2026-10-22 19:00:45
+## [3.22.4] - 2026-10-22
 
 ### Changed
 
@@ -593,7 +593,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   venv's interpreter reports (`pypy@X.Y` for PyPy, `X.Yt` for a free-threaded build, otherwise the
   bare minor such as `--python 3.10`), never the interpreter's path.
 
-## [3.22.3] 2026-10-21 20:59:38
+## [3.22.3] - 2026-10-21
 
 ### Fixed
 
@@ -609,7 +609,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **The devops-bmk skill no longer says JSON mode hides a failed provisioning sync**: it points at
   the `[venv] uv sync from uv.lock failed ...` line, printed in every output mode since 3.22.2.
 
-## [3.22.2] 2026-10-21 17:31:29
+## [3.22.2] - 2026-10-21
 
 ### Changed
 
@@ -628,7 +628,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `astral-sh/setup-uv`, `codecov/codecov-action`, the ref kept in a comment), distributed from the
   `default_cicd_public` template; Dependabot groups their updates into one monthly PR.
 
-## [3.22.1] 2026-10-21 15:44:41
+## [3.22.1] - 2026-10-21
 
 ### Fixed
 
@@ -647,7 +647,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   requests. The release is younger than the 7-day cooldown, so `[tool.uv]` carries a per-package
   pin for it until the cooldown admits it.
 
-## [3.22.0] 2026-10-19 20:08:07
+## [3.22.0] - 2026-10-19
 
 ### Changed
 
@@ -658,7 +658,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   value in the shipped `defaultconfig.d/10-bmk.toml`, which is what an installed bmk reads, to the
   documented default.
 
-## [3.21.5] 2026-10-18 11:34:32
+## [3.21.5] - 2026-10-18
 
 ### Added
 
@@ -668,7 +668,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   in CI. bmk's own Makefile and floor churn is committed and pushed first, and the release
   waits for CI on that commit, since `release` does not check it.
 
-## [3.21.4] 2026-10-17 00:39:55
+## [3.21.4] - 2026-10-17
 
 ### Fixed
 
@@ -678,7 +678,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   causes: no test carries the marker (an empty lane, reported as neither passed nor failed) and
   integration tests that exist but were filtered out (a real fault).
 
-## [3.21.3] 2026-10-17 00:17:32
+## [3.21.3] - 2026-10-17
 
 ### Changed
 
@@ -695,7 +695,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   bashate's line length and ignores from `[tool.bashate]`; and the Makefile no longer passes
   `--refresh-package bmk`.
 
-## [3.21.2] 2026-10-15 15:23:57
+## [3.21.2] - 2026-10-15
 
 ### Fixed
 
@@ -706,7 +706,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `make test` does: the project's value, `integration` when the key is unset, and no filter when
   it is empty.
 
-## [3.21.1] 2026-10-13 14:14:15
+## [3.21.1] - 2026-10-13
 
 ### Fixed
 
@@ -732,7 +732,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   itself (offline configured) does the lock run once more without it, saying so; any other lock
   failure stands as it is.
 
-## [3.21.0] 2026-10-12 20:51:09
+## [3.21.0] - 2026-10-12
 
 ### Fixed
 
@@ -760,7 +760,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   was silently getting JSON now gets text mode: verbose output, and the Makefile-outdated question
   when stdin is a terminal.
 
-## [3.20.1] 2026-10-12 19:25:20
+## [3.20.1] - 2026-10-12
 
 ### Fixed
 
@@ -787,7 +787,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   update it. A console that Python does not see as a terminal - native Windows Python in mintty /
   Git Bash without winpty - gets the note instead of the question too.
 
-## [3.20.0] 2026-10-12 18:25:31
+## [3.20.0] - 2026-10-12
 
 ### Added
 
@@ -870,7 +870,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   the directory and says so on stderr. The PowerShell stage now also skips a nested git
   checkout (a linked worktree or a nested clone), as the shell stage already did.
 
-## [3.19.0] 2026-10-12 09:38:11
+## [3.19.0] - 2026-10-12
 
 ### Fixed
 
@@ -927,7 +927,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `50-mail.toml` and `.env.example` documented the comma form for all six list settings; they now
   show the JSON-array and per-index forms.
 
-## [3.18.0] 2026-09-28 22:58:34
+## [3.18.0] - 2026-09-28
 
 ### Added
 
@@ -941,7 +941,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   configured value above the number of declared versions is capped down to it; a value below 1 is
   refused with a clear error and exit code 2, never a silent no-op.
 
-## [3.17.1] 2026-09-02 12:12:33
+## [3.17.1] - 2026-09-02
 
 ## [3.17.1]
 
@@ -956,7 +956,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   toolchain, and `lint_imports_argv` returns a bare argv, so a missing tool fails loudly rather
   than silently skipping. Mirrors the same section in the bitranox-skills copy of this skill.
 
-## [3.17.0] 2026-08-20 17:51:25
+## [3.17.0] - 2026-08-20
 
 ### Fixed
 
@@ -1002,7 +1002,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   in the code: `uv-receipt.toml` is what marks a tool environment, and its parent is where the
   lock goes.
 
-## [3.16.0] 2026-08-20 17:05:36
+## [3.16.0] - 2026-08-20
 
 ### Fixed
 
@@ -1039,7 +1039,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `pip-audit -> cachecontrol[filecache]`, far too fragile a provenance for something bmk imports:
   dropping pip-audit would have taken the lock with it.
 
-## [3.15.0] 2026-08-17 15:47:15
+## [3.15.0] - 2026-08-17
 
 ### Added
 
@@ -1073,7 +1073,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   ordering it is no longer the problem, but that manifest is read by Claude Code's marketplace
   machinery and is only ever seen carrying a plain `X.Y.Z`.
 
-## [3.14.0] 2026-07-30 17:37:50
+## [3.14.0] - 2026-07-30
 
 ### Added
 
@@ -1102,7 +1102,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   -ci`, `bashate --max-line-length 120`, and that bashate reads no config file) and the pre-3.13.2
   nested-worktree file discovery. Both had been written into the bitranox-skills mirror only.
 
-## [3.13.2] 2026-07-28 14:49:10
+## [3.13.2] - 2026-07-28
 
 ### Fixed
 - **The shell-lint stage no longer crosses into a nested git checkout.** `find_sh_files`
@@ -1115,7 +1115,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   for a linked worktree. The project root's own `.git` is never treated as a nested checkout,
   whether the project is a normal clone or is itself checked out as a worktree.
 
-## [3.13.1] 2026-07-24 18:24:00
+## [3.13.1] - 2026-07-24
 
 ### Fixed
 - **PLR0917 (too many positional arguments) on the three Click command callbacks and one
@@ -1149,7 +1149,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
     mount; git already stored them as `100644`, so this never affected CI - only local
     `ruff check` via `EXE002`).
 
-## [3.13.0] 2026-07-20 14:46:40
+## [3.13.0] - 2026-07-20
 
 ### Fixed
 - **The Makefile no longer rebuilds bmk's shared environment before every target.** bmk's env lives
@@ -1183,7 +1183,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   not an import probe: `bmk --version` costs 1.3s, more than the upgrade it guards, and never
   imports `pip_api`.
 
-## [3.12.2] 2026-07-20 14:04:50
+## [3.12.2] - 2026-07-20
 
 ### Fixed
 - **PSScriptAnalyzer no longer lints vendored `.ps1` files inside the project venv.**
@@ -1204,7 +1204,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   notebook. Every `!` is now followed by an assertion on its exit status, stating whether the
   command must succeed or (for the `bmk fail` traceback demos) must exit 1.
 
-## [3.12.0] 2026-07-20 12:12:14
+## [3.12.0] - 2026-07-20
 
 ### Fixed
 - **Email delivery works against `btx_lib_mail` 1.5.0.** The dependency floor moves to `>=1.5.0`,
@@ -1227,7 +1227,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   callers are unaffected. Delivery tests now inject a recording double through this seam instead of
   monkeypatching `smtplib.SMTP`, which pinned the library's private wire protocol and is what broke.
 
-## [3.11.2] 2026-07-19 14:07:59
+## [3.11.2] - 2026-07-19
 
 ### Fixed
 - **`config-deploy` no longer crashes on a legacy Windows console codepage (cp1252).** It printed a
@@ -1245,7 +1245,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `devops-bmk` skill: Windows `make install` uses winget instead of choco, and `make release` skips
   the GitHub step cleanly when `gh` is not on PATH.
 
-## [3.11.1] 2026-07-16 18:40:48
+## [3.11.1] - 2026-07-16
 
 ### Security
 - **PowerShell command injection via `pyproject.toml` closed.** `_psscriptanalyzer.py` was the one
@@ -1290,7 +1290,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   config-deploy return path, the new Pydantic models' malformed-entry skip paths, `test-all` CLI
   dispatch, and previously untested `_toml_config` / `PoetryDepSpec` / `_sync_initconf` branches.
 
-## [3.11.0] 2026-07-16 14:34:33
+## [3.11.0] - 2026-07-16
 
 ### Added
 - **`make test-all`: run the suite and type-check on EVERY declared Python version, in parallel.**
@@ -1351,7 +1351,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   it. Only a MINOR change (a classifier moving 3.14 -> 3.15) still forces one, which is the case
   that genuinely cannot be done in place.
 
-## [3.10.0] 2026-07-16 00:49:30
+## [3.10.0] - 2026-07-16
 
 ### Added
 - **The project venv is built on the newest Python your project declares, at its latest patch.**
@@ -1385,7 +1385,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
   Documented in `docs/pyproject-reference.md`, the `devops-bmk` skill, and `CLAUDE.md`.
 
-## [3.9.1] 2026-07-16 00:13:38
+## [3.9.1] - 2026-07-16
 
 ### Fixed
 - **`pyright` is now pinned at the project's interpreter, like every other gate.** It ran as a
@@ -1411,7 +1411,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   import-linter need no interpreter (they never resolve imports from site-packages). pyright was
   the only gap.
 
-## [3.9.0] 2026-07-15 22:27:01
+## [3.9.0] - 2026-07-15
 
 ### Security
 - **`EmailConfig` no longer leaks the SMTP password on any export path.** Only `__repr__` was
@@ -1475,7 +1475,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   dependencies" - bmk ships no `[dev]` extra by design, because the tools are the product.
 - `docs/make-targets.md` documents `ship`/`sh`, which existed but was listed nowhere.
 
-## [3.8.2] 2026-07-15 19:54:07
+## [3.8.2] - 2026-07-15
 
 ### Removed
 - **Two dead dependencies, and 22 packages with them: 95 -> 73.** Both were declared and
@@ -1514,7 +1514,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   contract, how a command resolves and runs, and the decisions with their trade-offs, and no
   file paths at all. 371 -> 123 lines.
 
-## [3.8.1] 2026-07-15 18:45:01
+## [3.8.1] - 2026-07-15
 
 ### Fixed
 - **A new bmk release is now picked up immediately, instead of whenever uv's index cache
@@ -1534,7 +1534,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   way to opt out. Offline keeps installing from the cache, which is what an offline user
   wants regardless.
 
-## [3.8.0] 2026-07-15 18:09:41
+## [3.8.0] - 2026-07-15
 
 ### Changed
 - **bmk's environment now holds bmk alone, and is shared by every repo.** The Makefile no
@@ -1586,7 +1586,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   off PATH. It deliberately never falls back to bmk's interpreter - a silent fallback is
   the defect itself - so with no project venv it fails and names the fix.
 
-## [3.7.1] 2026-07-15 15:19:16
+## [3.7.1] - 2026-07-15
 
 ### Fixed
 - **`make test` works again in projects with platform-specific dependencies.** The dependency
@@ -1614,7 +1614,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `tests/test_makefile_template_integrity.py` asserts the two files agree on those
   invariants, so the drift cannot recur silently.
 
-## [3.7.0] 2026-07-15 14:34:47
+## [3.7.0] - 2026-07-15
 
 ### Added
 - **`make push MSG="..."` / `make commit MSG="..."` - a commit-message channel that cannot be
@@ -1658,7 +1658,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   where the code reads `BMK_GIT_REMOTE`, and gave `chore: update` as the non-interactive default,
   where the code uses `chores`.
 
-## [3.6.1] 2026-07-15 14:00:30
+## [3.6.1] - 2026-07-15
 
 ### Fixed
 - **bmk is installable again: its `build` floor no longer points at a yanked release.** PyPI yanked
@@ -1674,7 +1674,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   explaining why it must not be raised back to 1.5.1 by a routine dependency sweep; only a real
   1.5.2+ release should move it.
 
-## [3.6.0] 2026-07-14 20:28:03
+## [3.6.0] - 2026-07-14
 
 ### Fixed
 - **bmk keeps its own venvs out of the project's pyright run, so a type-check cannot spin
@@ -1694,7 +1694,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   or when an `include` list already narrows the scope. Existing coverage in any spelling
   (`**/.*`, `.venv`, `**/.venv/**`, `.venv/`) is recognised, so the list cannot grow on repeat runs.
 
-## [3.5.0] 2026-07-14 18:40:00
+## [3.5.0] - 2026-07-14
 
 ### Fixed
 - **The template installs `bmk>=$(BMK_MIN)` instead of a bare `bmk`, so bmk can no longer be
@@ -1707,7 +1707,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   resolves to the newest release. `_sync_initconf.py` keeps `BMK_MIN` equal to the package
   version, and a test asserts it, so the floor cannot lag a release.
 
-## [3.4.0] 2026-07-14 18:05:00
+## [3.4.0] - 2026-07-14
 
 ### Changed
 - **bmk now lives in a per-project tool env (`.venv-bmk`) instead of one machine-wide env.**
@@ -1726,7 +1726,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   import order that would serve stale code to anything running from another directory. As a side
   effect, editing bmk's own source is live immediately.
 
-## [3.3.1] 2026-07-14 16:20:00
+## [3.3.1] - 2026-07-14
 
 ### Fixed
 - `_ensure_bmk` (the target that runs before EVERY make invocation) could silently leave the
@@ -1755,7 +1755,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   `"old"`, which is a substring of ordinary English and made the assertion fail whenever the
   template's own prose used the word.
 
-## [3.3.0] 2026-07-14 14:45:00
+## [3.3.0] - 2026-07-14
 
 ### Added
 - bmk keeps the venv it creates out of git. After provisioning it drops the venv from the index
@@ -1780,7 +1780,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   adding the venv either. A project that lists a venv in its own `[tool.clean].patterns` keeps
   the old behaviour; remove it there to opt in. Delete a venv by hand when you want it gone.
 
-## [3.2.0] 2026-07-14 13:58:00
+## [3.2.0] - 2026-07-14
 
 ### Added
 - bmk now provisions and syncs the target project's own venv before running any
@@ -1823,7 +1823,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   skipped with a warning, the same way a missing token already was; only a real
   upload attempt that fails is still an error.
 
-## [3.1.7] 2026-07-10 10:52:43
+## [3.1.7] - 2026-07-10
 
 ### Fixed
 - `make test` now provisions bmk's tool venv with the project's `[dev]` extra
@@ -1834,7 +1834,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   test importing a `[dev]`-only package failed locally even though CI (which
   installs `[dev]`) passed.
 
-## [3.1.6] 2026-07-10 09:53:04
+## [3.1.6] - 2026-07-10
 
 ### Fixed
 - PowerShell (`.ps1`) and shell (`.sh`) linting now skip any `.venv`-prefixed
@@ -1842,7 +1842,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   virtualenv (`.venv-win`) or Linux one (`.venv-linux`) no longer trips the linter
   on vendored scripts bundled inside it (e.g. `Activate.ps1`, `npm.ps1`).
 
-## [3.1.5] 2026-07-06 17:03:41
+## [3.1.5] - 2026-07-06
 
 ### Fixed
 - **Tool stages failed on Windows (and any host without a global ruff/pytest on `PATH`)**
@@ -1869,7 +1869,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `context._prepend_tool_bin_to_path`: puts bmk's own venv bin dir first on the child `PATH`,
   giving `shutil.which` a place to find the toolchain and letting grandchild processes see it.
 
-## [3.1.4] 2026-07-03 11:41:32
+## [3.1.4] - 2026-07-03
 
 ### Fixed
 - **`.venv`-vs-clean race in `make push`.** `push` built via the `bld` pipeline (which
@@ -1893,7 +1893,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - `actions.ToolActionWithSetup` (added in 3.1.3) replaced by `PipAuditAction`, which folds
   in the pip bootstrap plus the interpreter re-resolution and self-heal retry.
 
-## [3.1.3] 2026-07-03 10:29:05
+## [3.1.3] - 2026-07-03
 
 ### Fixed
 - `pip_audit` stage no longer fails with `No module named pip` when the audited
@@ -1915,7 +1915,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   tool venv) are clean, and the new pip auto-upgrade removes the former pip-CVE ignores'
   reason to exist.
 
-## [3.1.2] 2026-07-03 01:31:51
+## [3.1.2] - 2026-07-03
 
 ### Added
 - Ship the `devops-bmk` Claude Code skill as a single-plugin marketplace: added
@@ -1927,14 +1927,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Changed
 - `.gitignore` no longer ignores `.claude/` or `prompts.md`.
 
-## [3.1.1] 2026-07-02 17:27:40
+## [3.1.1] - 2026-07-02
 
 ### Changed
 - The `ship` command now parses `gh` workflow-run JSON with `orjson` instead of the stdlib
   `json`, matching the modern-library convention used across the rest of the codebase. Added
   tests covering the run-lookup helper (`_find_run_id`), which previously had none.
 
-## [3.1.0] 2026-07-02 17:15:59
+## [3.1.0] - 2026-07-02
 
 ### Added
 - `bmk ensure` (and `make ensure`): installs the external tools bmk needs on the host, best-effort
@@ -1945,7 +1945,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   current platform (pwsh on Linux, winget itself) are reported with a hint instead of failing.
   `--dry-run` previews the install commands; `--strict` exits non-zero if any tool is still missing.
 
-## [3.0.1] 2026-07-02 16:08:51
+## [3.0.1] - 2026-07-02
 
 ### Fixed
 - Coverage runner reads its settings from the correct config table. `CoverageConfig`
@@ -1956,7 +1956,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   verbosity stayed `-v` instead of a configured `-vv`). Now reads the correct table and keys;
   defaults are unchanged.
 
-## [3.0.0] 2026-07-02 15:17:39
+## [3.0.0] - 2026-07-02
 
 ### Changed
 - **Stage runner rewritten in Python (cross-OS).** The make pipelines (clean, deps, deps-update,
@@ -1985,7 +1985,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   tree. Previously the bare `pip-audit` call could resolve to an unrelated `pip-audit` earlier on
   PATH (e.g. an editor's venv) and report vulnerabilities for the wrong environment.
 
-## [2.9.6] 2026-06-30 22:15:59
+## [2.9.6] - 2026-06-30
 
 ### Fixed
 - pip-audit now audits the target project's `.venv`, not whatever venv happens to be active in the
@@ -1996,7 +1996,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   venv's interpreter (the override pip-audit documents), Windows-aware, and clear it when there is no
   project venv. (+2 test assertions.)
 
-## [2.9.5] 2026-06-14
+## [2.9.5] - 2026-06-14
 
 ### Added
 - `bmk ship` command (alias `sh`, `make ship`/`make sh`): the full CI-gated release - runs `push`, waits for the push-triggered CI workflow to pass, runs `release`, then waits for the release workflow to pass; aborts if any CI run fails. Matches the run to the just-pushed HEAD commit and gates via the GitHub CLI (`gh`); falls back to push-only with a clear message if `gh` is unavailable. `--ci-workflow` / `--release-workflow` override the workflow names.
@@ -2005,12 +2005,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - Added a `typed_click.py` facade wrapping rich-click's `option` / `version_option` / `argument` decorators behind explicit, fully-known signatures, keeping the CLI strict-clean under pyright 1.1.410 (`reportUnknownMemberType`) without disabling the rule (ignore isolated to the facade).
 - Bumped internal dependency floors: `lib_cli_exit_tools>=2.3.2`, `lib_log_rich>=6.3.5`, `lib_layered_config>=5.5.2`, `btx_lib_mail>=1.3.2`.
 
-## [2.9.4] 2026-06-01 16:54:25
+## [2.9.4] - 2026-06-01
 
 ### Removed
 - **pip-audit suppression `GHSA-4gg8-gxpx-9rph` dropped**: the `uv` entry-point path-traversal advisory is now resolved at the source - the build environment's `uv` is upgraded to 0.11.15 (the fixed release), so the suppression is no longer needed and the vulnerability is fixed rather than ignored
 
-## [2.9.3] 2026-06-01 16:33:48
+## [2.9.3] - 2026-06-01
 
 ### Changed
 - **Replaced `httpx` with `httpx2`**: the dependency-checker makescript (`makescripts/_dependencies.py`) now imports `httpx2`, the Pydantic-maintained successor to httpx (drop-in API, `import httpx2`). `pyproject.toml` now requires `httpx2>=2.3.0` instead of `httpx>=0.28.1`
@@ -2020,7 +2020,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   - removed `CVE-2026-44431` and `CVE-2026-44432` - urllib3 entries no longer flagged now that the pinned urllib3 (`>=2.7.0`) is the fixed version
   - retained `PYSEC-2022-42969` (py) and `CVE-2026-44405` (paramiko) - still flagged upstream with no fix released
 
-## [2.9.2] 2026-05-16 23:40:54
+## [2.9.2] - 2026-05-16
 
 ### Changed
 - **pip-audit CVE exclusion list refreshed**: removed 17 stale entries that pip-audit no longer flags (pip, setuptools, wheel, cryptography, pillow, pygments, authlib, lxml, python-multipart, uv, rpyc); list is now down to four current entries
@@ -2033,7 +2033,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   - `CVE-2026-44431` - urllib3 cross-origin sensitive-header leak via low-level `ProxyManager` redirects (fix 2.7.0; project already pins urllib3>=2.7.0)
   - `CVE-2026-44432` - urllib3 Brotli/`drain_conn` over-decompression DoS (fix 2.7.0; project already pins urllib3>=2.7.0)
 
-## [2.9.1] 2026-04-24
+## [2.9.1] - 2026-04-24
 
 ### Changed
 - **CI/CD workflow updates**: refreshed GitHub Actions matrix, bumped `codecov/codecov-action` to v6, and updated `actions/download-artifact` to a newer version
@@ -2048,7 +2048,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   - `CVE-2026-40347` - python-multipart 0.0.22 DoS on crafted multipart
   - `GHSA-pjjw-68hj-v9mw` - uv 0.9.11 wheel RECORD path traversal on uninstall
 
-## [2.9.0] 2026-02-27
+## [2.9.0] - 2026-02-27
 
 ### Changed
 - **Makefile switched from `uvx` to persistent `uv tool install`**: the deployed Makefile template now runs `uv tool install --reinstall bmk --with .` before every target, installing bmk and the current project's dependencies into a persistent venv at `~/.local/share/uv/tools/bmk/`; tools like pyright, pytest and pip-audit resolve the full dependency tree without `PYTHONPATH` hacks or a local `.venv` - works on network shares without symlink support
@@ -2062,7 +2062,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - **ruff minimum version**: bumped `>=0.15.2` to `>=0.15.4`
 
-## [2.8.2] 2026-02-25 14:57:07
+## [2.8.2] - 2026-02-25
 
 ### Added
 - **Makefile exports project venv site-packages via `PYTHONPATH`**: ensures bmk's isolated `uvx` Python can find project dependencies (e.g., private git repo packages) by exporting the active venv's `site.getsitepackages()[0]`
@@ -2070,12 +2070,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - **pip-audit CVE exclusion**: added `CVE-2026-25990` (pillow 12.0.0) to `[tool.pip-audit].ignore-vulns` - environment-level package, not a project dependency
 
-## [2.8.1] 2026-02-25 14:42:58
+## [2.8.1] - 2026-02-25
 
 ### Fixed
 - **Codecov upload failed for repos using git credential URL rewriting**: `_get_repo_metadata_from_git()` returned `token@github.com` as the host when the git remote URL contained embedded authentication (`https://token@github.com/owner/repo.git`); now strips everything before `@` in the host component
 
-## [2.8.0] 2026-02-25
+## [2.8.0] - 2026-02-25
 
 ### Changed
 - **Private repo dependencies simplified**: Removed token injection (`GH_PRIVATE_REPOS__` convention); dependencies now use PEP 440 direct references (`pkg @ git+https://...`) with authentication handled by global git config URL rewriting
@@ -2085,12 +2085,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **`install_git_dependencies()`**: Removed from `_dependencies.py` along with `_find_dotenv_upward()` and `_get_git_source_names()` - no longer needed with git config URL rewriting
 - **`UvSourceEntry` dataclass**: Removed from `_toml_config.py` - was only used by the removed git dependency installer
 
-## [2.7.1] 2026-02-24
+## [2.7.1] - 2026-02-24
 
 ### Changed
 - **Token convention renamed**: `.env` keys for private repo tokens changed from `<NAME>_GHTOKEN` to `GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>` for consistency with dotenv section conventions
 
-## [2.7.0] 2026-02-24
+## [2.7.0] - 2026-02-24
 
 ### Added
 - **Private repository dependencies**: `install_git_dependencies()` auto-installs packages from `[tool.uv.sources]` git URLs before PyPI dependency checking; per-library GitHub tokens read from `.env` (`GH_PRIVATE_REPOS__<UPPER_PACKAGE_NAME>=ghp_xxx`); git-sourced packages excluded from PyPI version comparison
@@ -2100,7 +2100,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Documentation**: README, DEVELOPMENT, and CONTRIBUTING updated for v2.6.0 features (private repos, `make test-human`, JSON success summary, NFS venv resilience)
 - **Stage table corrected**: removed stale `test_900_clean` entry, moved `psscriptanalyzer` to stage 040
 
-## [2.6.0] 2026-02-24
+## [2.6.0] - 2026-02-24
 
 ### Added
 - **`make test-human` / `make th`**: dedicated Makefile target for human-readable test output - avoids the `make test --human` issue where Make intercepts `--` flags
@@ -2111,13 +2111,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - **Broken `.venv` detection on NFS**: `execute_script()` now validates `.venv/pyvenv.cfg` exists before setting `VIRTUAL_ENV` - stale NFS mounts or corrupt venvs are ignored instead of causing tool failures
 
-## [2.5.1] 2026-02-24
+## [2.5.1] - 2026-02-24
 
 ### Fixed
 - **Dependency updater corrupted specs with upper bounds**: `_build_updated_spec` injected display annotations (e.g. `(max <1.3, absolute: 1.3.0)`) into dependency strings and overwrote upper-bound constraints (`<1.3`) with the latest version - specs like `>=1.1.0,<1.3; python_version<'3.10'` were mangled into invalid version strings
 - **Upper-bound constraints now preserved during dependency updates**: only lower-bound operators (`>=`, `==`, `~=`, `>`) are updated; `<`, `<=`, and `!=` constraints are left untouched
 
-## [2.5.0] 2026-02-24
+## [2.5.0] - 2026-02-24
 
 ### Added
 - **JSON mode output suppression**: stagerunner captures all tool output in JSON mode and only displays it when a stage fails - a fully passing run produces zero tool output, designed for LLM-driven workflows to minimize context window consumption
@@ -2125,7 +2125,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **JSON mode auto-accept for dependency updates**: `_dependencies.py` runs silently in JSON mode - no report, no per-dependency output, no summary
 - **Pytest concise mode**: in JSON mode, pytest runs with `--tb=short -q --no-header` and coverage report display is suppressed
 
-## [2.4.0] 2026-02-24 11:20:14
+## [2.4.0] - 2026-02-24
 
 ### Added
 - **JSON-by-default output**: `bmk test` and `bmk testintegration` now emit JSON output from tools (ruff, pyright, bandit, pip-audit, shellcheck, PSScriptAnalyzer) for machine-readable consumption
@@ -2143,7 +2143,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Bandit configuration**: bandit now reads settings from `pyproject.toml`
 - **Clean list**: added `.venv` to clean targets; removed `.idea` directory from repository
 
-## [2.3.3] 2026-02-13 20:23:26
+## [2.3.3] - 2026-02-13
 
 ### Removed
 - **test_900_clean stage**: removed `test_900_clean.sh` and `test_900_clean.ps1` from the test pipeline to preserve coverage data for post-test analysis and reporting
@@ -2151,12 +2151,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Changed
 - **Dependency floors updated**: `lib_cli_exit_tools >=2.2.4 → >=2.3.0`, `lib_log_rich >=6.3.1 → >=6.3.3`
 
-## [2.3.2] 2026-02-13 18:14:14
+## [2.3.2] - 2026-02-13
 
 ### Fixed
 - **Makefile alias targets firing as prerequisites during argument forwarding**: `make push coverage test` no longer executes the real `codecov` target - alias targets (`coverage cov:`, `t:`, `bld:`, `cln cl:`, `c:`, `psh p:`, `rel r:`, `deps d:`, `testi ti:`) now use standalone recipes instead of prerequisite chains, allowing the trailing-argument no-op override block to properly suppress them; GNU Make accumulates prerequisites across rules (never overridden), but recipes follow "last rule wins"
 
-## [2.3.1] 2026-02-13 17:59:34
+## [2.3.1] - 2026-02-13
 
 ### Added
 - **Comprehensive makescript test coverage**: added 146 new tests across four makescript modules, raising overall project coverage from 83% to 95%
@@ -2178,7 +2178,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **pip-audit CVE exclusion**: added `CVE-2026-26007` (cryptography 46.0.3) to `[tool.pip-audit].ignore-vulns`
 - **pyright strict error in test file**: added `reportUnknownVariableType=false` pragma to `test_makescripts_dependencies.py` for dynamically-typed `_toml_config` imports
 
-## [2.3.0] 2026-02-13 14:01:44
+## [2.3.0] - 2026-02-13
 
 ### Added
 - **PSScriptAnalyzer lint stage** (`test_040_psscriptanalyzer`): new makescript that lints all `.ps1` files via PSScriptAnalyzer, with excluded rules driven by `[tool.psscriptanalyzer]` in `pyproject.toml`; auto-installs the PowerShell module if absent
@@ -2198,18 +2198,18 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Removed
 - **`hello` command and `behaviors.py` domain module**: removed `cli_hello`, `build_greeting()`, and `CANONICAL_GREETING` - template scaffolding no longer needed
 
-## [2.2.2] 2026-02-13 11:02:42
+## [2.2.2] - 2026-02-13
 
 ### Changed
 - **`make clean` warns on missing `[tool.clean]` config**: prints a warning with example `[tool.clean].patterns` section to stderr when `pyproject.toml` exists but has no clean patterns configured
 - **Makefile update no longer aborts the command**: accepting a Makefile version update now continues running the original subcommand instead of exiting
 
-## [2.2.1] 2026-02-13 10:35:26
+## [2.2.1] - 2026-02-13
 
 ### Fixed
 - **`make dev` now installs `[dev]` extras**: changed `uv pip install -e "."` to `uv pip install -e ".[dev]"` so customers with a `[dev]` optional-dependencies group get those extras installed
 
-## [2.2.0] 2026-02-11 22:09:03
+## [2.2.0] - 2026-02-11
 
 ### Changed
 - **Extracted inline Python to standalone scripts**: moved inline `python -c` code from stagerunners and `test_040_pip_audit` into `_derive_package_name.py` and `_extract_pip_audit_ignores.py`, eliminating the temp-file write-execute-delete pattern that triggered Windows Defender false positives
@@ -2218,7 +2218,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - **Windows Defender false positive**: the stagerunner's temp-file pattern (write Python to `.py`, execute, delete) was flagged as a malicious "script dropper"; standalone `.py` scripts eliminate the trigger entirely
 
-## [2.1.0] 2026-02-11 21:13:49
+## [2.1.0] - 2026-02-11
 
 ### Added
 - **Shared Python resolver for makescripts**: new `_resolve_python.ps1` and `_resolve_python.sh` helpers that all makescripts source to find the correct Python interpreter
@@ -2232,17 +2232,17 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **Stagerunner `Invoke-SingleScript` output leaking into return value**: captured stdout via `2>&1` and replayed via `Write-Host` to prevent PowerShell from including script output in the function's return value
 - **Stagerunner parallel job error handling**: wrapped `Start-Job` script blocks in `try/catch` to prevent `$ErrorActionPreference = "Stop"` in child scripts from turning stderr into terminating errors in PS 5.1
 
-## [2.0.16] 2026-02-11 19:36:31
+## [2.0.16] - 2026-02-11
 
 ### Fixed
 - **Stagerunner Python command detection**: both `_btx_stagerunner.ps1` and `_btx_stagerunner.sh` now detect the available Python command (`python` / `python3`) instead of hardcoding `python3`, fixing failures on Windows where only `python` exists
 
-## [2.0.15] 2026-02-11 19:03:25
+## [2.0.15] - 2026-02-11
 
 ### Fixed
 - **Coverage threshold reverted to 70%**: Windows CI has lower coverage due to platform-specific code paths; `fail_under` set back to 70 for cross-platform compatibility
 
-## [2.0.14] 2026-02-11 18:57:25
+## [2.0.14] - 2026-02-11
 
 ### Changed
 - **Shared script infrastructure moved to `_shared.py`**: extracted `execute_script`, `get_script_name`, `normalize_returncode`, and `resolve_script_path` from `test_cmd.py` into `_shared.py`; all 12 command modules now import from the shared module
@@ -2255,27 +2255,27 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - **`build_cmd.py` phantom alias in docstring**: removed reference to nonexistent `cli_b` short alias (that alias belongs to the bump command)
 - **`install_cmd.py` leaking private function in `__all__`**: removed `_extract_version` from public exports
 
-## [2.0.13] 2026-02-11 13:15:15
+## [2.0.13] - 2026-02-11
 
 ### Fixed
 - **Warning scanner false positives**: exclude summary lines containing `N warnings` (e.g. pyright's `0 errors, 0 warnings, 0 informations`) from stagerunner warning output in both bash and PowerShell
 
-## [2.0.12] 2026-02-11 12:54:51
+## [2.0.12] - 2026-02-11
 
 ### Fixed
 - **Makefile argument forwarding**: trailing words matching real target names (e.g. `make push codecov fix`) no longer execute those targets as separate commands; replaced `$(eval)` no-ops (overridden by later target definitions) with a regular rule block at end of Makefile using GNU Make's "last rule wins" behavior
 
-## [2.0.11] 2026-02-11 12:47:59
+## [2.0.11] - 2026-02-11
 
 ### Changed
 - **Codecov token warning color**: changed from bright red (`\033[91m`) to yellow (`\033[33m`) to match stagerunner warning styling
 
-## [2.0.10] 2026-02-11 12:41:22
+## [2.0.10] - 2026-02-11
 
 ### Fixed
 - **Missing codecov token not surfaced by warning scanner**: `_coverage.py` message changed from `[codecov] CODECOV_TOKEN not found` to `[codecov] warning: CODECOV_TOKEN not found` so the stagerunner warning scanner picks it up
 
-## [2.0.9] 2026-02-11 12:28:32
+## [2.0.9] - 2026-02-11
 
 ### Added
 - **Show warnings from passing parallel stagerunner jobs**: output from successful parallel scripts is scanned for lines containing "warning" (case-insensitive) and displayed in yellow after the pass/fail summary
@@ -2285,29 +2285,29 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - **PowerShell stagerunner exit code display bug**: failed-job output header showed raw output instead of exit code (`$failedOutput[$scriptName]` → `$exitCodes[$scriptName]`)
 
-## [2.0.8] 2026-02-11 12:23:30
+## [2.0.8] - 2026-02-11
 
 ### Changed
 - **Root Makefile switched to local dev source**: `BMK` variable now uses `uvx --refresh --from /path bmk` instead of `uvx bmk@latest`, and sentinel line removed to prevent `bmk install` from overwriting local changes
 
-## [2.0.7] 2026-02-11 01:43:23
+## [2.0.7] - 2026-02-11
 
-## [2.0.6] 2026-02-11 01:28:04
+## [2.0.6] - 2026-02-11
 
 ### Added
 - **Auto-sync bundled Makefile version from `pyproject.toml`**: `_sync_initconf.py` now also patches the `# BMK MAKEFILE X.Y.Z` sentinel on line 1 of `src/<pkg>/makefile/Makefile`, keeping it in sync alongside `__init__conf__.py` after version bumps
 
-## [2.0.5] 2026-02-11 00:39:28
+## [2.0.5] - 2026-02-11
 
 ### Changed
 - **Stage delegator scripts show delegation flow**: replaced generic announcements with `delegator → target pipeline` messages (e.g. `push_040_commit → commit pipeline`) so pipeline nesting is visible in output
 
-## [2.0.4] 2026-02-10 23:12:40
+## [2.0.4] - 2026-02-10
 
 ### Fixed
 - **Duplicate log messages in stage delegator scripts**: removed redundant printf/Write-Host from 8 delegator scripts (.sh + .ps1 pairs) whose inner pipelines already print their own announcements (e.g. `test_050_clean.sh` → `clean_010_clean.sh`, `push_020_build.sh` → `bld_020_build.sh`, `push_040_commit.sh` → `commit_010_commit.sh`)
 
-## [2.0.3] 2026-02-10 22:56:06
+## [2.0.3] - 2026-02-10
 
 ### Added
 - **Auto-sync `__init__conf__.py` version from `pyproject.toml`**: new `_sync_initconf.py` makescript patches the `version` line after every bump and before every commit, preventing version mismatch test failures
@@ -2317,7 +2317,7 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 ### Fixed
 - **Makefile recipe override warning**: `make push test parameters` no longer warns about overriding the `test` target recipe - extra arguments that collide with existing target names are now skipped in the no-op eval
 
-## [2.0.2] 2026-02-10 22:35:34
+## [2.0.2] - 2026-02-10
 
 ### Fixed
 - **Stagerunner parallel output**: announce tasks upfront (`▶ running N tasks in parallel: ...`) and print all results together after completion instead of trickling one-by-one in arbitrary order
