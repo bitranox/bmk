@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- Three `config` display tests in `tests/test_cli_config.py` compare the shown SMTP hosts exactly
+  (the parsed JSON value, or the whole `smtp_hosts = [...]` line) instead of searching the output for
+  a host substring, which also matched `xsmtp.test.com:5870`. The substring form was what CodeQL
+  flagged as `py/incomplete-url-substring-sanitization`.
+
 ## [3.32.0] 2026-10-29 00:28:13
 
 ### Fixed

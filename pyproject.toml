@@ -17,9 +17,9 @@ dependencies = [
                                    # ALSO the CVE-2026-7246 floor, so this line is load-bearing
                                    # twice over - do not remove it as "just a pin"
     "lib_cli_exit_tools>=2.4.1",
-    "lib_log_rich>=8.1.1",          # 6.4.2: validate_config, the check config --profile runs,
+    "lib_log_rich>=8.1.2",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses
-    "lib_layered_config>=7.3.0",
+    "lib_layered_config>=7.4.1",
     "btx_lib_mail>=4.6.0",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.1",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output
