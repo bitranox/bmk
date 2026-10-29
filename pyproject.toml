@@ -55,7 +55,7 @@ dependencies = [
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.17.1",
+    "ruff>=0.17.2",
     "pyright[nodejs]>=1.1.414",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
