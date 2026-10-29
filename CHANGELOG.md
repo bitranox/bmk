@@ -6,6 +6,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- `bump` names the new CHANGELOG section `## [X.Y.Z] - YYYY-MM-DD`, the Keep a Changelog form,
+  instead of `## [X.Y.Z] YYYY-MM-DD HH:MM:SS`. The old form left most changelogs with two heading
+  styles, since their earlier entries were written by hand in the Keep a Changelog form.
+
 ### Fixed
 
 - Three `config` display tests in `tests/test_cli_config.py` compare the shown SMTP hosts exactly

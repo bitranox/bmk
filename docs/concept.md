@@ -8,8 +8,8 @@ c / commit  --> commit.sh
 create a new command, same pattern as our other commands, command : bump bmp b , subcommands ma/major m/minor p/patch --> bump_major_010_bump.sh, bump_minor_010.sh, bump_patch_010.sh
 create a small standalon python script who does the heavvy lifting and is called by that shellscripts: 
 - increment major/minor/patch in pyproj.toml
-- rename the top [unreleased] section in changelog to the new version number, and put date and time local like : 
-"[1.0.1] yyyy-mm-dd hh:mm:ss"  localtime
+- rename the top [unreleased] section in changelog to the new version number with the local date, in the
+  Keep a Changelog form "## [1.0.1] - yyyy-mm-dd" (no time of day; user decision 2026-10-29)
 - if there is no [unreleased] section in changelog just create the new entry
 - after that, create a new [unreleased] section above that 
 

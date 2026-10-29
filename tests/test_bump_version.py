@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -244,19 +245,16 @@ class TestUpdateChangelog:
         # New version should come before old version
         assert new_version_idx < old_version_idx
 
-    def test_adds_timestamp_to_new_version(self, bump_module: Any, tmp_path: Path) -> None:
-        """New version entry includes timestamp."""
+    def test_new_version_heading_is_the_keep_a_changelog_form(self, bump_module: Any, tmp_path: Path) -> None:
+        """The heading is ``## [X.Y.Z] - YYYY-MM-DD``, the form Keep a Changelog prescribes, with no time."""
         changelog = tmp_path / "CHANGELOG.md"
-        changelog.write_text("# Changelog\n\n## [Unreleased]\n\n## [1.0.0]\n")
+        changelog.write_text("# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-15\n")
 
         bump_module.update_changelog(tmp_path, "1.1.0")
 
-        content = changelog.read_text()
-        # Should have timestamp in format YYYY-MM-DD HH:MM:SS
-        import re
-
-        pattern = r"\[1\.1\.0\] \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
-        assert re.search(pattern, content) is not None
+        headings = [line for line in changelog.read_text().splitlines() if line.startswith("## [1.1.0]")]
+        assert len(headings) == 1
+        assert re.fullmatch(r"## \[1\.1\.0\] - \d{4}-\d{2}-\d{2}", headings[0]), headings[0]
 
     def test_creates_unreleased_when_missing(self, bump_module: Any, tmp_path: Path) -> None:
         """Creates Unreleased section when missing."""

@@ -3,7 +3,7 @@
 
 Standalone script that bumps the project version in project files:
 - Updates version in pyproject.toml (preserves file formatting)
-- Renames [Unreleased] section in CHANGELOG.md to new version with timestamp
+- Renames [Unreleased] section in CHANGELOG.md to ``## [X.Y.Z] - YYYY-MM-DD`` (Keep a Changelog)
 - Creates new [Unreleased] section above the versioned entry
 
 The version rules themselves live in ``bmk.domain.version``, shared with the release
@@ -150,8 +150,9 @@ def update_changelog(project_dir: Path, new_version: str) -> None:
 
     content = changelog_path.read_text(encoding="utf-8")
     lines = content.split("\n")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_version_line = f"## [{new_version}] {timestamp}"
+    # Keep a Changelog's own heading form, which every CHANGELOG here declares it follows: a
+    # bump that wrote a time-of-day variant left each file with two heading styles.
+    new_version_line = f"## [{new_version}] - {datetime.now().strftime('%Y-%m-%d')}"
 
     unreleased_idx = find_unreleased_line(lines)
 
