@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.33.0] - 2026-10-29
+
 ### Changed
 
 - `bump` names the new CHANGELOG section `## [X.Y.Z] - YYYY-MM-DD`, the Keep a Changelog form,
