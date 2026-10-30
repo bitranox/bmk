@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.33.1] - 2026-10-30
+
+### Docs
+
+- The `devops-bmk` skill covers release races, unreleased versions, skill-only pushes and pip-audit
+  ignores.
+
 ## [3.33.0] - 2026-10-29
 
 ### Changed
