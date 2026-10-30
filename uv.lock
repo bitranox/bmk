@@ -72,7 +72,7 @@ wheels = [
 
 [[package]]
 name = "bmk"
-version = "3.33.1"
+version = "3.33.2"
 source = { editable = "." }
 dependencies = [
     { name = "bandit" },
@@ -115,9 +115,9 @@ dependencies = [
 requires-dist = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "bashate", specifier = ">=2.1.1" },
-    { name = "btx-lib-mail", specifier = ">=4.6.0" },
+    { name = "btx-lib-mail", specifier = ">=4.6.4" },
     { name = "build", specifier = ">=1.6.1" },
-    { name = "certifi", specifier = ">=2026.10.19" },
+    { name = "certifi", specifier = ">=2026.10.23" },
     { name = "click", specifier = ">=8.5.0" },
     { name = "filelock", marker = "python_full_version < '3.11'", specifier = ">=4.1.0" },
     { name = "filelock", marker = "python_full_version >= '3.11'", specifier = ">=4.2.4" },
@@ -126,7 +126,7 @@ requires-dist = [
     { name = "hypothesis", specifier = ">=6.168.5" },
     { name = "import-linter", specifier = ">=2.15" },
     { name = "lib-cli-exit-tools", specifier = ">=2.4.1" },
-    { name = "lib-layered-config", specifier = ">=7.6.0" },
+    { name = "lib-layered-config", specifier = ">=7.6.1" },
     { name = "lib-log-rich", specifier = ">=8.1.2" },
     { name = "orjson", specifier = ">=3.13.0" },
     { name = "packaging", specifier = ">=26.3" },
@@ -158,16 +158,16 @@ wheels = [
 
 [[package]]
 name = "btx-lib-mail"
-version = "4.6.0"
+version = "4.6.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
     { name = "pydantic" },
     { name = "rich-click" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/ee/b154514730aad491acf9b3df30548573f4855c131a3f8fa8e704e29a6416/btx_lib_mail-4.6.0.tar.gz", hash = "sha256:42ceb3041541855d141e5a4b144cee8341d052c2cfbbcf5054f84363aa835f7c", size = 310414, upload-time = "2026-10-24T13:07:32.067Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/f1/3565ebd694f3ac6b6e8b5c0737b59ab6a1ad810f5bd9515b7a9354cb6eed/btx_lib_mail-4.6.4.tar.gz", hash = "sha256:4eb47f11acb04dbd0fbe44c31fe7668b6365a500751ffc2c31fd860e9be9432c", size = 310709, upload-time = "2026-10-30T10:47:01.54Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ee/55/74067275caea34be7f974a0cc45276f08caf33f7c5bfb9e1a8f11cc241a0/btx_lib_mail-4.6.0-py3-none-any.whl", hash = "sha256:1d752fa94b1d4009e53eaa75bd52a1a473c89d949e5a275bf1f433cb66df3aad", size = 120489, upload-time = "2026-10-24T13:07:30.479Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/f8/02a3ac9f54eef9a03a331f4f1d1a5a9bb57b5905236f5a864d28039ebd36/btx_lib_mail-4.6.4-py3-none-any.whl", hash = "sha256:ff30b273c5a32159f9d9bd51880a2582f8aaf2f72316596bdc26ce0fbaeb6084", size = 120498, upload-time = "2026-10-30T10:46:59.952Z" },
 ]
 
 [[package]]
@@ -207,11 +207,11 @@ filecache = [
 
 [[package]]
 name = "certifi"
-version = "2026.10.19"
+version = "2026.10.23"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a6/bd/1436c50cc46699de0230fbaacc1d1de7bfec413176099949e9d5112e88f2/certifi-2026.10.19.tar.gz", hash = "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae", size = 137598, upload-time = "2026-10-20T02:24:16.604Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/11/b524cbd9bbdaca58608e4cf4053fd463417549e1959fa8d3aa18319f9555/certifi-2026.10.23.tar.gz", hash = "sha256:a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd", size = 136225, upload-time = "2026-10-23T11:36:16.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/51/29046e48f693c54e5b7412216d447a1d8362c9653148d98c02cdf65fa733/certifi-2026.10.19-py3-none-any.whl", hash = "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b", size = 136464, upload-time = "2026-10-20T02:24:15.072Z" },
+    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
 ]
 
 [[package]]
@@ -1223,7 +1223,7 @@ wheels = [
 
 [[package]]
 name = "lib-layered-config"
-version = "7.6.0"
+version = "7.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lib-cli-exit-tools" },
@@ -1232,9 +1232,9 @@ dependencies = [
     { name = "rtoml", marker = "python_full_version < '3.14'" },
     { name = "tomli", marker = "python_full_version == '3.14.*'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/3f/8aed73c9897185d72158e1e1db2f96ada5bf194679abbe54b5737eeefd25/lib_layered_config-7.6.0.tar.gz", hash = "sha256:e59d87ed9438ef2b41b443230fba22709e8fd6cb1e4fc6c39dd5049e91e03c69", size = 548139, upload-time = "2026-10-29T23:34:38.355Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/31/cc82835b33b0fd08ad70341e5932b981d34fcd4f44ff6c3af3f5737d2caa/lib_layered_config-7.6.1.tar.gz", hash = "sha256:29e3e89a6f187e05f685582ef5fb9c603f2c9e8bb2e085c42382d163216280f5", size = 549506, upload-time = "2026-10-30T10:29:58.81Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/43/2098288794ec006da27892a5cea56688dea9ef3168b0f770d1a17beb31d2/lib_layered_config-7.6.0-py3-none-any.whl", hash = "sha256:379bb77aaf11c5d95a57b075530b3e4d518b485fcc3bdc0790fd1b6f1124fcbf", size = 167590, upload-time = "2026-10-29T23:34:36.976Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/95/8a2ed2453804729af3e21960a91432d08932c139c38a4f100f2fac5e2a71/lib_layered_config-7.6.1-py3-none-any.whl", hash = "sha256:02cf5a0ff4b4972a877b7217b45ea4440dfde6f93472178dd5dc6a3a5ab23263", size = 167590, upload-time = "2026-10-30T10:29:57.081Z" },
 ]
 
 [[package]]

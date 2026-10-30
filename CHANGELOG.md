@@ -6,6 +6,14 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.33.2] - 2026-10-30
+
+### Docs
+
+- The `devops-bmk` skill: choose the bump step from everything unreleased, declare a floor a
+  git-URL dependency needs in the consumer too, and register every marker bmk's `-m` names
+  (pytest 9.2 with strict markers exits 4 on an unregistered one).
+
 ## [3.33.1] - 2026-10-30
 
 ### Docs
