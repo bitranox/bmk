@@ -825,11 +825,13 @@ def test_a_bad_pytest_worker_count_is_refused_with_exit_2_before_any_cell_runs(
 
 
 @pytest.mark.os_agnostic
-def test_a_cell_runs_pytest_across_workers_when_its_venv_has_xdist(tmp_path: Path) -> None:
-    # bmk's own venv interpreter has pytest-xdist; a real probe decides, nothing is patched.
-    argv = cell_pytest_argv(Path(sys.executable), tmp_path, pytest_workers="3", env=dict(os.environ))
+def test_a_cell_runs_pytest_across_workers_when_its_venv_has_xdist(
+    tmp_path: Path, groups_honouring_python: str
+) -> None:
+    # A venv whose pytest-xdist keeps its groups; a real probe decides, nothing is patched.
+    argv = cell_pytest_argv(Path(groups_honouring_python), tmp_path, pytest_workers="3", env=dict(os.environ))
 
-    assert argv[:3] == [sys.executable, "-m", "pytest"]
+    assert argv[:3] == [groups_honouring_python, "-m", "pytest"]
     assert argv[3:7] == ["-n", "3", "--dist", "loadgroup"]
 
 
@@ -851,11 +853,12 @@ def test_one_pytest_worker_with_an_interpreter_that_cannot_answer_adds_nothing(t
 
 
 @pytest.mark.os_agnostic
-def test_one_pytest_worker_beats_an_n_the_project_passes_itself(tmp_path: Path) -> None:
+def test_one_pytest_worker_beats_an_n_the_project_passes_itself(tmp_path: Path, groups_honouring_python: str) -> None:
+    # A pair that keeps the groups, so the -n 0 below comes from the worker count alone.
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "p"\nversion = "0"\n\n[tool.pytest.ini_options]\naddopts = "-n 2"\n', encoding="utf-8"
     )
 
-    argv = cell_pytest_argv(Path(sys.executable), tmp_path, pytest_workers="1", env=dict(os.environ))
+    argv = cell_pytest_argv(Path(groups_honouring_python), tmp_path, pytest_workers="1", env=dict(os.environ))
 
     assert argv[3:5] == ["-n", "0"]

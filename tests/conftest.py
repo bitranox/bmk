@@ -12,6 +12,7 @@ import contextlib
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -235,6 +236,43 @@ def serial_inner_test_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     about parallel runs sets ``BMK_TEST_WORKERS`` itself.
     """
     monkeypatch.setenv(WORKERS_ENV, "1")
+
+
+# Pinned pytest + pytest-xdist pairs for the tests about parallel runs. bmk's own venv cannot be the
+# working pair: its pytest is whatever the last resolve picked (the scheduled CI resolves the latest
+# releases), and pytest 9.2.0 with pytest-xdist 3.8.0 drops xdist's groups (pytest-xdist #1386), so
+# bmk rightly plans a serial run there. A test that needs a parallel run measured against such an
+# interpreter fails, and one asserting that grouped tests never overlap passes without running in
+# parallel at all. Each pair below is exact for the packages the probe judges.
+GROUP_HONOURING_PYTEST = ("pytest==9.1.1", "pytest-xdist==3.8.0", "pytest-cov==7.1.0")
+GROUP_DROPPING_PYTEST = ("pytest==9.2.0", "pytest-xdist==3.8.0", "pytest-cov==7.1.0")
+
+
+def _pinned_pytest_venv(tmp_path_factory: pytest.TempPathFactory, name: str, requirements: tuple[str, ...]) -> str:
+    """Build a venv on this test run's interpreter holding ``requirements``, and return its python.
+
+    Built with uv outside any project, so no ``[tool.uv]`` cooldown keeps an exact pin out.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("needs uv to build the venv")
+    root = tmp_path_factory.mktemp(name)
+    venv = root / "venv"
+    subprocess.run(["uv", "venv", "-q", "--python", sys.executable, str(venv)], cwd=root, check=True)
+    python = str(venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
+    subprocess.run(["uv", "pip", "install", "-q", "--python", python, *requirements], cwd=root, check=True)
+    return python
+
+
+@pytest.fixture(scope="session")
+def groups_honouring_python(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """An interpreter with pytest-xdist and pytest-cov whose pytest keeps ``xdist_group``: parallel runs work."""
+    return _pinned_pytest_venv(tmp_path_factory, "groups-honoured", GROUP_HONOURING_PYTEST)
+
+
+@pytest.fixture(scope="session")
+def groups_dropping_python(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """An interpreter with the measured broken pair: pytest 9.2.0 and pytest-xdist 3.8.0."""
+    return _pinned_pytest_venv(tmp_path_factory, "groups-dropped", GROUP_DROPPING_PYTEST)
 
 
 # A push from a linked worktree exports the repository-scoping ones to git hooks, and git

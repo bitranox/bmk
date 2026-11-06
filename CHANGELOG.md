@@ -12,6 +12,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   tests the commit under test. It used to install `git+https://github.com/...` every time, which is
   the pushed default branch, so a pull request's notebook run tested the code already there.
   Outside a checkout (a downloaded notebook) it still installs from GitHub.
+- bmk's own tests about parallel runs build their working environment from a pinned pair
+  (`pytest==9.1.1` + `pytest-xdist==3.8.0`) instead of using bmk's own venv. With pytest 9.2.0,
+  which the scheduled CI resolves, xdist's groups are dropped and bmk plans a serial run, so five
+  tests failed and two passed without ever running in parallel. Those two now also check that the
+  run used more than one worker.
 
 ## [3.33.2] - 2026-10-30
 

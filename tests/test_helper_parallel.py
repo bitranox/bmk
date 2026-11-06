@@ -1,14 +1,14 @@
 """Parallel pytest: the worker setting, the xdist probe, and the arguments they turn into.
 
 The probe runs a REAL interpreter and lets pytest read a REAL configuration: bmk's own venv has
-both plugins, a bare venv has neither, and each scratch project's ``pytest.ini`` or the environment
+both plugins, a bare venv has neither, two venvs pinned to a pytest + pytest-xdist pair (conftest)
+say whether xdist's groups survive, and each scratch project's ``pytest.ini`` or the environment
 says what the run will see. Nothing is patched.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
@@ -167,8 +167,8 @@ def bare_python(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.mark.os_agnostic
-def test_a_venv_with_both_plugins_is_ready(tmp_path: Path) -> None:
-    plugins = probe_parallel(sys.executable, env=_env(), cwd=_project(tmp_path))
+def test_a_venv_with_both_plugins_is_ready(tmp_path: Path, groups_honouring_python: str) -> None:
+    plugins = probe_parallel(groups_honouring_python, env=_env(), cwd=_project(tmp_path))
 
     assert plugins.support is ParallelSupport.READY
     assert not plugins.project_workers
@@ -294,31 +294,14 @@ def test_ignored_groups_without_xdist_loaded_change_nothing() -> None:
 
 
 @pytest.mark.os_agnostic
-def test_bmks_own_pytest_still_honours_the_groups(tmp_path: Path) -> None:
-    # bmk's venv locks a pytest older than 9.2, where xdist's rename takes effect.
-    plugins = probe_parallel(sys.executable, env=_env(), cwd=_project(tmp_path))
+def test_pytest_9_1_with_xdist_3_8_is_reported_as_honouring_groups(
+    tmp_path: Path, groups_honouring_python: str
+) -> None:
+    # The control for the broken pair below: the same xdist, a pytest that still reads its rename.
+    plugins = probe_parallel(groups_honouring_python, env=_env(), cwd=_project(tmp_path))
 
     assert not plugins.groups_ignored
     assert plugins.support is ParallelSupport.READY
-
-
-_PYTEST_THAT_DROPS_GROUPS = ("pytest==9.2.0", "pytest-xdist==3.8.0", "pytest-cov>=7.1.0")
-
-
-@pytest.fixture(scope="module")
-def groups_dropping_python(tmp_path_factory: pytest.TempPathFactory) -> str:
-    """A venv with the measured broken pair: pytest 9.2.0 and pytest-xdist 3.8.0.
-
-    Built with uv outside any project, so no ``[tool.uv]`` cooldown keeps pytest 9.2.0 out.
-    """
-    if shutil.which("uv") is None:
-        pytest.skip("needs uv to build the venv")
-    root = tmp_path_factory.mktemp("groups-dropped")
-    venv = root / "venv"
-    subprocess.run(["uv", "venv", "-q", str(venv)], cwd=root, check=True)
-    python = str(venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
-    subprocess.run(["uv", "pip", "install", "-q", "--python", python, *_PYTEST_THAT_DROPS_GROUPS], cwd=root, check=True)
-    return python
 
 
 @pytest.mark.os_agnostic

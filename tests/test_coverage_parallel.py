@@ -1,8 +1,9 @@
 """The coverage helper runs a project's suite across processes when the project's venv has xdist.
 
-End to end: a scratch project's real suite runs through ``run_coverage_tests`` under bmk's own venv
-interpreter, which has pytest-xdist and pytest-cov. Nothing is patched; the worker count comes in
-through ``BMK_TEST_WORKERS``, the way a user sets it.
+End to end: a scratch project's real suite runs through ``run_coverage_tests`` in a venv pinned to a
+pytest + pytest-xdist pair that keeps xdist's groups (``groups_honouring_python`` in conftest), with
+pytest-cov. Nothing is patched; the worker count comes in through ``BMK_TEST_WORKERS``, the way a
+user sets it.
 """
 
 from __future__ import annotations
@@ -92,10 +93,10 @@ def _project(tmp_path: Path, *, extra_toml: str = "") -> Path:
     return project
 
 
-def _run(project: Path, workers: str, monkeypatch: pytest.MonkeyPatch) -> tuple[int, dict[str, str]]:
+def _run(project: Path, workers: str, monkeypatch: pytest.MonkeyPatch, *, python: str) -> tuple[int, dict[str, str]]:
     monkeypatch.setenv(WORKERS_ENV, workers)
     shutil.rmtree(project / "tests" / "marks", ignore_errors=True)
-    rc = run_coverage_tests(project_dir=project, python=sys.executable, generate_xml=True, quiet=True)
+    rc = run_coverage_tests(project_dir=project, python=python, generate_xml=True, quiet=True)
     root = ET.parse(project / "coverage.xml").getroot()  # noqa: S314 - our own file
     return rc, {key: root.attrib[key] for key in ("lines-covered", "lines-valid", "branches-covered", "branches-valid")}
 
@@ -113,13 +114,13 @@ def _spans(project: Path) -> tuple[set[str], list[tuple[float, float]]]:
 
 @pytest.mark.os_agnostic
 def test_a_parallel_run_measures_the_same_coverage_as_a_serial_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, groups_honouring_python: str
 ) -> None:
     project = _project(tmp_path)
 
-    serial_rc, serial = _run(project, "1", monkeypatch)
+    serial_rc, serial = _run(project, "1", monkeypatch, python=groups_honouring_python)
     serial_workers, _ = _spans(project)
-    parallel_rc, parallel = _run(project, "3", monkeypatch)
+    parallel_rc, parallel = _run(project, "3", monkeypatch, python=groups_honouring_python)
     parallel_workers, _ = _spans(project)
 
     assert (serial_rc, parallel_rc) == (0, 0)
@@ -145,13 +146,13 @@ def test_a_parallel_run_measures_the_same_coverage_as_a_serial_one(
     ids=["workers-1", "no-pytest-cov"],
 )
 def test_an_n_the_project_passes_runs_in_one_process_when_bmk_runs_serially(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, addopts: str, workers: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, addopts: str, workers: str, groups_honouring_python: str
 ) -> None:
     plain = _project(tmp_path / "plain")
     owned = _project(tmp_path / "owned", extra_toml=f'\n[tool.pytest.ini_options]\naddopts = "{addopts}"\n')
 
-    plain_rc, plain_cov = _run(plain, "1", monkeypatch)
-    owned_rc, owned_cov = _run(owned, workers, monkeypatch)
+    plain_rc, plain_cov = _run(plain, "1", monkeypatch, python=groups_honouring_python)
+    owned_rc, owned_cov = _run(owned, workers, monkeypatch, python=groups_honouring_python)
     owned_workers, _ = _spans(owned)
 
     assert (plain_rc, owned_rc) == (0, 0)
@@ -161,14 +162,16 @@ def test_an_n_the_project_passes_runs_in_one_process_when_bmk_runs_serially(
 
 @pytest.mark.os_agnostic
 def test_tests_sharing_an_xdist_group_never_overlap_in_a_parallel_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, groups_honouring_python: str
 ) -> None:
     project = _project(tmp_path)
 
-    rc, _ = _run(project, "3", monkeypatch)
-    _, db = _spans(project)
+    rc, _ = _run(project, "3", monkeypatch, python=groups_honouring_python)
+    workers, db = _spans(project)
 
     assert rc == 0
+    # A serial run never overlaps anything; only a run across workers can show the group held.
+    assert len(workers) > 1, workers
     assert len(db) == 3
     assert all(end <= next_start for (_, end), (next_start, _) in pairwise(db)), db
 
@@ -197,7 +200,7 @@ addopts = "-m 'not slow'"
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("workers", ["1", "2"], ids=["serial", "parallel"])
 def test_the_projects_own_mark_expression_survives_bmks_exclusion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: str, groups_honouring_python: str
 ) -> None:
     # pytest keeps the last -m: bmk's "-m 'not integration'" used to replace the project's
     # "-m 'not slow'", so make test ran the slow tests the project had excluded.
@@ -205,7 +208,7 @@ def test_the_projects_own_mark_expression_survives_bmks_exclusion(
     (project / "tests" / "test_marked.py").write_text(_MARKED_FAILURES, encoding="utf-8")
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
 
-    rc, _ = _run(project, workers, monkeypatch)
+    rc, _ = _run(project, workers, monkeypatch, python=groups_honouring_python)
 
     assert rc == 0
 
@@ -236,9 +239,11 @@ def test_a_project_without_xdist_runs_serially_and_is_told_how_to_go_parallel(
 
 
 @pytest.mark.os_agnostic
-def test_a_project_with_xdist_gets_the_count_it_asked_for(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_project_with_xdist_gets_the_count_it_asked_for(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], groups_honouring_python: str
+) -> None:
     workers = plan_test_workers(
-        "auto", python=sys.executable, env={**os.environ, WORKERS_ENV: "5"}, cwd=tmp_path
+        "auto", python=groups_honouring_python, env={**os.environ, WORKERS_ENV: "5"}, cwd=tmp_path
     ).workers
 
     assert workers == "5"
@@ -339,9 +344,12 @@ _HELPER = Path(_coverage_module.__file__)
 
 
 def _stage(
-    project: Path, workers: str, *, output_format: str = "text", **extra_env: str
+    project: Path, workers: str, *, python: str, output_format: str = "text", **extra_env: str
 ) -> subprocess.CompletedProcess[str]:
-    """Run the helper exactly as the pytest stage does: a subprocess under bmk's interpreter."""
+    """Run the helper exactly as the pytest stage does: a subprocess under bmk's interpreter.
+
+    ``python`` is the project's interpreter, the one the helper runs pytest in.
+    """
     env = {**os.environ, WORKERS_ENV: workers, **extra_env}
     return subprocess.run(
         [
@@ -352,7 +360,7 @@ def _stage(
             "--project-dir",
             str(project),
             "--python",
-            sys.executable,
+            python,
             "--output-format",
             output_format,
         ],
@@ -367,25 +375,29 @@ def _stage(
 
 
 @pytest.mark.os_agnostic
-def test_a_parallel_run_below_the_floor_fails_like_a_serial_one_with_the_missing_lines(tmp_path: Path) -> None:
+def test_a_parallel_run_below_the_floor_fails_like_a_serial_one_with_the_missing_lines(
+    tmp_path: Path, groups_honouring_python: str
+) -> None:
     project = _project(tmp_path, extra_toml="\n[tool.coverage.report]\nfail_under = 100\n")
 
-    serial = _stage(project, "1")
-    parallel = _stage(project, "3")
+    serial = _stage(project, "1", python=groups_honouring_python)
+    parallel = _stage(project, "3", python=groups_honouring_python)
+    parallel_workers, _ = _spans(project)
 
     assert serial.returncode == parallel.returncode == 2, (serial.stderr[-800:], parallel.stderr[-800:])
+    assert len(parallel_workers) > 1, parallel_workers
     assert "unused.py" in parallel.stdout, "the report naming the missing lines must still print"
 
 
 @pytest.mark.os_agnostic
 @pytest.mark.parametrize("workers", ["1", "3"], ids=["serial", "parallel"])
 def test_a_floor_failure_in_json_mode_prints_the_missing_lines_and_says_it_is_the_floor(
-    tmp_path: Path, workers: str
+    tmp_path: Path, workers: str, groups_honouring_python: str
 ) -> None:
     # JSON is make test's default: the stage runner shows this output only because the stage failed.
     project = _project(tmp_path, extra_toml="\n[tool.coverage.report]\nfail_under = 100\n")
 
-    result = _stage(project, workers, output_format="json")
+    result = _stage(project, workers, python=groups_honouring_python, output_format="json")
 
     assert result.returncode == 2, result.stderr[-800:]
     assert "unused.py" in result.stdout, "the report naming the missing lines must reach the user"
@@ -394,18 +406,18 @@ def test_a_floor_failure_in_json_mode_prints_the_missing_lines_and_says_it_is_th
 
 
 @pytest.mark.os_agnostic
-def test_a_passing_json_run_prints_no_coverage_report(tmp_path: Path) -> None:
-    result = _stage(_project(tmp_path), "1", output_format="json")
+def test_a_passing_json_run_prints_no_coverage_report(tmp_path: Path, groups_honouring_python: str) -> None:
+    result = _stage(_project(tmp_path), "1", python=groups_honouring_python, output_format="json")
 
     assert result.returncode == 0, result.stderr[-800:]
     assert "TOTAL" not in result.stdout
 
 
 @pytest.mark.os_agnostic
-def test_plugin_autoload_off_runs_serially_and_passes(tmp_path: Path) -> None:
+def test_plugin_autoload_off_runs_serially_and_passes(tmp_path: Path, groups_honouring_python: str) -> None:
     project = _project(tmp_path)
 
-    result = _stage(project, "3", PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
+    result = _stage(project, "3", python=groups_honouring_python, PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
 
     assert result.returncode == 0, result.stdout[-800:] + result.stderr[-800:]
     workers, _ = _spans(project)
@@ -422,11 +434,11 @@ def test_plugin_autoload_off_runs_serially_and_passes(tmp_path: Path) -> None:
     ids=["env", "pyproject"],
 )
 def test_a_bad_worker_setting_is_one_refusal_line_with_exit_2(
-    tmp_path: Path, extra_env: dict[str, str], extra_toml: str, named: str
+    tmp_path: Path, extra_env: dict[str, str], extra_toml: str, named: str, groups_honouring_python: str
 ) -> None:
     project = _project(tmp_path, extra_toml=extra_toml)
 
-    result = _stage(project, extra_env.get(WORKERS_ENV, "auto"))
+    result = _stage(project, extra_env.get(WORKERS_ENV, "auto"), python=groups_honouring_python)
 
     assert result.returncode == 2, result.stderr[-800:]
     assert "Traceback" not in result.stderr
