@@ -6,8 +6,22 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- `lib_log_rich>=8.2.0` (from 8.1.2): an unreachable Graylog no longer stalls the logging queue.
+
 ### Fixed
 
+- The dependency check no longer LOWERS a floor that names a release PyPI's JSON does not list yet. PyPI's
+  JSON can miss a release for minutes after its upload, and in that window bmk read the floor as one the oldest
+  Python cannot install and rewrote `lib_log_rich>=8.2.0` to `>=8.1.2`, with the false reason "does not install
+  on Python 3.10". A floor above every listed release is now kept and reported as an error naming what was
+  missing. A requirement that admits nothing because it sits below every listed release (`==1.*` beside 7.0)
+  still moves up.
+- `main()` keeps the command's exit code when stopping the logging runtime fails. A sink that kept the queue
+  worker busy past `queue_stop_timeout` made `shutdown()` raise `RuntimeError: Queue worker failed to stop within
+  the allotted timeout` out of `main()`'s `finally`, so a finished run ended with a traceback and exit code 1.
+  It now prints one warning line to stderr.
 - `display_config` takes its `output_format` as the plain value too (`"json"`), as an untyped caller passes it, instead of failing with `AttributeError: 'str' object has no attribute 'value'`.
 - `notebooks/Quickstart.ipynb` installs the checkout it runs in, so CI's "Execute notebooks" job
   tests the commit under test. It used to install `git+https://github.com/...` every time, which is

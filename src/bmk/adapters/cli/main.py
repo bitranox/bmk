@@ -20,6 +20,7 @@ import bmk_toollock
 from bmk import __init__conf__
 from bmk.domain.errors import RefusalError
 
+from . import safe_console
 from .constants import TRACEBACK_SUMMARY_LIMIT, TRACEBACK_VERBOSE_LIMIT
 from .context import (
     apply_traceback_preferences,
@@ -183,7 +184,22 @@ def main(
         # Only shutdown logging from main thread to avoid killing logging for other threads.
         is_main_thread = threading.current_thread() is threading.main_thread()
         if is_main_thread and lib_log_rich.runtime.is_initialised():
-            lib_log_rich.runtime.shutdown()
+            _shutdown_logging()
+
+
+def _shutdown_logging() -> None:
+    """Stop the logging runtime without letting a teardown failure replace the command's result.
+
+    A sink that keeps the queue worker busy past ``queue_stop_timeout`` makes ``shutdown()`` raise
+    ``RuntimeError`` after the command has already decided its exit code; raised from ``main()``'s
+    ``finally``, it would turn a finished run into a traceback and exit code 1. The queued events
+    are lost either way, so say that on stderr and let the exit code stand.
+    """
+    try:
+        lib_log_rich.runtime.shutdown()
+    # Any failure here comes after the command decided its result, so none may replace it.
+    except Exception as exc:
+        safe_console.echo(f"Warning: logging did not shut down cleanly, some log events may be lost: {exc}", err=True)
 
 
 __all__ = ["main"]
