@@ -936,7 +936,9 @@ def _hold_to_supported_python(
       floor is lowered to the newest admitted release and reported OUTDATED: the one case in which
       bmk lowers one. If only the cooldown keeps it out, the floor is kept and reported as an
       ERROR: lowering would drop the fixes it was raised for, and ``deps --update`` pins the
-      release instead (``_pin_young_floors``), after which it is admitted.
+      release instead (``_pin_young_floors``), after which it is admitted. If no release PyPI lists
+      satisfies the floor at all, it is kept and reported as an ERROR too: PyPI's JSON can miss a
+      release for minutes after its upload, and a lower floor would drop the raise.
     * An OUTDATED suggestion is above it. The suggestion is held to that release. When the floor
       already is that release, the dependency is PINNED if the Python is what holds it, and
       UP-TO-DATE if only the cooldown does: a release still in its cooldown is not yet due.
@@ -1209,9 +1211,9 @@ def _judge_floor(
     specifier = _specifier_of(dep.original_spec)
     if specifier is None:
         return _keep_outdated_floor(dep, why="requirement is not valid PEP 508")
-    releases = _releases_of(dep.name)
-    if releases is None:
-        return _keep_outdated_floor(dep, why="release list unreadable")
+    releases = _judgeable_releases(dep, specifier)
+    if isinstance(releases, DependencyInfo):
+        return releases
     admitted = admitted_releases(releases, cutoff)
     ceiling = _ceiling_of(specifier)
     named = bool(specifier.prereleases)
@@ -1309,6 +1311,53 @@ def _keep_outdated_floor(dep: DependencyInfo, *, why: str) -> DependencyInfo:
     """An OUTDATED floor that cannot be judged is kept and reported; any other is left as it is."""
     if dep.status is not DependencyStatus.OUTDATED:
         return dep
+    return replace(dep, status=DependencyStatus.ERROR, notes=(f"{why}, floor kept",))
+
+
+def _judgeable_releases(dep: DependencyInfo, specifier: SpecifierSet) -> PypiReleases | DependencyInfo:
+    """``dep``'s release list when its floor can be judged from it, else the verdict that keeps the floor.
+
+    PyPI's JSON can miss a release for minutes after its upload, and a floor raised to that release
+    is deliberate; a floor above every listed release is that or a typo. Lowering fixes neither, it
+    silently drops the raise, so the floor is kept and the report names what was missing.
+    """
+    releases = _releases_of(dep.name)
+    if releases is None:
+        return _keep_outdated_floor(dep, why="release list unreadable")
+    if _beyond_listed(releases, specifier, floor=dep.current_min):
+        return _floor_beyond_listed(dep, why=f"floor {dep.constraint} matches no listed release on PyPI")
+    return releases
+
+
+def _beyond_listed(releases: PypiReleases, specifier: SpecifierSet, *, floor: str) -> bool:
+    """Whether the floor sits at or above every release PyPI lists and ``specifier`` admits none of them.
+
+    Listed means on any Python, yanked or not. A requirement that admits nothing because it sits
+    BELOW the listed releases (``==1.*`` beside 7.0 and 8.0) is not beyond them: moving it up is
+    the update's job.
+
+    Example:
+        >>> _beyond_listed({"1.0": [], "1.1": []}, SpecifierSet(">=1.2"), floor="1.2")
+        True
+        >>> _beyond_listed({"1.0": [], "1.1": []}, SpecifierSet(">1.1"), floor="1.1")
+        True
+        >>> _beyond_listed({"1.0": [], "1.1": []}, SpecifierSet(">=1.1"), floor="1.1")
+        False
+        >>> _beyond_listed({"7.0": [], "8.0": []}, SpecifierSet("==1.*"), floor="1")
+        False
+    """
+    listed = [Version(v) for v in releases if _is_version(v)]
+    if not listed or not _is_version(floor) or Version(floor) < max(listed):
+        return False
+    return not any(specifier.contains(version, prereleases=True) for version in listed)
+
+
+def _floor_beyond_listed(dep: DependencyInfo, *, why: str) -> DependencyInfo:
+    """A floor above every release PyPI lists is kept and reported as an ERROR about reading PyPI.
+
+    Not ``blocks_lock``: uv resolves from the simple index, which may already serve the release
+    the JSON document has not caught up with.
+    """
     return replace(dep, status=DependencyStatus.ERROR, notes=(f"{why}, floor kept",))
 
 

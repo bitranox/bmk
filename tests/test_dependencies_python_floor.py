@@ -450,8 +450,8 @@ def test_a_release_list_with_nothing_installable_keeps_the_floor(
 @pytest.mark.usefixtures("pypi")
 @pytest.mark.parametrize(
     "declared",
-    ['"hypothesis>6.168.4"', '"hypothesis>6.169.0"', '"hypothesis>6.168.5"'],
-    ids=["raised", "lowered-from-uninstallable", "already-uninstallable"],
+    ['"hypothesis>6.168.4"', '"hypothesis>6.168.5"'],
+    ids=["raised", "lowered-from-uninstallable"],
 )
 def test_a_strict_floor_is_written_as_an_inclusive_one_on_the_release_it_was_held_to(
     tmp_path: Path, declared: str
@@ -915,3 +915,27 @@ def test_a_wheel_only_release_with_no_wheel_for_the_oldest_python_does_not_take_
     update_dependencies(deps, pyproject, quiet=True)
 
     assert '"pywin32>=308"' in pyproject.read_text(encoding="utf-8")
+
+
+@pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    "declared",
+    ['"hypothesis>=6.170.0"', '"hypothesis>6.169.0"'],
+    ids=["inclusive", "strict"],
+)
+def test_a_floor_naming_a_release_pypi_does_not_list_is_kept_not_lowered(
+    tmp_path: Path, pypi: _FakeIndex, declared: str
+) -> None:
+    # PyPI's JSON can miss a release for minutes after its upload; the floor raised to it is deliberate.
+    pypi.serve("hypothesis", {"info": {"version": "6.169.0"}, "releases": _HYPOTHESIS["releases"]})
+    pyproject = _write_pyproject(tmp_path, dev=declared)
+    before = pyproject.read_text(encoding="utf-8")
+
+    (dep,) = check_dependencies(pyproject)
+
+    assert dep.status is DependencyStatus.ERROR
+    assert "no listed release" in dep.latest_display
+    assert "does not install" not in dep.latest_display
+    assert not dep.blocks_lock
+    assert update_dependencies([dep], pyproject, quiet=True) == 0
+    assert pyproject.read_text(encoding="utf-8") == before
