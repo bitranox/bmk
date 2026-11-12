@@ -551,7 +551,9 @@ forwarded (e.g. `make push fix login bug`). Most have short aliases.
   a release the JSON does not list yet is reported as `floor >=X matches no listed release on
   PyPI, floor kept` and left as written. bmk 3.33.2 LOWERED it instead (measured; older releases
   untested), with the false note `does not install on Python 3.10`, so after a gate on that bmk
-  check `git diff pyproject.toml` for a floor that moved down.
+  check `git diff pyproject.toml` for a floor that moved down. Restore the floor you wrote, wait
+  until both endpoints list the release, and run the gate again: the lock it wrote went with the
+  lowered floor.
 - **Right after a green publish, a version missing from PyPI is index lag, not a failed upload.**
   Either `info.version` in `https://pypi.org/pypi/<pkg>/json` or the Simple index
   `https://pypi.org/simple/<pkg>/` (what resolvers read; ask for JSON with
