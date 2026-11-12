@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.33.3] - 2026-11-12
+
 ### Changed
 
 - `lib_log_rich>=8.2.0` (from 8.1.2): an unreachable Graylog no longer stalls the logging queue.
