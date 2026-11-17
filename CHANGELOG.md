@@ -6,6 +6,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Docs
+
+- The `devops-bmk` skill: a gate run after the commit it gates (`make test && git push`) pushes
+  that commit without the files the gate rewrote, Markdown code blocks `ruff format` touched
+  included; read `git status --porcelain` after every gate run and commit what bmk changed.
+
 ## [3.33.3] - 2026-11-12
 
 ### Changed
