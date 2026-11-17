@@ -6,6 +6,12 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Changed
+
+- Runtime dependency floors raised by the dependency refresh: `click>=8.5.1` (from 8.5.0),
+  `lib_cli_exit_tools>=2.5.0` (from 2.4.1), `lib_log_rich>=8.2.2` (from 8.2.0),
+  `filelock>=4.2.10` (from 4.2.9, Python 3.11+), `ruff>=0.17.4` (from 0.17.3).
+
 ### Docs
 
 - The `devops-bmk` skill: a gate run after the commit it gates (`make test && git push`) pushes
