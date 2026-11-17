@@ -17,6 +17,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 - The `devops-bmk` skill: a gate run after the commit it gates (`make test && git push`) pushes
   that commit without the files the gate rewrote, Markdown code blocks `ruff format` touched
   included; read `git status --porcelain` after every gate run and commit what bmk changed.
+- The `devops-bmk` skill: with a Python minor declared, `UV_PYTHON` does not choose the
+  interpreter a gate runs on (bmk passes the highest declared minor to uv); gate another
+  minor with `make test-all` or CI. A runtime floor the dependency refresh raises needs a
+  CHANGELOG line before the bump, which bmk does not write; the skill gives the comparison
+  against the last tag.
 
 ## [3.33.3] - 2026-11-12
 
