@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.34.0] - 2026-11-18
+
 ### Changed
 
 - `lib_layered_config>=8.1.0` (from 7.7.0): bmk imports `DeployAction` from the package root
