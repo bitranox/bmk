@@ -392,7 +392,7 @@ def test_deploy_configuration_filters_and_flattens_results(
     both filter out SKIPPED entries and descend into dot_d_results, so this exercises both
     behaviours against the real DeployAction/DeployResult types rather than an empty stub.
     """
-    from lib_layered_config.examples.deploy import DeployAction, DeployResult
+    from lib_layered_config import DeployAction, DeployResult
 
     from bmk.adapters.config import deploy as deploy_mod
 

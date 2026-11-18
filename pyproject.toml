@@ -20,7 +20,8 @@ dependencies = [
     "lib_log_rich>=8.2.2",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses; 8.2.0: an unreachable
                                    # Graylog no longer stalls the queue until shutdown() raises
-    "lib_layered_config>=7.7.0",
+    "lib_layered_config>=8.1.0",   # DeployAction/DeployResult from the package root (the
+                                   # lib_layered_config.examples shim goes away in 9.0.0)
     "btx_lib_mail>=4.6.4",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.3",            # the pipeline-overlay and email schemas
     "orjson>=3.13.0",              # JSON: PyPI responses, CLI output

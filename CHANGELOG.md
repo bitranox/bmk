@@ -8,6 +8,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ### Changed
 
+- `lib_layered_config>=8.1.0` (from 7.7.0): bmk imports `DeployAction` from the package root
+  instead of the `lib_layered_config.examples.deploy` shim, which lib_layered_config 9.0.0 removes.
 - Runtime dependency floors raised by the dependency refresh: `click>=8.5.1` (from 8.5.0),
   `lib_cli_exit_tools>=2.5.0` (from 2.4.1), `lib_log_rich>=8.2.2` (from 8.2.0),
   `filelock>=4.2.10` (from 4.2.9, Python 3.11+), `ruff>=0.17.4` (from 0.17.3).
