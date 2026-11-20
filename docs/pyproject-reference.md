@@ -294,11 +294,11 @@ workers = 1
 
 ## The keys bmk writes back
 
-| Key                               | Behaviour                                                                                                                                                       |
-|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `[tool.pyright].exclude`          | If present (and `[tool.pyright].include` is not), bmk appends the venv directories it creates and **rewrites your `pyproject.toml`**.                           |
-| `[tool.uv].exclude-newer`         | Written by `make test` / `deps update` when absent, from `[bmk.supply_chain].cooldown` (default `"7 days"`). Never overwritten.                                 |
-| `[tool.uv].exclude-newer-package` | bmk adds `<own-package> = false` for every own package the project reaches, and keeps its own floor pins current (see below). Entries the project set are kept. |
+| Key                               | Behaviour                                                                                                                                                                                                 |
+|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `[tool.pyright].exclude`          | If present (and `[tool.pyright].include` is not), bmk appends the venv directories it creates and **rewrites your `pyproject.toml`**.                                                                     |
+| `[tool.uv].exclude-newer`         | Written by `make test` / `deps update` when absent, from `[bmk.supply_chain].cooldown` (default `"7 days"`). Never overwritten.                                                                           |
+| `[tool.uv].exclude-newer-package` | bmk adds `<own-package> = false` for every own package the project reaches and for the project itself when it is one, and keeps its own floor pins current (see below). Entries the project set are kept. |
 
 This exists because pyright's `exclude` **replaces** its built-in defaults rather than
 extending them. The moment you list any exclude of your own, you lose `**/.*` - the rule
@@ -346,6 +346,11 @@ bmk judges floors against the cutoff uv itself resolved, read back from `uv.lock
   exempt too. bmk walks the own packages' requirements on PyPI and adds every one it reaches. If
   PyPI does not answer for one of them, bmk leaves `[tool.uv]` as it is and says so, rather than
   write a list that misses whatever sits behind it.
+- The project itself is exempt too when it is one of our own packages. `uv pip install <project>`
+  run inside the repository (the CI Quickstart notebook installs the published release this way)
+  obeys the project's `[tool.uv]`; with only its libraries exempt, uv installs a release of the
+  project older than the cooldown against the newest libraries. `uv lock` takes the project from
+  the source tree, so the entry does not change the lock's resolution.
 - An exempt package's floor rises only to the newest release `uv lock` can resolve: one whose
   own requirements each have a release the cooldown admits. Our libs' newest release can need a
   third-party release younger than the cooldown, and a floor on it makes the lock unsatisfiable

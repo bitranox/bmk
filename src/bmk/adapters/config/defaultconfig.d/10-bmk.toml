@@ -76,7 +76,9 @@ cooldown = "7 days"
 #
 # Default: the bitranox packages on PyPI (see _supply_chain.DEFAULT_OWN_PACKAGES)
 # Effect:  bmk adds `<name> = false` under [tool.uv] exclude-newer-package for every one of
-#          these the project reaches, directly or through another own package.
+#          these the project reaches, directly or through another own package, and for the
+#          project itself when it is one of them (`uv pip install <project>` run inside the
+#          repository, a CI notebook's, obeys the project's [tool.uv] too).
 # When to set: when you publish a new package of your own. Setting it REPLACES the default
 #          list, so repeat the names you keep. Git-URL dependencies need no entry: uv's cooldown
 #          applies only to packages from an index.

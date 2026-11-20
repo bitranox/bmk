@@ -25,6 +25,7 @@ Contents
 * ``uv_resolved_options`` - asks uv to resolve ``[tool.uv]`` values into that canonical form.
 * ``admitted_releases`` - a PyPI ``releases`` map reduced to the files uploaded before a cutoff.
 * ``own_closure`` - the own packages a project reaches, directly or through other own packages.
+* ``own_project_exemption`` - the project itself, when it is one of our own packages.
 * ``ensure_uv_cooldown`` - writes the cooldown and the exemptions into ``[tool.uv]``.
 * ``floor_pin`` / ``reconcile_floor_pins`` - the per-package cutoff that admits a floor release
   still inside the cooldown, and keeping bmk's own such entries current.
@@ -70,6 +71,7 @@ __all__ = [
     "floor_pin",
     "normalize",
     "own_closure",
+    "own_project_exemption",
     "read_lock_options",
     "reconcile_floor_pins",
     "uv_resolved_options",
@@ -560,7 +562,9 @@ def own_closure(
         own: Our own packages, normalized.
         requires_of: The requirement strings of a package's newest release, by normalized name;
             None when they cannot be read.
-        project: The project's own name, never exempted from itself.
+        project: The project's own name. It is never walked: a self-reference (``demo[cli]`` in
+            demo's own requirements) comes from the source tree, and an unpublished project has no
+            PyPI requirements to read. Its own exemption is ``own_project_exemption``.
 
     Raises:
         OwnPackageUnreadableError: When an own package's requirements cannot be read: an own package
@@ -583,6 +587,29 @@ def own_closure(
                 reached.add(required)
                 queue.append(required)
     return reached
+
+
+def own_project_exemption(project: str, *, own: frozenset[str]) -> set[str]:
+    """The project itself, normalized, when it is one of our own packages; else nothing.
+
+    ``uv pip install <project>`` run inside the repository (a CI notebook installing the published
+    release) obeys the project's ``[tool.uv]``. With its own libraries exempt and itself not, uv
+    pairs a release older than the cooldown with the newest libraries, so a release that adapts to
+    a breaking library change installs the release before it, which that change breaks. ``uv lock``
+    takes the project from the source tree, so the entry changes nothing in the project's own lock.
+
+    Args:
+        project: The project's ``[project].name``.
+        own: Our own packages, in any spelling.
+
+    Examples:
+        >>> own_project_exemption("Demo_Tool", own=frozenset({"demo-tool", "lib-log-rich"}))
+        {'demo-tool'}
+        >>> own_project_exemption("widget", own=frozenset({"lib-log-rich"}))
+        set()
+    """
+    name = normalize(project)
+    return {name} if name in {normalize(n) for n in own} else set()
 
 
 def ensure_uv_cooldown(pyproject: Path, *, cooldown: str, exempt: Iterable[str]) -> list[str]:

@@ -6,6 +6,15 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- The `[tool.uv] exclude-newer-package` block bmk writes now exempts the project itself when it is
+  one of `[bmk.supply_chain] own_packages`, not only the own packages it depends on.
+  `uv pip install <project>` run inside the repository (the CI Quickstart notebook installs the
+  published release that way) obeys the project's `[tool.uv]`, so it installed a release older than
+  the cooldown against the newest libraries, and a release adapting to a breaking library change
+  failed its own notebook job for a week.
+
 ## [3.34.0] - 2026-11-18
 
 ### Changed

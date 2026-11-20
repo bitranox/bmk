@@ -61,6 +61,7 @@ from bmk.adapters.stagerunner.helpers._supply_chain import (
     floor_pin,
     normalize,
     own_closure,
+    own_project_exemption,
     reconcile_floor_pins,
     uv_resolved_options,
 )
@@ -1823,7 +1824,7 @@ def _complete_block(
             own=supply_chain.own_packages,
             requires_of=_requires_of_newest,
             project=config.project.name,
-        )
+        ) | own_project_exemption(config.project.name, own=supply_chain.own_packages)
     except OwnPackageUnreadableError as exc:
         _say(
             f"{pyproject}: [tool.uv] left as it is: PyPI did not answer for {exc}, so the exemptions would be incomplete",

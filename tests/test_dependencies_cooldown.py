@@ -546,6 +546,29 @@ def test_an_update_writes_the_block_locks_raises_under_it_and_syncs_from_the_loc
 
 
 @pytest.mark.os_agnostic
+@pytest.mark.parametrize(
+    ("own", "exempt"),
+    [
+        pytest.param(frozenset({"lib-log-rich", "demo"}), {"lib-log-rich": False, "demo": False}, id="own-project"),
+        pytest.param(frozenset({"lib-log-rich"}), {"lib-log-rich": False}, id="foreign-project"),
+    ],
+)
+def test_an_own_project_is_exempt_from_its_own_cooldown(
+    tmp_path: Path, pypi: _FakeIndex, own: frozenset[str], exempt: dict[str, bool]
+) -> None:
+    # `uv pip install demo` run inside the repository obeys this [tool.uv]. Exempting demo's own
+    # libraries but not demo itself installed a release older than the cooldown against the newest
+    # libraries - the pairing a release adapting to a breaking library change cannot survive.
+    pypi.packages["lib-log-rich"] = _doc("6.5.1", {"6.5.1": _uploaded(40)})
+    pypi.versions["lib-log-rich/6.5.1"] = []
+    pyproject = _write(tmp_path, deps='"lib_log_rich>=6.5.1"')
+
+    _update(pyproject, _Uv(tmp_path), SupplyChainSettings(cooldown="14 days", own_packages=own))
+
+    assert rtoml.load(pyproject)["tool"]["uv"]["exclude-newer-package"] == exempt
+
+
+@pytest.mark.os_agnostic
 def test_an_update_with_nothing_to_raise_still_upgrades_the_lock_and_syncs(tmp_path: Path, pypi: _FakeIndex) -> None:
     # A transitive package can move inside an unchanged manifest; the venv must follow the lock.
     _ = pypi
