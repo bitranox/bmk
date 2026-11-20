@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.34.1] - 2026-11-20
+
 ### Fixed
 
 - The `[tool.uv] exclude-newer-package` block bmk writes now exempts the project itself when it is
@@ -14,6 +16,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   published release that way) obeys the project's `[tool.uv]`, so it installed a release older than
   the cooldown against the newest libraries, and a release adapting to a breaking library change
   failed its own notebook job for a week.
+
+### Changed
+
+- Runtime dependency floors raised by the dependency refresh: `lib_layered_config>=9.0.2` (from
+  8.1.0), `ruff>=0.17.5` (from 0.17.4).
 
 ## [3.34.0] - 2026-11-18
 
