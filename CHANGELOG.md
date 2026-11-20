@@ -6,6 +6,13 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.34.2] - 2026-11-20
+
+### Changed
+
+- `devops-bmk` skill: the cooldown bullet says bmk also exempts the project itself when its own
+  name is in `[bmk.supply_chain] own_packages`.
+
 ## [3.34.1] - 2026-11-20
 
 ### Fixed
