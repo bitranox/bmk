@@ -20,7 +20,7 @@ dependencies = [
     "lib_log_rich>=8.2.2",          # 6.4.2: validate_config, the check config --profile runs,
                                    # refuses exactly what init() refuses; 8.2.0: an unreachable
                                    # Graylog no longer stalls the queue until shutdown() raises
-    "lib_layered_config>=8.1.0",   # DeployAction/DeployResult from the package root (the
+    "lib_layered_config>=9.0.2",   # DeployAction/DeployResult from the package root (the
                                    # lib_layered_config.examples shim goes away in 9.0.0)
     "btx_lib_mail>=4.6.4",         # send-email / send-notification (SecretStr password + Transport seam)
     "pydantic>=2.14.3",            # the pipeline-overlay and email schemas
@@ -57,7 +57,7 @@ dependencies = [
     # These look unused to an import scan. They are not: each one is a stage. The
     # distribution name and the executable differ for several - import-linter ships
     # `lint-imports`, shellcheck-py ships `shellcheck`, shfmt-py ships `shfmt`.
-    "ruff>=0.17.4",
+    "ruff>=0.17.5",
     "pyright[nodejs]>=1.1.414",    # [nodejs] bundles Node, so no system Node is required
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
@@ -149,7 +149,7 @@ os = ["ubuntu-latest", "windows-latest", "macos-latest"]
 
 [tool.uv]
 exclude-newer = "7 days"
-exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false}
+exclude-newer-package = {btx-lib-mail = false, lib-cli-exit-tools = false, lib-layered-config = false, lib-log-rich = false, bmk = false}
 
 [project.urls]
 Homepage = "https://github.com/bitranox/bmk"
