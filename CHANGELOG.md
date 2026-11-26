@@ -6,6 +6,8 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+## [3.34.3] - 2026-11-26
+
 ### Fixed
 
 - **`make bump-*` and `make test` no longer flip one line of `uv.lock` on every release.** The bump
