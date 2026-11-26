@@ -16,6 +16,11 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
   refused the tree until then. The bump now re-locks with the gate's own lock, so a bump with no
   gate just before it can also take dependency releases that have newly passed the cooldown.
 
+### Changed
+
+- Runtime floors raised: `lib_layered_config>=9.0.3`, `pydantic>=2.14.4`,
+  `filelock>=4.2.12` (Python 3.11+).
+
 ## [3.34.2] - 2026-11-20
 
 ### Changed
