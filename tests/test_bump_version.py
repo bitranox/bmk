@@ -10,12 +10,14 @@ import signal
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import rtoml
 
+from bmk.adapters.stagerunner.venv import lock_project
 from bmk.domain.enums import BumpPart
 from bmk.domain.version import next_version
 
@@ -388,6 +390,73 @@ def test_main_relocks_a_committed_uv_lock(bump_module: Any, tmp_path: Path, monk
     assert subprocess.run(["uv", "lock", "--check", "-q"], cwd=tmp_path, check=False).returncode == 0
 
 
+# uv writes a dependency edge whose marker can never hold (`python_version < '0'`) when it resolves
+# from scratch (no lock, or `uv lock --upgrade`, which update_deps runs on every `make test`), and
+# leaves it out when a plain `uv lock` re-resolves guided by the existing lock after the project's
+# version changed (measured with uv 0.13.0 and 0.13.10). A bump that relocked the plain way dropped
+# that line and the next gate wrote it back, so every release needed a relock commit and a second
+# gate. These wheels reproduce the shape offline: alpha needs beta only below 3.10.2, gamma needs
+# beta>=2 from 3.11, so the lock forks at 3.11 and alpha's edge in the 3.11 fork is dead.
+
+
+def _wheel(dist: Path, name: str, version: str, requires: list[str], requires_python: str = "") -> None:
+    """Write a minimal pure-Python wheel carrying only the metadata the resolver reads."""
+    tag = f"{name}-{version}"
+    metadata = ["Metadata-Version: 2.1", f"Name: {name}", f"Version: {version}"]
+    metadata += [f"Requires-Python: {requires_python}"] if requires_python else []
+    metadata += [f"Requires-Dist: {requirement}" for requirement in requires]
+    files = {
+        f"{name}/__init__.py": "",
+        f"{tag}.dist-info/METADATA": "\n".join(metadata) + "\n",
+        f"{tag}.dist-info/WHEEL": "Wheel-Version: 1.0\nGenerator: bmk-tests\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    }
+    record = "".join(f"{path},,\n" for path in files) + f"{tag}.dist-info/RECORD,,\n"
+    with zipfile.ZipFile(dist / f"{tag}-py3-none-any.whl", "w") as archive:
+        for path, text in files.items():
+            archive.writestr(path, text)
+        archive.writestr(f"{tag}.dist-info/RECORD", record)
+
+
+def _forked_project(tmp_path: Path) -> Path:
+    """A project locked offline against local wheels whose fresh lock holds a dead edge."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    _wheel(dist, "alpha", "1.0", ["beta; python_full_version < '3.10.2'"])
+    _wheel(dist, "gamma", "1.0", ["beta>=2; python_version >= '3.11'"])
+    _wheel(dist, "beta", "1.0", [])
+    _wheel(dist, "beta", "2.0", [], requires_python=">=3.11")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1.2.3"\nrequires-python = ">=3.10"\n'
+        'dependencies = ["alpha", "gamma"]\n\n'
+        f'[tool.uv]\nfind-links = ["{dist.as_posix()}"]\nno-index = true\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["uv", "lock", "-q"], cwd=project, check=True)
+    return project
+
+
+@pytest.mark.os_agnostic
+def test_the_bump_relock_is_the_lock_the_next_gate_writes(
+    bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After a bump, the gate's own lock (update_deps) must find nothing to change in uv.lock."""
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not installed")
+    project = _forked_project(tmp_path)
+    lock = project / "uv.lock"
+    assert "python_version < '0'" in lock.read_text(encoding="utf-8"), "the fixture no longer forks"
+    monkeypatch.setattr(sys, "argv", ["_bump_version.py", "patch", "--project-dir", str(project)])
+
+    assert bump_module.main() == 0
+    bumped = lock.read_bytes()
+    assert lock_project(project, quiet=True, upgrade=True)
+
+    assert b'version = "1.2.4"' in bumped
+    assert lock.read_bytes() == bumped
+
+
 @pytest.mark.os_agnostic
 def test_main_writes_no_lock_where_the_project_has_none(
     bump_module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -519,8 +588,8 @@ def test_a_ctrl_c_during_the_relock_restores_every_file_and_still_interrupts(
     lock.write_bytes(b"version = 1\n# demo 1.2.3\n")
     before = {path: path.read_bytes() for path in (tmp_path / "pyproject.toml", changelog, lock)}
 
-    def relock_then_interrupt(project_dir: Path, *, quiet: bool = True) -> bool:
-        _ = quiet
+    def relock_then_interrupt(project_dir: Path, *, quiet: bool = True, upgrade: bool = False) -> bool:
+        _ = (quiet, upgrade)
         (project_dir / "uv.lock").write_bytes(b"version = 1\n# demo 1.2.4\n")
         raise KeyboardInterrupt
 

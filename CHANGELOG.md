@@ -6,6 +6,16 @@ the [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`make bump-*` and `make test` no longer flip one line of `uv.lock` on every release.** The bump
+  re-locked with a plain `uv lock`, which re-resolves guided by the existing lock and drops a
+  dependency edge whose marker can never hold (`marker = "python_version < '0'"`); the gate's
+  `uv lock --upgrade` resolves from scratch and writes it back (uv 0.13.0 to 0.13.10). So the gate
+  after every bump left `uv.lock` dirty, needed a relock commit and a second gate, and `release`
+  refused the tree until then. The bump now re-locks with the gate's own lock, so a bump with no
+  gate just before it can also take dependency releases that have newly passed the cooldown.
+
 ## [3.34.2] - 2026-11-20
 
 ### Changed

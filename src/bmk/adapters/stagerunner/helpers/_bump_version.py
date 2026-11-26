@@ -356,8 +356,13 @@ def _apply_bump(project_dir: Path, new_version: str) -> str | None:
     sync_plugin_version(project_dir)
     # uv.lock records the project's own version; left stale it fails `uv sync --locked`
     # and CI's `uv export --locked` on the very commit that is about to be released.
+    # The re-lock is the one update_deps runs on every `make test` (upgrade=True), so the next gate
+    # finds nothing to change. A plain `uv lock` here re-resolves guided by the existing lock and
+    # drops a dead edge (`marker = "python_version < '0'"`) that uv's from-scratch resolve writes
+    # (uv 0.13.0 to 0.13.10), so bump and gate flipped that line on every release and `release`
+    # refused the dirty tree.
     # Not quiet: when it fails, uv's own reason is the only useful part of the message.
-    if (project_dir / "uv.lock").is_file() and not lock_project(project_dir, quiet=False):
+    if (project_dir / "uv.lock").is_file() and not lock_project(project_dir, quiet=False, upgrade=True):
         return "`uv lock` failed (see above)"
     return None
 
